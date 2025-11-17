@@ -43,6 +43,10 @@ func (b *Binder) bindStatement(stmt ast.Statement) {
 		b.bindImportDeclaration(s)
 	case *ast.ExportDeclaration:
 		b.bindExportDeclaration(s)
+	case *ast.ForStatement:
+		b.bindForStatement(s)
+	case *ast.WhileStatement:
+		b.bindWhileStatement(s)
 	default:
 		// Unknown statement type
 		fmt.Printf("Warning: Unknown statement type: %T\n", stmt)
@@ -169,6 +173,11 @@ func (b *Binder) bindExpression(expr ast.Expression) {
 		}
 	case *ast.ArrowFunctionExpression:
 		b.bindArrowFunction(e)
+	case *ast.AssignmentExpression:
+		b.bindExpression(e.Left)
+		b.bindExpression(e.Right)
+	case *ast.UnaryExpression:
+		b.bindExpression(e.Argument)
 	default:
 		// Unknown expression type
 		fmt.Printf("Warning: Unknown expression type: %T\n", expr)
@@ -284,6 +293,48 @@ func (b *Binder) bindExportDeclaration(decl *ast.ExportDeclaration) {
 				}
 			}
 		}
+	}
+}
+
+func (b *Binder) bindForStatement(stmt *ast.ForStatement) {
+	// Create a new scope for the for loop
+	b.table.EnterScope(stmt)
+
+	// Bind init
+	if stmt.Init != nil {
+		switch init := stmt.Init.(type) {
+		case *ast.VariableDeclaration:
+			b.bindVariableDeclaration(init)
+		case *ast.ExpressionStatement:
+			b.bindExpression(init.Expression)
+		}
+	}
+
+	// Bind test
+	if stmt.Test != nil {
+		b.bindExpression(stmt.Test)
+	}
+
+	// Bind update
+	if stmt.Update != nil {
+		b.bindExpression(stmt.Update)
+	}
+
+	// Bind body
+	if stmt.Body != nil {
+		b.bindStatement(stmt.Body)
+	}
+
+	b.table.ExitScope()
+}
+
+func (b *Binder) bindWhileStatement(stmt *ast.WhileStatement) {
+	// Bind test
+	b.bindExpression(stmt.Test)
+
+	// Bind body
+	if stmt.Body != nil {
+		b.bindStatement(stmt.Body)
 	}
 }
 

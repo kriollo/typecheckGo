@@ -48,16 +48,22 @@ phases[5]{name, duration_weeks, goals, deliverables, acceptance}:
         - "✅ Funciones globales (parseInt, parseFloat, isNaN, isFinite, setTimeout, setInterval)"
         - "✅ Parser de arrays literales [1, 2, 3]"
         - "✅ Checker actualizado para reconocer globales"
+        - "✅ Arrow functions implementadas completamente"
+        - "✅ Detección automática de funciones en variables (const f = () => {})"
+        - "✅ Validación de aridad en arrow functions"
+        - "✅ Scopes correctos para arrow functions"
 
       next_tasks:
-        - "⏳ Implementar objetos literales { key: value } (requiere disambiguación con bloques)"
-        - "⏳ Type inference para variables con inicializador"
+        - "⏳ Type inference para variables con inicializador (prioridad alta)"
+        - "⏳ Validación de tipos en asignaciones (prioridad alta)"
         - "⏳ Type inference para return statements"
-        - "⏳ Validación de tipos en asignaciones"
         - "⏳ Validación de tipos en operaciones binarias"
+        - "⏳ Implementar objetos literales { key: value } (requiere disambiguación con bloques)"
         - "⏳ Union types básicos"
-        - "⏳ Arrow functions"
         - "⏳ Soporte para clases básicas"
+        - "⏳ Async/await"
+        - "⏳ Destructuring básico"
+        - "⏳ Spread operator (...)"
 
   - Avanzado,12:
       goals:

@@ -97,6 +97,14 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 		return p.parseIfStatement()
 	}
 
+	if p.matchKeyword("for") {
+		return p.parseForStatement()
+	}
+
+	if p.matchKeyword("while") {
+		return p.parseWhileStatement()
+	}
+
 	if p.matchKeyword("import") {
 		return p.parseImportDeclaration()
 	}
@@ -328,6 +336,118 @@ func (p *parser) parseIfStatement() (*ast.IfStatement, error) {
 	}, nil
 }
 
+func (p *parser) parseForStatement() (*ast.ForStatement, error) {
+	startPos := p.currentPos()
+
+	p.consumeKeyword("for")
+	p.skipWhitespaceAndComments()
+
+	p.expect("(")
+	p.skipWhitespaceAndComments()
+
+	// Parse init (can be variable declaration or expression)
+	var init ast.Node
+	if p.matchKeyword("var", "let", "const") {
+		varDecl, err := p.parseVariableDeclaration()
+		if err != nil {
+			return nil, err
+		}
+		init = varDecl
+	} else if !p.match(";") {
+		expr, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		init = &ast.ExpressionStatement{Expression: expr}
+		p.skipWhitespaceAndComments()
+		if p.match(";") {
+			p.advance()
+		}
+	} else {
+		p.advance() // consume ;
+	}
+
+	p.skipWhitespaceAndComments()
+
+	// Parse test
+	var test ast.Expression
+	if !p.match(";") {
+		var err error
+		test, err = p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	p.skipWhitespaceAndComments()
+	if p.match(";") {
+		p.advance()
+	}
+	p.skipWhitespaceAndComments()
+
+	// Parse update
+	var update ast.Expression
+	if !p.match(")") {
+		var err error
+		update, err = p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	p.skipWhitespaceAndComments()
+	p.expect(")")
+	p.skipWhitespaceAndComments()
+
+	// Parse body
+	body, err := p.parseStatement()
+	if err != nil {
+		return nil, err
+	}
+
+	return &ast.ForStatement{
+		Init:     init,
+		Test:     test,
+		Update:   update,
+		Body:     body,
+		Position: startPos,
+		EndPos:   p.currentPos(),
+	}, nil
+}
+
+func (p *parser) parseWhileStatement() (*ast.WhileStatement, error) {
+	startPos := p.currentPos()
+
+	p.consumeKeyword("while")
+	p.skipWhitespaceAndComments()
+
+	p.expect("(")
+	p.skipWhitespaceAndComments()
+
+	// Parse test
+	test, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+
+	p.skipWhitespaceAndComments()
+	p.expect(")")
+	p.skipWhitespaceAndComments()
+
+	// Parse body
+	body, err := p.parseStatement()
+	if err != nil {
+		return nil, err
+	}
+
+	return &ast.WhileStatement{
+		Test:     test,
+		Body:     body,
+		Position: startPos,
+		EndPos:   p.currentPos(),
+	}, nil
+}
+
 func (p *parser) parseBlockStatement() (*ast.BlockStatement, error) {
 	startPos := p.currentPos()
 
@@ -361,11 +481,55 @@ func (p *parser) parseBlockStatement() (*ast.BlockStatement, error) {
 }
 
 func (p *parser) parseExpression() (ast.Expression, error) {
-	return p.parseBinaryExpression()
+	return p.parseAssignmentExpression()
+}
+
+func (p *parser) parseAssignmentExpression() (ast.Expression, error) {
+	left, err := p.parseBinaryExpression()
+	if err != nil {
+		return nil, err
+	}
+
+	p.skipWhitespaceAndComments()
+
+	// Check for assignment operators
+	var op string
+	if p.match("+=") {
+		op = "+="
+	} else if p.match("-=") {
+		op = "-="
+	} else if p.match("*=") {
+		op = "*="
+	} else if p.match("/=") {
+		op = "/="
+	} else if p.match("=") && !p.match("==") && !p.match("===") {
+		op = "="
+	}
+
+	if op != "" {
+		startPos := left.Pos()
+		p.advanceString(len(op))
+		p.skipWhitespaceAndComments()
+
+		right, err := p.parseAssignmentExpression()
+		if err != nil {
+			return nil, err
+		}
+
+		return &ast.AssignmentExpression{
+			Left:     left,
+			Operator: op,
+			Right:    right,
+			Position: startPos,
+			EndPos:   p.currentPos(),
+		}, nil
+	}
+
+	return left, nil
 }
 
 func (p *parser) parseBinaryExpression() (ast.Expression, error) {
-	left, err := p.parseCallExpression()
+	left, err := p.parseUnaryExpression()
 	if err != nil {
 		return nil, err
 	}
@@ -379,30 +543,37 @@ func (p *parser) parseBinaryExpression() (ast.Expression, error) {
 	// Handle binary operators (simple left-to-right parsing for now)
 	for !p.isAtEnd() {
 		var op string
-		if p.match("+") {
-			op = "+"
-		} else if p.match("-") {
-			op = "-"
-		} else if p.match("*") {
-			op = "*"
-		} else if p.match("/") {
-			op = "/"
-		} else if p.match("===") {
+		// Check multi-character operators first
+		if p.match("===") {
 			op = "==="
-		} else if p.match("==") {
-			op = "=="
 		} else if p.match("!==") {
 			op = "!=="
+		} else if p.match("==") {
+			op = "=="
 		} else if p.match("!=") {
 			op = "!="
-		} else if p.match("<") {
-			op = "<"
-		} else if p.match(">") {
-			op = ">"
 		} else if p.match("<=") {
 			op = "<="
 		} else if p.match(">=") {
 			op = ">="
+		} else if p.match("&&") {
+			op = "&&"
+		} else if p.match("||") {
+			op = "||"
+		} else if p.match("+") && p.peek(1) != "+" && p.peek(1) != "=" {
+			op = "+"
+		} else if p.match("-") && p.peek(1) != "-" && p.peek(1) != "=" {
+			op = "-"
+		} else if p.match("*") && p.peek(1) != "=" {
+			op = "*"
+		} else if p.match("/") && p.peek(1) != "=" {
+			op = "/"
+		} else if p.match("%") {
+			op = "%"
+		} else if p.match("<") && p.peek(1) != "=" {
+			op = "<"
+		} else if p.match(">") && p.peek(1) != "=" {
+			op = ">"
 		} else {
 			break
 		}
@@ -507,6 +678,84 @@ func (p *parser) parseMemberExpression() (ast.Expression, error) {
 	}
 
 	return left, nil
+}
+
+func (p *parser) parseUnaryExpression() (ast.Expression, error) {
+	p.skipWhitespaceAndComments()
+
+	// Check for unary operators (check multi-char first)
+	var op string
+	startPos := p.currentPos()
+
+	if p.peekString(2) == "++" {
+		op = "++"
+		p.advanceString(2)
+	} else if p.peekString(2) == "--" {
+		op = "--"
+		p.advanceString(2)
+	} else if p.match("!") {
+		op = "!"
+		p.advance()
+	} else if p.match("-") {
+		// Unary minus
+		op = "-"
+		p.advance()
+	} else if p.match("+") {
+		// Unary plus
+		op = "+"
+		p.advance()
+	}
+
+	if op != "" {
+		p.skipWhitespaceAndComments()
+		argument, err := p.parseUnaryExpression()
+		if err != nil {
+			return nil, err
+		}
+
+		return &ast.UnaryExpression{
+			Operator: op,
+			Argument: argument,
+			Prefix:   true,
+			Position: startPos,
+			EndPos:   p.currentPos(),
+		}, nil
+	}
+
+	// Parse postfix expression (call, member, postfix ++)
+	return p.parsePostfixExpression()
+}
+
+func (p *parser) parsePostfixExpression() (ast.Expression, error) {
+	expr, err := p.parseCallExpression()
+	if err != nil {
+		return nil, err
+	}
+
+	p.skipWhitespaceAndComments()
+
+	// Check for postfix ++ or --
+	if p.match("++") {
+		p.advanceString(2)
+		return &ast.UnaryExpression{
+			Operator: "++",
+			Argument: expr,
+			Prefix:   false,
+			Position: expr.Pos(),
+			EndPos:   p.currentPos(),
+		}, nil
+	} else if p.match("--") {
+		p.advanceString(2)
+		return &ast.UnaryExpression{
+			Operator: "--",
+			Argument: expr,
+			Prefix:   false,
+			Position: expr.Pos(),
+			EndPos:   p.currentPos(),
+		}, nil
+	}
+
+	return expr, nil
 }
 
 func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
@@ -644,11 +893,11 @@ func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 		return p.parseArrayLiteral()
 	}
 
-	// Object literal - DISABLED for now to avoid conflicts with block statements
-	// TODO: Implement proper disambiguation between object literals and blocks
-	// if p.match("{") {
-	// 	return p.parseObjectLiteral()
-	// }
+	// Object literal
+	// In expression context, { starts an object literal
+	if p.match("{") {
+		return p.parseObjectLiteral()
+	}
 
 	if p.matchIdentifier() {
 		return p.parseIdentifier()

@@ -88,6 +88,74 @@ func NewGlobalEnvironment() *GlobalEnvironment {
 		"finally": NewFunctionType([]*Type{Any}, Any),
 	})
 
+	// Crear tipo String
+	stringType := NewObjectType("String", map[string]*Type{
+		"length":      Number,
+		"charAt":      NewFunctionType([]*Type{Number}, String),
+		"charCodeAt":  NewFunctionType([]*Type{Number}, Number),
+		"concat":      NewFunctionType([]*Type{String}, String),
+		"indexOf":     NewFunctionType([]*Type{String}, Number),
+		"lastIndexOf": NewFunctionType([]*Type{String}, Number),
+		"slice":       NewFunctionType([]*Type{Number, Number}, String),
+		"substring":   NewFunctionType([]*Type{Number, Number}, String),
+		"toLowerCase": NewFunctionType([]*Type{}, String),
+		"toUpperCase": NewFunctionType([]*Type{}, String),
+		"trim":        NewFunctionType([]*Type{}, String),
+		"split":       NewFunctionType([]*Type{String}, NewArrayType(String)),
+		"replace":     NewFunctionType([]*Type{String, String}, String),
+		"includes":    NewFunctionType([]*Type{String}, Boolean),
+		"startsWith":  NewFunctionType([]*Type{String}, Boolean),
+		"endsWith":    NewFunctionType([]*Type{String}, Boolean),
+	})
+
+	// Crear tipo Number
+	numberType := NewObjectType("Number", map[string]*Type{
+		"toFixed":      NewFunctionType([]*Type{Number}, String),
+		"toExponential": NewFunctionType([]*Type{Number}, String),
+		"toPrecision":  NewFunctionType([]*Type{Number}, String),
+		"toString":     NewFunctionType([]*Type{}, String),
+		"valueOf":      NewFunctionType([]*Type{}, Number),
+	})
+
+	// Crear tipo Boolean
+	booleanType := NewObjectType("Boolean", map[string]*Type{
+		"toString": NewFunctionType([]*Type{}, String),
+		"valueOf":  NewFunctionType([]*Type{}, Boolean),
+	})
+
+	// Crear tipo Date
+	dateType := NewObjectType("Date", map[string]*Type{
+		"getTime":         NewFunctionType([]*Type{}, Number),
+		"getFullYear":     NewFunctionType([]*Type{}, Number),
+		"getMonth":        NewFunctionType([]*Type{}, Number),
+		"getDate":         NewFunctionType([]*Type{}, Number),
+		"getDay":          NewFunctionType([]*Type{}, Number),
+		"getHours":        NewFunctionType([]*Type{}, Number),
+		"getMinutes":      NewFunctionType([]*Type{}, Number),
+		"getSeconds":      NewFunctionType([]*Type{}, Number),
+		"getMilliseconds": NewFunctionType([]*Type{}, Number),
+		"toISOString":     NewFunctionType([]*Type{}, String),
+		"toDateString":    NewFunctionType([]*Type{}, String),
+		"toTimeString":    NewFunctionType([]*Type{}, String),
+	})
+
+	// Crear tipo RegExp
+	regExpType := NewObjectType("RegExp", map[string]*Type{
+		"test":    NewFunctionType([]*Type{String}, Boolean),
+		"exec":    NewFunctionType([]*Type{String}, Any),
+		"source":  String,
+		"global":  Boolean,
+		"ignoreCase": Boolean,
+		"multiline": Boolean,
+	})
+
+	// Crear tipo Error
+	errorType := NewObjectType("Error", map[string]*Type{
+		"name":    String,
+		"message": String,
+		"stack":   String,
+	})
+
 	// Registrar objetos globales
 	env.Objects["console"] = consoleType
 	env.Objects["Object"] = objectType
@@ -95,6 +163,12 @@ func NewGlobalEnvironment() *GlobalEnvironment {
 	env.Objects["Math"] = mathType
 	env.Objects["JSON"] = jsonType
 	env.Objects["Promise"] = promiseType
+	env.Objects["String"] = stringType
+	env.Objects["Number"] = numberType
+	env.Objects["Boolean"] = booleanType
+	env.Objects["Date"] = dateType
+	env.Objects["RegExp"] = regExpType
+	env.Objects["Error"] = errorType
 
 	// Funciones globales
 	env.Objects["parseInt"] = NewFunctionType([]*Type{String, Number}, Number)

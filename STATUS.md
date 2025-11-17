@@ -7,9 +7,12 @@
 - ✅ Funciones con parámetros tipados y tipo de retorno
 - ✅ Variables (var, let, const)
 - ✅ If statements con else
-- ✅ Expresiones binarias (+, -, *, /, ===, ==, !==, !=, <, >, <=, >=)
+- ✅ **For loops** `for (init; test; update) { ... }`
+- ✅ **While loops** `while (test) { ... }`
+- ✅ Expresiones binarias: aritméticas (+, -, *, /, %), comparación (===, ==, !==, !=, <, >, <=, >=), lógicas (&&, ||)
 - ✅ Template strings con interpolación `${}`
 - ✅ Arrays literales `[1, 2, 3]`
+- ✅ **Arrow functions** `() => expr`, `x => expr`, `(x, y) => { ... }`
 - ✅ Import/export statements
 - ✅ Comentarios (// y /* */)
 
@@ -39,7 +42,7 @@
 - ✅ Formatos de salida: text, json, toon
 - ✅ Comando `ast <file>` para debugging
 
-## 🔄 Fase Intermedia EN PROGRESO (40%)
+## 🔄 Fase Intermedia EN PROGRESO (55%)
 
 ### Sistema de Tipos
 - ✅ Tipos primitivos: any, unknown, void, never, undefined, null, boolean, number, string, symbol, bigint
@@ -48,36 +51,58 @@
 - ⏳ Type inference (estructura creada, falta implementación)
 - ⏳ Type narrowing
 
-### Objetos Globales
-- ✅ console: log, error, warn, info, debug, trace, assert, clear, count, dir, table, time, timeEnd
-- ✅ Math: PI, E, abs, ceil, floor, round, max, min, pow, sqrt, random, sin, cos, tan
-- ✅ Array: isArray, from, of
-- ✅ JSON: parse, stringify
-- ✅ Object: toString, valueOf, hasOwnProperty
-- ✅ Promise: then, catch, finally
-- ✅ Funciones globales: parseInt, parseFloat, isNaN, isFinite, setTimeout, setInterval, clearTimeout, clearInterval
+### Objetos Globales (60+ objetos y métodos)
+- ✅ **console**: log, error, warn, info, debug, trace, assert, clear, count, dir, table, time, timeEnd
+- ✅ **Math**: PI, E, abs, ceil, floor, round, max, min, pow, sqrt, random, sin, cos, tan
+- ✅ **Array**: isArray, from, of
+- ✅ **JSON**: parse, stringify
+- ✅ **Object**: toString, valueOf, hasOwnProperty
+- ✅ **Promise**: then, catch, finally
+- ✅ **String**: length, charAt, charCodeAt, concat, indexOf, lastIndexOf, slice, substring, toLowerCase, toUpperCase, trim, split, replace, includes, startsWith, endsWith
+- ✅ **Number**: toFixed, toExponential, toPrecision, toString, valueOf
+- ✅ **Boolean**: toString, valueOf
+- ✅ **Date**: getTime, getFullYear, getMonth, getDate, getDay, getHours, getMinutes, getSeconds, getMilliseconds, toISOString, toDateString, toTimeString
+- ✅ **RegExp**: test, exec, source, global, ignoreCase, multiline
+- ✅ **Error**: name, message, stack
+- ✅ **Funciones globales**: parseInt, parseFloat, isNaN, isFinite, setTimeout, setInterval, clearTimeout, clearInterval
+
+### Arrow Functions
+- ✅ Sintaxis básica: `() => expr`
+- ✅ Parámetro único sin paréntesis: `x => expr`
+- ✅ Múltiples parámetros: `(x, y) => expr`
+- ✅ Cuerpo de bloque: `() => { statements }`
+- ✅ Cuerpo de expresión: `() => expr`
+- ✅ Detección automática de funciones en variables
+- ✅ Validación de aridad en arrow functions
 
 ### Pendiente
 - ⏳ Objetos literales (requiere disambiguación con bloques)
-- ⏳ Arrow functions
 - ⏳ Type inference para variables
 - ⏳ Type inference para return
 - ⏳ Validación de tipos en asignaciones
 - ⏳ Validación de tipos en operaciones binarias
 - ⏳ Clases básicas
+- ⏳ Async/await
+- ⏳ Destructuring
+- ⏳ Soporte para union types
+- ⏳ Generics
+- ⏳ integración con archivo tsconfig.json
 
 ## 📊 Estadísticas
 
 ### Archivos de Test
-- ✅ 10 archivos de test pasando sin errores
+- ✅ 13 archivos de test pasando sin errores
 - ✅ 1 archivo de test con errores intencionales detectados correctamente (5/5 errores)
 - ✅ 1 archivo de test de tipos y globales pasando
+- ✅ 1 archivo de test de arrow functions pasando
+- ✅ 1 archivo de test de loops (for, while) pasando
 
 ### Cobertura de Features
-- Parser: ~60% de TypeScript básico
-- Type System: ~25% de TypeScript
-- Module Resolution: ~80% de casos comunes
-- Globales: ~40% de objetos estándar
+- **Parser**: ~70% de TypeScript básico
+- **Type System**: ~30% de TypeScript (primitivos, arrays, funciones, inference básico)
+- **Module Resolution**: ~80% de casos comunes
+- **Globales**: ~60% de objetos estándar (12 objetos globales, 60+ métodos)
+- **Control Flow**: ~80% (if, for, while, funciones, arrow functions)
 
 ## 🐛 Problemas Conocidos
 
@@ -89,13 +114,15 @@
 
 ## 🎯 Próximos Pasos
 
-1. Implementar arrow functions
+1. ✅ ~~Implementar arrow functions~~ **COMPLETADO**
 2. Implementar type inference básico
 3. Agregar validación de tipos en asignaciones
 4. Implementar objetos literales con disambiguación
 5. Agregar soporte para clases básicas
 6. Implementar union types
 7. Agregar más objetos globales (String, Number, Boolean, etc.)
+8. Implementar async/await
+9. Agregar destructuring básico
 
 ## 📝 Notas Técnicas
 

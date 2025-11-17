@@ -109,6 +109,10 @@ func (tc *TypeChecker) checkStatement(stmt ast.Statement, filename string) {
 		tc.checkImportDeclaration(s, filename)
 	case *ast.ExportDeclaration:
 		tc.checkExportDeclaration(s, filename)
+	case *ast.ForStatement:
+		tc.checkForStatement(s, filename)
+	case *ast.WhileStatement:
+		tc.checkWhileStatement(s, filename)
 	default:
 		// Unknown statement type
 		tc.addError(filename, stmt.Pos().Line, stmt.Pos().Column,
@@ -267,11 +271,32 @@ func (tc *TypeChecker) checkExpression(expr ast.Expression, filename string) {
 		}
 	case *ast.ArrowFunctionExpression:
 		tc.checkArrowFunction(e, filename)
+	case *ast.AssignmentExpression:
+		tc.checkAssignmentExpression(e, filename)
+	case *ast.UnaryExpression:
+		tc.checkUnaryExpression(e, filename)
 	default:
 		// Unknown expression type
 		tc.addError(filename, expr.Pos().Line, expr.Pos().Column,
 			fmt.Sprintf("Unknown expression type: %T", expr), "TS9999", "error")
 	}
+}
+
+func (tc *TypeChecker) checkAssignmentExpression(assign *ast.AssignmentExpression, filename string) {
+	// Check left side (must be an identifier or member expression)
+	tc.checkExpression(assign.Left, filename)
+
+	// Check right side
+	tc.checkExpression(assign.Right, filename)
+
+	// TODO: Type checking - verify that right is assignable to left
+}
+
+func (tc *TypeChecker) checkUnaryExpression(unary *ast.UnaryExpression, filename string) {
+	// Check the argument
+	tc.checkExpression(unary.Argument, filename)
+
+	// TODO: Type checking - verify operator is valid for the argument type
 }
 
 func (tc *TypeChecker) checkIdentifier(id *ast.Identifier, filename string) {
@@ -574,6 +599,74 @@ func (tc *TypeChecker) processImport(importDecl *ast.ImportDeclaration, filename
 		newSymbol := tc.symbolTable.DefineSymbol(name, symbol.Type, symbol.Node, false)
 		newSymbol.IsFunction = symbol.IsFunction
 		newSymbol.Params = symbol.Params
+	}
+}
+
+func (tc *TypeChecker) checkForStatement(stmt *ast.ForStatement, filename string) {
+	// Find the for statement scope
+	forScope := tc.findScopeForNode(stmt)
+	if forScope != nil {
+		originalScope := tc.symbolTable.Current
+		tc.symbolTable.Current = forScope
+
+		// Check init
+		if stmt.Init != nil {
+			switch init := stmt.Init.(type) {
+			case *ast.VariableDeclaration:
+				tc.checkVariableDeclaration(init, filename)
+			case *ast.ExpressionStatement:
+				tc.checkExpression(init.Expression, filename)
+			}
+		}
+
+		// Check test
+		if stmt.Test != nil {
+			tc.checkExpression(stmt.Test, filename)
+		}
+
+		// Check update
+		if stmt.Update != nil {
+			tc.checkExpression(stmt.Update, filename)
+		}
+
+		// Check body
+		if stmt.Body != nil {
+			tc.checkStatement(stmt.Body, filename)
+		}
+
+		tc.symbolTable.Current = originalScope
+	} else {
+		// Fallback without scope
+		if stmt.Init != nil {
+			switch init := stmt.Init.(type) {
+			case *ast.VariableDeclaration:
+				tc.checkVariableDeclaration(init, filename)
+			case *ast.ExpressionStatement:
+				tc.checkExpression(init.Expression, filename)
+			}
+		}
+
+		if stmt.Test != nil {
+			tc.checkExpression(stmt.Test, filename)
+		}
+
+		if stmt.Update != nil {
+			tc.checkExpression(stmt.Update, filename)
+		}
+
+		if stmt.Body != nil {
+			tc.checkStatement(stmt.Body, filename)
+		}
+	}
+}
+
+func (tc *TypeChecker) checkWhileStatement(stmt *ast.WhileStatement, filename string) {
+	// Check test
+	tc.checkExpression(stmt.Test, filename)
+
+	// Check body
+	if stmt.Body != nil {
+		tc.checkStatement(stmt.Body, filename)
 	}
 }
 

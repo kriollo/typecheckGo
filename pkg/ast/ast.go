@@ -344,3 +344,59 @@ func (a *ArrowFunctionExpression) Type() string { return "ArrowFunctionExpressio
 func (a *ArrowFunctionExpression) Pos() Position { return a.Position }
 func (a *ArrowFunctionExpression) End() Position { return a.EndPos }
 func (a *ArrowFunctionExpression) exprNode()     {}
+
+// ForStatement represents a for loop
+type ForStatement struct {
+	Init     Node // Can be VariableDeclaration or ExpressionStatement
+	Test     Expression
+	Update   Expression
+	Body     Statement
+	Position Position
+	EndPos   Position
+}
+
+func (f *ForStatement) Type() string { return "ForStatement" }
+func (f *ForStatement) Pos() Position { return f.Position }
+func (f *ForStatement) End() Position { return f.EndPos }
+func (f *ForStatement) stmtNode()     {}
+
+// WhileStatement represents a while loop
+type WhileStatement struct {
+	Test     Expression
+	Body     Statement
+	Position Position
+	EndPos   Position
+}
+
+func (w *WhileStatement) Type() string { return "WhileStatement" }
+func (w *WhileStatement) Pos() Position { return w.Position }
+func (w *WhileStatement) End() Position { return w.EndPos }
+func (w *WhileStatement) stmtNode()     {}
+
+// AssignmentExpression represents an assignment x = value
+type AssignmentExpression struct {
+	Left     Expression
+	Operator string // =, +=, -=, *=, /=
+	Right    Expression
+	Position Position
+	EndPos   Position
+}
+
+func (a *AssignmentExpression) Type() string { return "AssignmentExpression" }
+func (a *AssignmentExpression) Pos() Position { return a.Position }
+func (a *AssignmentExpression) End() Position { return a.EndPos }
+func (a *AssignmentExpression) exprNode()     {}
+
+// UnaryExpression represents a unary operation ++x, x++, !x, -x
+type UnaryExpression struct {
+	Operator string // ++, --, !, -, +
+	Argument Expression
+	Prefix   bool // true for ++x, false for x++
+	Position Position
+	EndPos   Position
+}
+
+func (u *UnaryExpression) Type() string { return "UnaryExpression" }
+func (u *UnaryExpression) Pos() Position { return u.Position }
+func (u *UnaryExpression) End() Position { return u.EndPos }
+func (u *UnaryExpression) exprNode()     {}
