@@ -491,7 +491,6 @@ func (tc *TypeChecker) processImport(importDecl *ast.ImportDeclaration, filename
 	currentModule, err := tc.moduleResolver.LoadModule(filename, filename)
 	if err != nil {
 		// If we can't load the current module, skip
-		fmt.Printf("DEBUG: Failed to load current module %s: %v\n", filename, err)
 		return
 	}
 
@@ -499,15 +498,11 @@ func (tc *TypeChecker) processImport(importDecl *ast.ImportDeclaration, filename
 	importedSymbols, err := importResolver.ResolveImport(importDecl)
 	if err != nil {
 		// Error will be reported during checkImportDeclaration
-		fmt.Printf("DEBUG: Failed to resolve import from %s: %v\n", sourceStr, err)
 		return
 	}
 
-	fmt.Printf("DEBUG: Resolved %d symbols from %s\n", len(importedSymbols), sourceStr)
-
 	// Add imported symbols to the current scope
 	for name, symbol := range importedSymbols {
-		fmt.Printf("DEBUG: Adding symbol %s (type=%v, isFunc=%v)\n", name, symbol.Type, symbol.IsFunction)
 		// Define the imported symbol in the current scope
 		newSymbol := tc.symbolTable.DefineSymbol(name, symbol.Type, symbol.Node, false)
 		newSymbol.IsFunction = symbol.IsFunction
