@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -112,8 +113,15 @@ func checkDirectory(tc *checker.TypeChecker, dir string) error {
 
 	// Report summary
 	if len(allErrors) > 0 {
-		reportErrorsWithContext("", allErrors)
-		fmt.Printf("\n%sChecked %d files in %dms. Found errors in %d file(s).%s\n", colorYellow, filesChecked, elapsedMs, filesWithErrors, colorReset)
+		switch outputFormat {
+		case "json":
+			reportErrorsJSON(allErrors)
+		case "toon":
+			reportErrorsTOON(allErrors)
+		default:
+			reportErrorsWithContext("", allErrors)
+			fmt.Printf("\n%sChecked %d files in %dms. Found errors in %d file(s).%s\n", colorYellow, filesChecked, elapsedMs, filesWithErrors, colorReset)
+		}
 		return fmt.Errorf("type checking failed")
 	}
 
@@ -145,10 +153,17 @@ func checkFile(tc *checker.TypeChecker, filename string) error {
 	elapsed := time.Since(startTime)
 	elapsedMs := elapsed.Milliseconds()
 
-	// Report errors with context
+	// Report errors
 	if len(errors) > 0 {
-		reportErrorsWithContext(filename, errors)
-		fmt.Printf("\n%sFinished in %dms.%s\n", colorGray, elapsedMs, colorReset)
+		switch outputFormat {
+		case "json":
+			reportErrorsJSON(errors)
+		case "toon":
+			reportErrorsTOON(errors)
+		default:
+			reportErrorsWithContext(filename, errors)
+			fmt.Printf("\n%sFinished in %dms.%s\n", colorGray, elapsedMs, colorReset)
+		}
 		return fmt.Errorf("type checking failed")
 	}
 
@@ -172,6 +187,34 @@ const (
 	colorGray   = "\033[90m"
 	colorBold   = "\033[1m"
 )
+
+func reportErrorsJSON(errors []checker.TypeError) {
+	fmt.Println("[")
+	for i, e := range errors {
+		if i > 0 {
+			fmt.Println(",")
+		}
+		fmt.Printf("  {\n")
+		fmt.Printf("    \"file\": %q,\n", e.File)
+		fmt.Printf("    \"line\": %d,\n", e.Line)
+		fmt.Printf("    \"column\": %d,\n", e.Column)
+		fmt.Printf("    \"message\": %q,\n", e.Message)
+		fmt.Printf("    \"code\": %q,\n", e.Code)
+		fmt.Printf("    \"severity\": %q\n", e.Severity)
+		fmt.Printf("  }")
+	}
+	fmt.Println("\n]")
+}
+
+func reportErrorsTOON(errors []checker.TypeError) {
+	fmt.Printf("errors[%d]{file,line,column,message,code,severity}:\n", len(errors))
+	for _, e := range errors {
+		// Escape message for TOON format (replace newlines and quotes)
+		msg := strings.ReplaceAll(e.Message, "\n", "\\n")
+		msg = strings.ReplaceAll(msg, "\"", "\\\"")
+		fmt.Printf("  %s,%d,%d,\"%s\",%s,%s\n", e.File, e.Line, e.Column, msg, e.Code, e.Severity)
+	}
+}
 
 func reportErrorsWithContext(filename string, errors []checker.TypeError) {
 	if len(errors) == 0 {
