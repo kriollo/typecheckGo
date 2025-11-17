@@ -18,6 +18,8 @@ type TypeChecker struct {
 	currentFile    string
 	globalEnv      *types.GlobalEnvironment
 	typeCache      map[ast.Node]*types.Type
+	varTypeCache   map[string]*types.Type // Cache types by variable name
+	inferencer     *types.TypeInferencer
 }
 
 // TypeError represents a type checking error
@@ -36,11 +38,18 @@ func (e TypeError) Error() string {
 
 // New creates a new type checker
 func New() *TypeChecker {
+	globalEnv := types.NewGlobalEnvironment()
+	typeCache := make(map[ast.Node]*types.Type)
+	inferencer := types.NewTypeInferencer(globalEnv)
+	inferencer.SetTypeCache(typeCache)
+
 	return &TypeChecker{
-		symbolTable: symbols.NewSymbolTable(),
-		errors:      []TypeError{},
-		globalEnv:   types.NewGlobalEnvironment(),
-		typeCache:   make(map[ast.Node]*types.Type),
+		symbolTable:  symbols.NewSymbolTable(),
+		errors:       []TypeError{},
+		globalEnv:    globalEnv,
+		typeCache:    typeCache,
+		varTypeCache: make(map[string]*types.Type),
+		inferencer:   inferencer,
 	}
 }
 
@@ -48,13 +57,19 @@ func New() *TypeChecker {
 func NewWithModuleResolver(rootDir string) *TypeChecker {
 	symbolTable := symbols.NewSymbolTable()
 	moduleResolver := modules.NewModuleResolver(rootDir, symbolTable)
+	globalEnv := types.NewGlobalEnvironment()
+	typeCache := make(map[ast.Node]*types.Type)
+	inferencer := types.NewTypeInferencer(globalEnv)
+	inferencer.SetTypeCache(typeCache)
 
 	return &TypeChecker{
 		symbolTable:    symbolTable,
 		errors:         []TypeError{},
 		moduleResolver: moduleResolver,
-		globalEnv:      types.NewGlobalEnvironment(),
-		typeCache:      make(map[ast.Node]*types.Type),
+		globalEnv:      globalEnv,
+		typeCache:      typeCache,
+		varTypeCache:   make(map[string]*types.Type),
+		inferencer:     inferencer,
 	}
 }
 
@@ -128,11 +143,21 @@ func (tc *TypeChecker) checkVariableDeclaration(decl *ast.VariableDeclaration, f
 				tc.addError(filename, declarator.ID.Pos().Line, declarator.ID.Pos().Column,
 					fmt.Sprintf("Invalid identifier: '%s'", declarator.ID.Name), "TS1003", "error")
 			}
-		}
 
-		// Check initializer if present
-		if declarator.Init != nil {
-			tc.checkExpression(declarator.Init, filename)
+			// Infer type from initializer if present
+			if declarator.Init != nil {
+				tc.checkExpression(declarator.Init, filename)
+
+				// Infer the type of the initializer
+				inferredType := tc.inferencer.InferType(declarator.Init)
+
+				// Store the inferred type in the cache
+				tc.typeCache[declarator] = inferredType
+				tc.typeCache[declarator.ID] = inferredType
+
+				// Also store it by variable name for easy lookup
+				tc.varTypeCache[declarator.ID.Name] = inferredType
+			}
 		}
 	}
 }
@@ -289,7 +314,33 @@ func (tc *TypeChecker) checkAssignmentExpression(assign *ast.AssignmentExpressio
 	// Check right side
 	tc.checkExpression(assign.Right, filename)
 
-	// TODO: Type checking - verify that right is assignable to left
+	// Type checking - verify that right is assignable to left (only for simple assignments)
+	if assign.Operator == "=" {
+		leftType := tc.getExpressionType(assign.Left)
+		rightType := tc.inferencer.InferType(assign.Right)
+
+		// Check if right is assignable to left
+		if !tc.isAssignableTo(rightType, leftType) {
+			// Build a more descriptive error message
+			msg := fmt.Sprintf("Type '%s' is not assignable to type '%s'.", rightType.String(), leftType.String())
+
+			// Add suggestions based on the types
+			if leftType.Kind == types.StringType && rightType.Kind == types.NumberType {
+				msg += "\n  Sugerencia: Considera convertir el número a string usando .toString() o String()"
+			} else if leftType.Kind == types.NumberType && rightType.Kind == types.StringType {
+				msg += "\n  Sugerencia: Considera convertir el string a número usando Number() o parseInt()"
+			} else if leftType.Kind == types.BooleanType && (rightType.Kind == types.StringType || rightType.Kind == types.NumberType) {
+				msg += "\n  Sugerencia: Los valores deben ser explícitamente booleanos (true/false)"
+			}
+
+			tc.addError(filename, assign.Right.Pos().Line, assign.Right.Pos().Column, msg, "TS2322", "error")
+		}
+
+		// Note: We don't update the type cache here because in TypeScript,
+		// a variable's type is fixed at declaration and cannot be changed by assignment
+	}
+	// For compound assignments (+=, -=, etc.), we skip type checking for now
+	// In a full implementation, we would check operator compatibility
 }
 
 func (tc *TypeChecker) checkUnaryExpression(unary *ast.UnaryExpression, filename string) {
@@ -311,8 +362,27 @@ func (tc *TypeChecker) checkIdentifier(id *ast.Identifier, filename string) {
 	}
 
 	// Not found anywhere
-	tc.addError(filename, id.Pos().Line, id.Pos().Column,
-		fmt.Sprintf("Cannot find name '%s'", id.Name), "TS2304", "error")
+	msg := fmt.Sprintf("Cannot find name '%s'.", id.Name)
+
+	// Try to find similar names for suggestions
+	similarNames := tc.findSimilarNames(id.Name)
+	if len(similarNames) > 0 {
+		msg += "\n  Sugerencia: ¿Quisiste decir"
+		if len(similarNames) == 1 {
+			msg += fmt.Sprintf(" '%s'?", similarNames[0])
+		} else {
+			msg += " alguno de estos?"
+			for i, name := range similarNames {
+				if i < 3 { // Show max 3 suggestions
+					msg += fmt.Sprintf("\n    • '%s'", name)
+				}
+			}
+		}
+	} else {
+		msg += "\n  Sugerencia: Verifica que la variable esté declarada antes de usarla"
+	}
+
+	tc.addError(filename, id.Pos().Line, id.Pos().Column, msg, "TS2304", "error")
 }
 
 func (tc *TypeChecker) checkCallExpression(call *ast.CallExpression, filename string) {
@@ -330,16 +400,31 @@ func (tc *TypeChecker) checkCallExpression(call *ast.CallExpression, filename st
 		// sophisticated type checking here
 		if symbol, exists := tc.symbolTable.ResolveSymbol(id.Name); exists {
 			if !symbol.IsFunction {
-				tc.addError(filename, call.Pos().Line, call.Pos().Column,
-					fmt.Sprintf("'%s' is not a function", id.Name), "TS2349", "error")
+				msg := fmt.Sprintf("This expression is not callable. Type '%s' has no call signatures.", id.Name)
+				msg += "\n  Sugerencia: Verifica que estés llamando a una función y no a una variable"
+				tc.addError(filename, call.Pos().Line, call.Pos().Column, msg, "TS2349", "error")
 			} else {
 				// Check parameter count
 				expectedCount := len(symbol.Params)
 				actualCount := len(call.Arguments)
 				if actualCount != expectedCount {
-					tc.addError(filename, call.Pos().Line, call.Pos().Column,
-						fmt.Sprintf("Expected %d arguments, but got %d", expectedCount, actualCount),
-						"TS2554", "error")
+					msg := fmt.Sprintf("Expected %d arguments, but got %d.", expectedCount, actualCount)
+
+					if actualCount < expectedCount {
+						msg += fmt.Sprintf("\n  Sugerencia: La función '%s' requiere %d argumento(s)", id.Name, expectedCount)
+						if len(symbol.Params) > 0 {
+							msg += "\n  Parámetros esperados:"
+							for i, param := range symbol.Params {
+								if i < 5 { // Show max 5 parameters
+									msg += fmt.Sprintf("\n    %d. %s", i+1, param)
+								}
+							}
+						}
+					} else {
+						msg += fmt.Sprintf("\n  Sugerencia: La función '%s' solo acepta %d argumento(s)", id.Name, expectedCount)
+					}
+
+					tc.addError(filename, call.Pos().Line, call.Pos().Column, msg, "TS2554", "error")
 				}
 			}
 		}
@@ -406,6 +491,92 @@ func (tc *TypeChecker) checkMemberExpression(member *ast.MemberExpression, filen
 		// Property is a computed expression
 		tc.checkExpression(member.Property, filename)
 	}
+}
+
+// findSimilarNames finds variable names similar to the given name
+func (tc *TypeChecker) findSimilarNames(name string) []string {
+	var similar []string
+
+	// Get all symbols in current scope
+	if tc.symbolTable.Current != nil {
+		for symbolName := range tc.symbolTable.Current.Symbols {
+			if levenshteinDistance(name, symbolName) <= 2 {
+				similar = append(similar, symbolName)
+			}
+		}
+	}
+
+	// Also check global scope
+	if tc.symbolTable.Global != nil && tc.symbolTable.Global != tc.symbolTable.Current {
+		for symbolName := range tc.symbolTable.Global.Symbols {
+			if levenshteinDistance(name, symbolName) <= 2 {
+				// Avoid duplicates
+				found := false
+				for _, s := range similar {
+					if s == symbolName {
+						found = true
+						break
+					}
+				}
+				if !found {
+					similar = append(similar, symbolName)
+				}
+			}
+		}
+	}
+
+	return similar
+}
+
+// levenshteinDistance calculates the edit distance between two strings
+func levenshteinDistance(s1, s2 string) int {
+	if len(s1) == 0 {
+		return len(s2)
+	}
+	if len(s2) == 0 {
+		return len(s1)
+	}
+
+	// Create matrix
+	matrix := make([][]int, len(s1)+1)
+	for i := range matrix {
+		matrix[i] = make([]int, len(s2)+1)
+	}
+
+	// Initialize first row and column
+	for i := 0; i <= len(s1); i++ {
+		matrix[i][0] = i
+	}
+	for j := 0; j <= len(s2); j++ {
+		matrix[0][j] = j
+	}
+
+	// Fill matrix
+	for i := 1; i <= len(s1); i++ {
+		for j := 1; j <= len(s2); j++ {
+			cost := 0
+			if s1[i-1] != s2[j-1] {
+				cost = 1
+			}
+
+			matrix[i][j] = min(
+				matrix[i-1][j]+1,      // deletion
+				min(
+					matrix[i][j-1]+1,  // insertion
+					matrix[i-1][j-1]+cost, // substitution
+				),
+			)
+		}
+	}
+
+	return matrix[len(s1)][len(s2)]
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // Helper functions
@@ -703,6 +874,92 @@ func (tc *TypeChecker) checkImportDeclaration(importDecl *ast.ImportDeclaration,
 			fmt.Sprintf("Cannot find module '%s' or its corresponding type declarations", sourceStr),
 			"TS2307", "error")
 	}
+}
+
+// getExpressionType gets the type of an expression
+func (tc *TypeChecker) getExpressionType(expr ast.Expression) *types.Type {
+	// For identifiers, look up by name first
+	if id, ok := expr.(*ast.Identifier); ok {
+		// Check the variable type cache first
+		if cachedType, ok := tc.varTypeCache[id.Name]; ok {
+			return cachedType
+		}
+
+		// If not in cache, try to infer from the symbol table
+		if symbol, exists := tc.symbolTable.ResolveSymbol(id.Name); exists {
+			// Check if we have a cached type for the symbol's declaration
+			if symbol.Node != nil {
+				// Try to get the type from the declarator
+				if declarator, ok := symbol.Node.(*ast.VariableDeclarator); ok {
+					// If the declarator has an initializer, infer from it
+					if declarator.Init != nil {
+						inferredType := tc.inferencer.InferType(declarator.Init)
+						tc.typeCache[declarator] = inferredType
+						tc.typeCache[declarator.ID] = inferredType
+						tc.varTypeCache[id.Name] = inferredType
+						return inferredType
+					}
+				}
+			}
+		}
+		// If we couldn't find a type, return any (to avoid false positives)
+		return types.Any
+	}
+
+	// Check if we have a cached type for this expression
+	if cachedType, ok := tc.typeCache[expr]; ok {
+		return cachedType
+	}
+
+	// Otherwise, infer the type
+	inferredType := tc.inferencer.InferType(expr)
+	tc.typeCache[expr] = inferredType
+	return inferredType
+}
+
+// isAssignableTo checks if sourceType can be assigned to targetType
+func (tc *TypeChecker) isAssignableTo(sourceType, targetType *types.Type) bool {
+	// Any is assignable to and from anything
+	if targetType.Kind == types.AnyType || sourceType.Kind == types.AnyType {
+		return true
+	}
+
+	// Unknown is assignable to anything except never
+	if sourceType.Kind == types.UnknownType {
+		return targetType.Kind != types.NeverType
+	}
+
+	// Nothing is assignable to never except never itself
+	if targetType.Kind == types.NeverType {
+		return sourceType.Kind == types.NeverType
+	}
+
+	// Exact type match
+	if sourceType.Kind == targetType.Kind {
+		return true
+	}
+
+	// Undefined and null are assignable to each other (in non-strict mode)
+	if (sourceType.Kind == types.UndefinedType && targetType.Kind == types.NullType) ||
+	   (sourceType.Kind == types.NullType && targetType.Kind == types.UndefinedType) {
+		return true
+	}
+
+	// Check array types
+	if sourceType.Kind == types.ArrayType && targetType.Kind == types.ArrayType {
+		if sourceType.ElementType != nil && targetType.ElementType != nil {
+			return tc.isAssignableTo(sourceType.ElementType, targetType.ElementType)
+		}
+	}
+
+	// Check function types
+	if sourceType.Kind == types.FunctionType && targetType.Kind == types.FunctionType {
+		// Simplified function compatibility check
+		// In a full implementation, we would check parameter and return types
+		return true
+	}
+
+	return false
 }
 
 // checkExportDeclaration checks export statements

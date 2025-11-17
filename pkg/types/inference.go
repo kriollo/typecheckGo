@@ -7,13 +7,20 @@ import (
 // TypeInferencer infiere tipos de expresiones
 type TypeInferencer struct {
 	globalEnv *GlobalEnvironment
+	typeCache map[ast.Node]*Type
 }
 
 // NewTypeInferencer crea un nuevo inferenciador de tipos
 func NewTypeInferencer(globalEnv *GlobalEnvironment) *TypeInferencer {
 	return &TypeInferencer{
 		globalEnv: globalEnv,
+		typeCache: make(map[ast.Node]*Type),
 	}
+}
+
+// SetTypeCache sets the type cache (shared with checker)
+func (ti *TypeInferencer) SetTypeCache(cache map[ast.Node]*Type) {
+	ti.typeCache = cache
 }
 
 // InferType infiere el tipo de una expresión
@@ -48,25 +55,28 @@ func (ti *TypeInferencer) inferLiteralType(lit *ast.Literal) *Type {
 		return Null
 	}
 
-	switch lit.Value.(type) {
+	switch v := lit.Value.(type) {
 	case bool:
 		return Boolean
 	case string:
+		// Check if it's actually a number stored as a string
+		if len(lit.Raw) > 0 {
+			firstChar := lit.Raw[0]
+			// If it starts with a digit or minus, it's a number
+			if (firstChar >= '0' && firstChar <= '9') || firstChar == '-' {
+				return Number
+			}
+			// If it starts with a quote, it's a string
+			if firstChar == '"' || firstChar == '\'' || firstChar == '`' {
+				return String
+			}
+		}
+		// Default to string
 		return String
 	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
 		return Number
 	default:
-		// Si es un string que representa un número
-		if _, ok := lit.Value.(string); ok {
-			// Verificar si el raw es un número
-			if len(lit.Raw) > 0 {
-				firstChar := lit.Raw[0]
-				if (firstChar >= '0' && firstChar <= '9') || firstChar == '-' {
-					return Number
-				}
-			}
-			return String
-		}
+		_ = v
 		return Unknown
 	}
 }

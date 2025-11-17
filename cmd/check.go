@@ -201,30 +201,49 @@ func reportErrorsWithContext(filename string, errors []checker.TypeError) {
 		fmt.Printf("  %s×%s %s%s%s\n", colorRed, colorReset, colorBold, e.Message, colorReset)
 
 		// Show file location with color
-		relPath, err := filepath.Rel(".", e.File)
-		if err != nil || relPath == "" {
-			relPath = filepath.Base(e.File)
+		// Get current working directory
+		cwd, err := os.Getwd()
+		var displayPath string
+		if err == nil {
+			// Try to get relative path from cwd
+			relPath, err := filepath.Rel(cwd, e.File)
+			if err == nil && !filepath.IsAbs(relPath) && len(relPath) < len(e.File) {
+				displayPath = relPath
+			} else {
+				displayPath = e.File
+			}
+		} else {
+			displayPath = e.File
 		}
-		fmt.Printf("   %s╭─[%s%s:%d:%d%s]\n", colorGray, colorCyan, relPath, e.Line, e.Column, colorGray)
+		fmt.Printf("   %s╭─[%s%s:%d:%d%s]\n", colorGray, colorCyan, displayPath, e.Line, e.Column, colorGray)
 
-		// Show code context (3 lines before and after)
+		// Show code context (only 3 lines: previous, error, next)
 		startLine := max(1, e.Line-1)
-		endLine := min(len(lines), e.Line+2)
+		endLine := min(len(lines), e.Line+1)
 
 		for lineNum := startLine; lineNum <= endLine; lineNum++ {
 			if lineNum-1 < len(lines) {
 				lineContent := lines[lineNum-1]
 
 				if lineNum == e.Line {
-					// Error line with marker
+					// Error line
 					fmt.Printf(" %s%3d%s %s│%s %s\n", colorGray, lineNum, colorReset, colorGray, colorReset, lineContent)
 
-					// Add error marker
+					// Add error marker on the next line with arrow pointing up
 					spaces := e.Column - 1
 					if spaces < 0 {
 						spaces = 0
 					}
-					fmt.Printf("     %s·%s %s%s^ %s%s%s\n", colorGray, colorReset, repeatString(" ", spaces), colorRed, colorYellow, e.Code, colorReset)
+					// Calculate padding to align with the code (after line number and │)
+					padding := 5 // "   3 │ " = 5 characters for line number display
+					fmt.Printf("%s%s%s^%s %s[%s]%s\n",
+						repeatString(" ", padding+spaces),
+						colorRed,
+						"",
+						colorReset,
+						colorGray,
+						e.Code,
+						colorReset)
 				} else {
 					// Context line
 					fmt.Printf(" %s%3d%s %s│%s %s\n", colorGray, lineNum, colorReset, colorGray, colorReset, lineContent)
