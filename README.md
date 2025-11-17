@@ -20,26 +20,54 @@ go build -o tscheck
 
 ## 📸 Example Output
 
-**With errors:**
+**With errors (text format):**
 ```
-  × Cannot find name 'undefinedVar'
-   ╭─[errors.ts:4:23]
-   3 │ // Error: undefined variable
-   4 │ const x = undefinedVar;
-     ·                       ^ TS2304
-   5 │
+  × Cannot find name 'unknownFunction'.
+  Sugerencia: Verifica que la variable esté declarada antes de usarla
+   ╭─[test\errors.ts:20:16]
+  19 │ // Error: undefined function
+  20 │ unknownFunction();
+                    ^ [TS2304]
+  21 │
    ╰────
 
-  × Expected 1 arguments, but got 0
-   ╭─[errors.ts:10:6]
-   9 │ }
-  10 │ greet(); // Too few arguments
-     ·      ^ TS2554
-  11 │ greet("Alice", "Bob");
+  × Type 'string' is not assignable to type 'number'.
+  Sugerencia: Considera convertir el string a número usando Number() o parseInt()
+   ╭─[test\type_errors.ts:5:7]
+   4 │ let x = 10;
+   5 │ x = "string";
+           ^ [TS2322]
+   6 │
    ╰────
 
 Found 2 error(s).
 Finished in 2ms.
+```
+
+**JSON format:**
+```bash
+./tscheck check file.ts -f json
+```
+```json
+[
+  {
+    "file": "test/errors.ts",
+    "line": 20,
+    "column": 16,
+    "message": "Cannot find name 'unknownFunction'.\n  Sugerencia: Verifica que la variable esté declarada antes de usarla",
+    "code": "TS2304",
+    "severity": "error"
+  }
+]
+```
+
+**TOON format:**
+```bash
+./tscheck check file.ts -f toon
+```
+```
+errors[1]{file,line,column,message,code,severity}:
+  test/errors.ts,20,16,"Cannot find name 'unknownFunction'.\n  Sugerencia: Verifica que la variable esté declarada antes de usarla",TS2304,error
 ```
 
 **Without errors:**
@@ -49,17 +77,20 @@ Finished in 2ms.
 
 **Directory check:**
 ```
-Checked 16 files in 6ms. Found errors in 1 file(s).
+Checked 18 files in 6ms. Found errors in 2 file(s).
 ```
 
 ## ⚡ Highlights
 
-- ✅ **15 test files** (14 passing, 1 intentional errors)
+- ✅ **18 test files** (16 passing, 2 with intentional errors)
+- ✅ **Type inference** for variables and expressions
+- ✅ **Type checking** for assignments with descriptive error messages
 - ✅ **60+ global objects and methods** (console, Math, Array, String, etc.)
 - ✅ **Arrow functions**, loops, assignments, unary operators
 - ✅ **Module resolution** with automatic .js → .ts conversion
+- ✅ **Multiple output formats**: text (with colors), JSON, TOON
+- ✅ **Smart suggestions** for typos and type mismatches
 - ✅ **~1000 lines/second** parsing speed
-- ✅ **~3000 lines** of Go code
 
 ## Features
 
@@ -79,16 +110,23 @@ Checked 16 files in 6ms. Found errors in 1 file(s).
 - **Multiple Output Formats**: Supports text, JSON, and TOON output formats
 - **Modular Architecture**: Clean separation between parsing, symbol binding, module resolution, and type checking
 
-### Phase 2: Intermediate (🔄 IN PROGRESS)
-- **Type System**: Basic type system with primitives (string, number, boolean, any, unknown, void, never)
-- **Global Objects**: Built-in support for JavaScript/TypeScript globals
-  - console (log, error, warn, info, debug, etc.)
-  - Math (PI, E, abs, ceil, floor, round, max, min, pow, sqrt, random, sin, cos, tan)
-  - Array (isArray, from, of)
-  - JSON (parse, stringify)
-  - Object (toString, valueOf, hasOwnProperty)
-  - Global functions (parseInt, parseFloat, isNaN, isFinite, setTimeout, setInterval)
-- **Array Support**: Array literal parsing and type checking
+### Phase 2: Intermediate (🔄 IN PROGRESS - 75%)
+- **Type System**: Comprehensive type system with primitives and composite types
+  - Primitives: string, number, boolean, any, unknown, void, never, undefined, null, symbol, bigint
+  - Composite: Function, Array, Union, Intersection, Literal, Object
+- **Type Inference**: Automatic type inference for variables and expressions
+  - Infers from literals, binary expressions, arrays, arrow functions
+  - Smart detection of number vs string literals
+- **Type Checking**: Validates type compatibility in assignments
+  - Detects type mismatches with descriptive error messages
+  - Provides context-aware suggestions for fixes
+- **Global Objects**: Built-in support for 12+ JavaScript/TypeScript globals (60+ methods)
+  - console, Math, Array, JSON, Object, Promise, String, Number, Boolean, Date, RegExp, Error
+  - Global functions (parseInt, parseFloat, isNaN, isFinite, setTimeout, setInterval, etc.)
+- **Smart Error Messages**: TypeScript-compatible error codes with helpful suggestions
+  - Typo detection with Levenshtein distance algorithm
+  - Context-aware suggestions for type conversions
+  - Parameter information for function calls
 
 ## Installation
 
@@ -113,19 +151,23 @@ Check a directory recursively:
 
 ### Output Formats
 
-Text format (default):
+Text format with colors (default):
 ```bash
 ./tscheck check examples/simple.ts
 ```
 
-JSON format:
+JSON format (for tool integration):
 ```bash
 ./tscheck check -f json examples/simple.ts
+# Redirect to file
+./tscheck check -f json examples/simple.ts > errors.json
 ```
 
-TOON format (custom format):
+TOON format (compact table format):
 ```bash
 ./tscheck check -f toon examples/simple.ts
+# Redirect to file
+./tscheck check -f toon examples/simple.ts > errors.toon
 ```
 
 ### AST Output
@@ -151,12 +193,14 @@ Show AST in TOON format:
 
 ### Error Codes
 
-The type checker uses TypeScript-compatible error codes:
+The type checker uses TypeScript-compatible error codes with descriptive messages:
 
-- `TS2304`: Cannot find name 'X'
-- `TS2554`: Expected X arguments, but got Y
-- `TS2349`: 'X' is not a function
-- `TS2451`: 'X' is already defined
+- `TS2304`: Cannot find name 'X' (with typo suggestions)
+- `TS2322`: Type 'X' is not assignable to type 'Y' (with conversion suggestions)
+- `TS2554`: Expected X arguments, but got Y (with parameter information)
+- `TS2349`: This expression is not callable (with usage hints)
+- `TS2307`: Cannot find module 'X'
+- `TS2305`: Module 'X' has no exported member
 - `TS1003`: Invalid identifier
 
 ## Examples
@@ -169,14 +213,36 @@ function greet(name: string) {
 }
 
 let message = greet("World");
+
+// Type inference
+let x = 10;        // inferred as number
+let y = "hello";   // inferred as string
+let z = [1, 2, 3]; // inferred as number[]
+
+// Arrow functions
+const add = (a, b) => a + b;
+const multiply = (x, y) => x * y;
 ```
 
 ### Errors Detected
 
 ```typescript
-let x = undefinedFunction(); // TS2304: Cannot find name 'undefinedFunction'
-let y = greet(); // TS2554: Expected 1 arguments, but got 0
-let z = message(); // TS2349: 'message' is not a function
+// TS2304: Cannot find name 'undefinedFunction'
+// Sugerencia: Verifica que la variable esté declarada antes de usarla
+let x = undefinedFunction();
+
+// TS2554: Expected 1 arguments, but got 0
+// Sugerencia: La función 'greet' requiere 1 argumento(s)
+let y = greet();
+
+// TS2349: This expression is not callable
+// Sugerencia: Verifica que estés llamando a una función y no a una variable
+let z = message();
+
+// TS2322: Type 'string' is not assignable to type 'number'
+// Sugerencia: Considera convertir el string a número usando Number() o parseInt()
+let num = 10;
+num = "hello";
 ```
 
 ## Development
