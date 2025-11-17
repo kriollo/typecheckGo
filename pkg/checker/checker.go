@@ -7,6 +7,7 @@ import (
 	"tstypechecker/pkg/ast"
 	"tstypechecker/pkg/symbols"
 	"tstypechecker/pkg/modules"
+	"tstypechecker/pkg/types"
 )
 
 // TypeChecker coordinates type checking operations
@@ -15,6 +16,8 @@ type TypeChecker struct {
 	errors         []TypeError
 	moduleResolver *modules.ModuleResolver
 	currentFile    string
+	globalEnv      *types.GlobalEnvironment
+	typeCache      map[ast.Node]*types.Type
 }
 
 // TypeError represents a type checking error
@@ -36,6 +39,8 @@ func New() *TypeChecker {
 	return &TypeChecker{
 		symbolTable: symbols.NewSymbolTable(),
 		errors:      []TypeError{},
+		globalEnv:   types.NewGlobalEnvironment(),
+		typeCache:   make(map[ast.Node]*types.Type),
 	}
 }
 
@@ -48,6 +53,8 @@ func NewWithModuleResolver(rootDir string) *TypeChecker {
 		symbolTable:    symbolTable,
 		errors:         []TypeError{},
 		moduleResolver: moduleResolver,
+		globalEnv:      types.NewGlobalEnvironment(),
+		typeCache:      make(map[ast.Node]*types.Type),
 	}
 }
 
@@ -248,6 +255,16 @@ func (tc *TypeChecker) checkExpression(expr ast.Expression, filename string) {
 		// For now, we don't do type checking on binary expressions
 		// In a full implementation, we would check if the types are compatible
 		// with the operator (e.g., can't add a string and a number without coercion)
+	case *ast.ArrayExpression:
+		// Check all elements
+		for _, elem := range e.Elements {
+			tc.checkExpression(elem, filename)
+		}
+	case *ast.ObjectExpression:
+		// Check all property values
+		for _, prop := range e.Properties {
+			tc.checkExpression(prop.Value, filename)
+		}
 	default:
 		// Unknown expression type
 		tc.addError(filename, expr.Pos().Line, expr.Pos().Column,
@@ -256,11 +273,19 @@ func (tc *TypeChecker) checkExpression(expr ast.Expression, filename string) {
 }
 
 func (tc *TypeChecker) checkIdentifier(id *ast.Identifier, filename string) {
-	// Check if the identifier is defined
-	if _, exists := tc.symbolTable.ResolveSymbol(id.Name); !exists {
-		tc.addError(filename, id.Pos().Line, id.Pos().Column,
-			fmt.Sprintf("Cannot find name '%s'", id.Name), "TS2304", "error")
+	// Check if the identifier is defined in the symbol table
+	if _, exists := tc.symbolTable.ResolveSymbol(id.Name); exists {
+		return
 	}
+
+	// Check if it's a global object or type
+	if tc.globalEnv.HasGlobal(id.Name) {
+		return
+	}
+
+	// Not found anywhere
+	tc.addError(filename, id.Pos().Line, id.Pos().Column,
+		fmt.Sprintf("Cannot find name '%s'", id.Name), "TS2304", "error")
 }
 
 func (tc *TypeChecker) checkCallExpression(call *ast.CallExpression, filename string) {

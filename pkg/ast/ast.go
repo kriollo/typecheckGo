@@ -294,3 +294,39 @@ func (f *FunctionType) Type() string { return "FunctionType" }
 func (f *FunctionType) Pos() Position { return f.Position }
 func (f *FunctionType) End() Position { return f.EndPos }
 func (f *FunctionType) typeNode() {}
+
+// ArrayExpression represents an array literal [1, 2, 3]
+type ArrayExpression struct {
+	Elements []Expression
+	Position Position
+	EndPos   Position
+}
+
+func (a *ArrayExpression) Type() string { return "ArrayExpression" }
+func (a *ArrayExpression) Pos() Position { return a.Position }
+func (a *ArrayExpression) End() Position { return a.EndPos }
+func (a *ArrayExpression) exprNode() {}
+
+// ObjectExpression represents an object literal { key: value }
+type ObjectExpression struct {
+	Properties []Property
+	Position   Position
+	EndPos     Position
+}
+
+func (o *ObjectExpression) Type() string { return "ObjectExpression" }
+func (o *ObjectExpression) Pos() Position { return o.Position }
+func (o *ObjectExpression) End() Position { return o.EndPos }
+func (o *ObjectExpression) exprNode() {}
+
+// Property represents a property in an object literal
+type Property struct {
+	Key      Expression
+	Value    Expression
+	Position Position
+	EndPos   Position
+}
+
+func (p Property) Type() string { return "Property" }
+func (p Property) Pos() Position { return p.Position }
+func (p Property) End() Position { return p.EndPos }

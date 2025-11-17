@@ -4,11 +4,32 @@ A TypeScript type checker written in Go that provides basic type checking capabi
 
 ## Features
 
+### Phase 1: Basic (✅ COMPLETED)
 - **Basic Type Checking**: Detects undefined variables, function arity mismatches, and basic syntax errors
 - **Symbol Table**: Maintains a comprehensive symbol table with scope management
 - **AST Parsing**: Parses TypeScript files and builds an Abstract Syntax Tree
+  - Functions, variables, if statements, binary expressions
+  - Template strings with interpolation `${}`
+  - Array literals `[1, 2, 3]`
+  - Import/export statements
+- **Module Resolution**: ES6/TypeScript module resolution with import/export support
+  - Automatic .js → .ts resolution
+  - Named imports/exports
+  - Module caching
+- **Import/Export Analysis**: Correctly resolves and validates imports and exports between modules
 - **Multiple Output Formats**: Supports text, JSON, and TOON output formats
-- **Modular Architecture**: Clean separation between parsing, symbol binding, and type checking
+- **Modular Architecture**: Clean separation between parsing, symbol binding, module resolution, and type checking
+
+### Phase 2: Intermediate (🔄 IN PROGRESS)
+- **Type System**: Basic type system with primitives (string, number, boolean, any, unknown, void, never)
+- **Global Objects**: Built-in support for JavaScript/TypeScript globals
+  - console (log, error, warn, info, debug, etc.)
+  - Math (PI, E, abs, ceil, floor, round, max, min, pow, sqrt, random, sin, cos, tan)
+  - Array (isArray, from, of)
+  - JSON (parse, stringify)
+  - Object (toString, valueOf, hasOwnProperty)
+  - Global functions (parseInt, parseFloat, isNaN, isFinite, setTimeout, setInterval)
+- **Array Support**: Array literal parsing and type checking
 
 ## Installation
 

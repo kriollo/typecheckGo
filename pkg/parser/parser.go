@@ -564,6 +564,17 @@ func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 		}, nil
 	}
 
+	// Array literal
+	if p.match("[") {
+		return p.parseArrayLiteral()
+	}
+
+	// Object literal - DISABLED for now to avoid conflicts with block statements
+	// TODO: Implement proper disambiguation between object literals and blocks
+	// if p.match("{") {
+	// 	return p.parseObjectLiteral()
+	// }
+
 	if p.matchIdentifier() {
 		return p.parseIdentifier()
 	}
@@ -1234,4 +1245,138 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// parseArrayLiteral parses an array literal [1, 2, 3]
+func (p *parser) parseArrayLiteral() (*ast.ArrayExpression, error) {
+	startPos := p.currentPos()
+
+	p.expect("[")
+	p.skipWhitespaceAndComments()
+
+	var elements []ast.Expression
+
+	for !p.match("]") && !p.isAtEnd() {
+		elem, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+
+		if elem != nil {
+			elements = append(elements, elem)
+		}
+
+		p.skipWhitespaceAndComments()
+		if p.match(",") {
+			p.advance()
+			p.skipWhitespaceAndComments()
+			// Allow trailing comma
+			if p.match("]") {
+				break
+			}
+		} else if !p.match("]") {
+			return nil, fmt.Errorf("expected ',' or ']' in array literal")
+		}
+	}
+
+	if !p.match("]") {
+		return nil, fmt.Errorf("expected ']' to close array literal")
+	}
+	p.advance()
+
+	return &ast.ArrayExpression{
+		Elements: elements,
+		Position: startPos,
+		EndPos:   p.currentPos(),
+	}, nil
+}
+
+// parseObjectLiteral parses an object literal { key: value }
+func (p *parser) parseObjectLiteral() (*ast.ObjectExpression, error) {
+	startPos := p.currentPos()
+
+	p.expect("{")
+	p.skipWhitespaceAndComments()
+
+	var properties []ast.Property
+
+	for !p.match("}") && !p.isAtEnd() {
+		prop, err := p.parseProperty()
+		if err != nil {
+			return nil, err
+		}
+
+		properties = append(properties, prop)
+
+		p.skipWhitespaceAndComments()
+		if p.match(",") {
+			p.advance()
+			p.skipWhitespaceAndComments()
+			// Allow trailing comma
+			if p.match("}") {
+				break
+			}
+		} else if !p.match("}") {
+			return nil, fmt.Errorf("expected ',' or '}' in object literal")
+		}
+	}
+
+	if !p.match("}") {
+		return nil, fmt.Errorf("expected '}' to close object literal")
+	}
+	p.advance()
+
+	return &ast.ObjectExpression{
+		Properties: properties,
+		Position:   startPos,
+		EndPos:     p.currentPos(),
+	}, nil
+}
+
+// parseProperty parses an object property
+func (p *parser) parseProperty() (ast.Property, error) {
+	startPos := p.currentPos()
+
+	// Parse key (identifier or string)
+	var key ast.Expression
+	var err error
+
+	if p.matchString() {
+		str := p.advanceStringLiteral()
+		key = &ast.Literal{
+			Value:    str[1 : len(str)-1],
+			Raw:      str,
+			Position: startPos,
+			EndPos:   p.currentPos(),
+		}
+	} else if p.matchIdentifier() {
+		key, err = p.parseIdentifier()
+		if err != nil {
+			return ast.Property{}, err
+		}
+	} else {
+		return ast.Property{}, fmt.Errorf("expected property key")
+	}
+
+	p.skipWhitespaceAndComments()
+
+	// Expect colon
+	if !p.match(":") {
+		return ast.Property{}, fmt.Errorf("expected ':' after property key")
+	}
+	p.advance()
+	p.skipWhitespaceAndComments()
+
+	// Parse value
+	value, err := p.parseExpression()
+	if err != nil {
+		return ast.Property{}, err
+	}
+
+	return ast.Property{
+		Key:      key,
+		Value:    value,
+		Position: startPos,
+		EndPos:   p.currentPos(),
+	}, nil
 }

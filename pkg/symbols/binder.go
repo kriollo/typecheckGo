@@ -51,12 +51,12 @@ func (b *Binder) bindStatement(stmt ast.Statement) {
 
 func (b *Binder) bindVariableDeclaration(decl *ast.VariableDeclaration) {
 	mutable := decl.Kind != "const"
-	
+
 	for _, declarator := range decl.Decls {
 		if declarator.ID != nil {
 			// Define the variable symbol
 			b.table.DefineSymbol(declarator.ID.Name, VariableSymbol, declarator, mutable)
-			
+
 			// If there's an initializer, bind it
 			if declarator.Init != nil {
 				b.bindExpression(declarator.Init)
@@ -68,22 +68,22 @@ func (b *Binder) bindVariableDeclaration(decl *ast.VariableDeclaration) {
 func (b *Binder) bindFunctionDeclaration(decl *ast.FunctionDeclaration) {
 	// Define the function symbol in the current scope
 	b.table.DefineFunction(decl.ID.Name, decl)
-	
+
 	// Create a new scope for the function body
 	b.table.EnterScope(decl)
-	
+
 	// Define parameters in the function scope
 	for _, param := range decl.Params {
 		if param.ID != nil {
 			b.table.DefineSymbol(param.ID.Name, ParameterSymbol, param, false)
 		}
 	}
-	
+
 	// Bind the function body
 	if decl.Body != nil {
 		b.bindBlockStatement(decl.Body)
 	}
-	
+
 	// Exit the function scope
 	b.table.ExitScope()
 }
@@ -91,12 +91,12 @@ func (b *Binder) bindFunctionDeclaration(decl *ast.FunctionDeclaration) {
 func (b *Binder) bindBlockStatement(block *ast.BlockStatement) {
 	// Create a new scope for the block
 	b.table.EnterScope(block)
-	
+
 	// Bind all statements in the block
 	for _, stmt := range block.Body {
 		b.bindStatement(stmt)
 	}
-	
+
 	// Exit the block scope
 	b.table.ExitScope()
 }
@@ -110,10 +110,10 @@ func (b *Binder) bindReturnStatement(ret *ast.ReturnStatement) {
 func (b *Binder) bindIfStatement(stmt *ast.IfStatement) {
 	// Bind the test condition
 	b.bindExpression(stmt.Test)
-	
+
 	// Bind the consequent (then branch)
 	b.bindStatement(stmt.Consequent)
-	
+
 	// Bind the alternate (else branch) if present
 	if stmt.Alternate != nil {
 		b.bindStatement(stmt.Alternate)
@@ -124,7 +124,7 @@ func (b *Binder) bindExpression(expr ast.Expression) {
 	if expr == nil {
 		return
 	}
-	
+
 	switch e := expr.(type) {
 	case *ast.Identifier:
 		b.bindIdentifier(e)
@@ -137,6 +137,16 @@ func (b *Binder) bindExpression(expr ast.Expression) {
 		b.bindMemberExpression(e)
 	case *ast.BinaryExpression:
 		b.bindBinaryExpression(e)
+	case *ast.ArrayExpression:
+		// Bind all elements
+		for _, elem := range e.Elements {
+			b.bindExpression(elem)
+		}
+	case *ast.ObjectExpression:
+		// Bind all property values
+		for _, prop := range e.Properties {
+			b.bindExpression(prop.Value)
+		}
 	default:
 		// Unknown expression type
 		fmt.Printf("Warning: Unknown expression type: %T\n", expr)
@@ -155,12 +165,12 @@ func (b *Binder) bindIdentifier(id *ast.Identifier) {
 func (b *Binder) bindCallExpression(call *ast.CallExpression) {
 	// Bind the callee
 	b.bindExpression(call.Callee)
-	
+
 	// Bind all arguments
 	for _, arg := range call.Arguments {
 		b.bindExpression(arg)
 	}
-	
+
 	// Check if it's a valid function call
 	if id, ok := call.Callee.(*ast.Identifier); ok {
 		b.table.CheckFunctionCall(id.Name, call.Pos(), len(call.Arguments))
@@ -170,7 +180,7 @@ func (b *Binder) bindCallExpression(call *ast.CallExpression) {
 func (b *Binder) bindMemberExpression(member *ast.MemberExpression) {
 	// Bind the object
 	b.bindExpression(member.Object)
-	
+
 	// Bind the property
 	if !member.Computed {
 		// Property is an identifier

@@ -8,9 +8,9 @@ description:
 phases[5]{name, duration_weeks, goals, deliverables, acceptance}:
   - Basico,4: ✅ COMPLETADO
       goals:
-        - ✅ "Parser + AST estable (usar parser existente)." - Implementado parser recursivo propio con soporte para funciones, variables, if statements, expresiones binarias, imports/exports
+        - ✅ "Parser + AST estable (usar parser existente)." - Implementado parser recursivo propio con soporte completo: funciones, variables, if statements, expresiones binarias, imports/exports, template strings
         - ✅ "Tabla de símbolos simple (variables, funciones, imports)." - Tabla de símbolos con scopes jerárquicos implementada
-        - ✅ "Resolución de módulos ES/TS (imports/exports)." - Sistema de resolución de módulos con algoritmo Node.js implementado, exports funcionando, imports: ⚠️ EN PROGRESO (problema de parsing con string literals)
+        - ✅ "Resolución de módulos ES/TS (imports/exports)." - Sistema de resolución de módulos con algoritmo Node.js implementado, exports e imports funcionando correctamente, soporte para .js → .ts
         - ✅ "Checks sintácticos y errores básicos (tipo: errores de nombre y aridad)." - Implementados checks de nombres no definidos y validación de aridad en funciones
       deliverables:
         - ✅ "CLI minimal: check <path> -> lista de errores." - CLI implementado con comando check
@@ -18,18 +18,35 @@ phases[5]{name, duration_weeks, goals, deliverables, acceptance}:
       acceptance:
         - ✅ "Procesa proyectos de ejemplo pequeños; detecta nombres no definidos y funciones llamadas con distinto arity." - Funcionando correctamente con archivos de prueba
 
-  - Intermedio,8:
+      fixes_applied:
+        - "✅ Loop infinito con template strings - agregado soporte para backticks y interpolación ${}"
+        - "✅ Tipo de retorno en funciones - parser ahora maneja anotaciones : Type"
+        - "✅ Resolución .js → .ts - imports con .js encuentran archivos .ts automáticamente"
+        - "✅ Símbolos importados disponibles - processImports() agrega símbolos al scope"
+        - "✅ Tipo correcto de imports - funciones importadas se marcan como FunctionSymbol"
+        - "✅ Export { name } encuentra declaraciones originales en el módulo"
+
+  - Intermedio,8: 🔄 EN PROGRESO
       goals:
-        - "Sistema de tipos básico: primitivos, objetos planos, funciones, arrays, uniones simples."
-        - "Type inference local (vars, return)."
-        - "Control-flow based narrowing (if typeof / instanceof / null checks) básico."
-        - "Módulos y tipos exportados/importados correctamente tipados."
+        - 🔄 "Sistema de tipos básico: primitivos, objetos planos, funciones, arrays, uniones simples."
+        - 🔄 "Type inference local (vars, return)."
+        - ⏳ "Control-flow based narrowing (if typeof / instanceof / null checks) básico."
+        - ⏳ "Módulos y tipos exportados/importados correctamente tipados."
       deliverables:
-        - "Graph de dependencias incremental."
-        - "Cache por archivo con hashes y timestamps."
-        - "Reporte de errores con código y span."
+        - ⏳ "Graph de dependencias incremental."
+        - ⏳ "Cache por archivo con hashes y timestamps."
+        - 🔄 "Reporte de errores con código y span." - Parcialmente implementado
       acceptance:
-        - "Projectos medianos (~10k LOC) checkean rápido con cache incremental (rechecks locales)."
+        - ⏳ "Projectos medianos (~10k LOC) checkean rápido con cache incremental (rechecks locales)."
+
+      next_tasks:
+        - "Implementar sistema de tipos básico (TypeID pool, primitivos: string, number, boolean, any, unknown, void)"
+        - "Agregar objetos globales (console, Object, Array, etc.)"
+        - "Type inference para variables con inicializador"
+        - "Type inference para return statements"
+        - "Validación de tipos en asignaciones y operaciones binarias"
+        - "Soporte para arrays y objetos literales"
+        - "Union types básicos"
 
   - Avanzado,12:
       goals:
