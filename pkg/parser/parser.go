@@ -657,6 +657,10 @@ func (p *parser) parseMemberExpression() (ast.Expression, error) {
 		return nil, err
 	}
 
+	if left == nil {
+		return nil, nil
+	}
+
 	p.skipWhitespaceAndComments()
 
 	if p.match(".") {
@@ -893,11 +897,12 @@ func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 		return p.parseArrayLiteral()
 	}
 
-	// Object literal
-	// In expression context, { starts an object literal
-	if p.match("{") {
-		return p.parseObjectLiteral()
-	}
+	// Object literal - DISABLED to prevent infinite loops
+	// The issue is that parseExpression -> parseProperty -> parseExpression creates recursion
+	// TODO: Fix the recursion issue properly
+	// if p.match("{") {
+	// 	return p.parseObjectLiteral()
+	// }
 
 	if p.matchIdentifier() {
 		return p.parseIdentifier()

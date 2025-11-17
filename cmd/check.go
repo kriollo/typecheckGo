@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/spf13/cobra"
 	"tstypechecker/pkg/checker"
@@ -62,8 +63,12 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	}
 }
 
-func checkDirectory(checker *checker.TypeChecker, dir string) error {
-	fmt.Printf("Checking directory: %s\n", dir)
+func checkDirectory(tc *checker.TypeChecker, dir string) error {
+	startTime := time.Now()
+
+	var allErrors []checker.TypeError
+	var filesChecked int
+	var filesWithErrors int
 
 	// Walk directory and find TypeScript files
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
@@ -78,17 +83,46 @@ func checkDirectory(checker *checker.TypeChecker, dir string) error {
 
 		// Only process .ts and .tsx files
 		if !info.IsDir() && (filepath.Ext(path) == ".ts" || filepath.Ext(path) == ".tsx") {
-			return checkFile(checker, path)
+			filesChecked++
+
+			// Parse file
+			ast, parseErr := parser.ParseFile(path)
+			if parseErr != nil {
+				fmt.Printf("Parse error in %s: %v\n", path, parseErr)
+				return nil
+			}
+
+			// Type check
+			errors := tc.CheckFile(path, ast)
+			if len(errors) > 0 {
+				filesWithErrors++
+				allErrors = append(allErrors, errors...)
+			}
 		}
 
 		return nil
 	})
 
-	return err
+	if err != nil {
+		return err
+	}
+
+	elapsed := time.Since(startTime)
+	elapsedMs := elapsed.Milliseconds()
+
+	// Report summary
+	if len(allErrors) > 0 {
+		reportErrorsWithContext("", allErrors)
+		fmt.Printf("\n%sChecked %d files in %dms. Found errors in %d file(s).%s\n", colorYellow, filesChecked, elapsedMs, filesWithErrors, colorReset)
+		return fmt.Errorf("type checking failed")
+	}
+
+	fmt.Printf("\n%s✓%s Checked %d files in %dms. No errors found.\n", colorGreen, colorReset, filesChecked, elapsedMs)
+	return nil
 }
 
-func checkFile(checker *checker.TypeChecker, filename string) error {
-	fmt.Printf("Checking file: %s\n", filename)
+func checkFile(tc *checker.TypeChecker, filename string) error {
+	startTime := time.Now()
 
 	// Parse file
 	ast, err := parser.ParseFile(filename)
@@ -106,28 +140,146 @@ func checkFile(checker *checker.TypeChecker, filename string) error {
 	}
 
 	// Type check
-	errors := checker.CheckFile(filename, ast)
+	errors := tc.CheckFile(filename, ast)
 
-	// Report errors
+	elapsed := time.Since(startTime)
+	elapsedMs := elapsed.Milliseconds()
+
+	// Report errors with context
 	if len(errors) > 0 {
-		fmt.Printf("Found %d errors in %s:\n", len(errors), filename)
-		for _, err := range errors {
-			reportError(err)
-		}
+		reportErrorsWithContext(filename, errors)
+		fmt.Printf("\n%sFinished in %dms.%s\n", colorGray, elapsedMs, colorReset)
 		return fmt.Errorf("type checking failed")
 	}
 
-	fmt.Printf("✓ No errors found in %s\n", filename)
+	// Success message
+	relPath, err := filepath.Rel(".", filename)
+	if err != nil || relPath == "" {
+		relPath = filepath.Base(filename)
+	}
+	fmt.Printf("%s✓%s %s %s(%dms)%s\n", colorGreen, colorReset, relPath, colorGray, elapsedMs, colorReset)
 	return nil
 }
 
-func reportError(err error) {
-	switch outputFormat {
-	case "json":
-		fmt.Printf("{\"error\": \"%s\"}\n", err.Error())
-	case "toon":
-		fmt.Printf("diags[1]{file,line,col,msg,code,severity}:\n  %s\n", err.Error())
-	default:
-		fmt.Printf("  - %s\n", err.Error())
+// ANSI color codes
+const (
+	colorReset  = "\033[0m"
+	colorRed    = "\033[31m"
+	colorGreen  = "\033[32m"
+	colorYellow = "\033[33m"
+	colorBlue   = "\033[34m"
+	colorCyan   = "\033[36m"
+	colorGray   = "\033[90m"
+	colorBold   = "\033[1m"
+)
+
+func reportErrorsWithContext(filename string, errors []checker.TypeError) {
+	if len(errors) == 0 {
+		return
 	}
+
+	// Use first error's file if filename is empty
+	if filename == "" && len(errors) > 0 {
+		filename = errors[0].File
+	}
+	// Read file content for context
+	content, err := os.ReadFile(filename)
+	if err != nil {
+		// Fallback to simple error reporting
+		fmt.Printf("\nFound %d errors in %s:\n", len(errors), filename)
+		for _, e := range errors {
+			fmt.Printf("  %s:%d:%d - %s (%s)\n", e.File, e.Line, e.Column, e.Message, e.Code)
+		}
+		return
+	}
+
+	lines := splitLines(string(content))
+
+	fmt.Printf("\n")
+	for i, e := range errors {
+		// Show error header with color
+		fmt.Printf("  %s×%s %s%s%s\n", colorRed, colorReset, colorBold, e.Message, colorReset)
+
+		// Show file location with color
+		relPath, err := filepath.Rel(".", e.File)
+		if err != nil || relPath == "" {
+			relPath = filepath.Base(e.File)
+		}
+		fmt.Printf("   %s╭─[%s%s:%d:%d%s]\n", colorGray, colorCyan, relPath, e.Line, e.Column, colorGray)
+
+		// Show code context (3 lines before and after)
+		startLine := max(1, e.Line-1)
+		endLine := min(len(lines), e.Line+2)
+
+		for lineNum := startLine; lineNum <= endLine; lineNum++ {
+			if lineNum-1 < len(lines) {
+				lineContent := lines[lineNum-1]
+
+				if lineNum == e.Line {
+					// Error line with marker
+					fmt.Printf(" %s%3d%s %s│%s %s\n", colorGray, lineNum, colorReset, colorGray, colorReset, lineContent)
+
+					// Add error marker
+					spaces := e.Column - 1
+					if spaces < 0 {
+						spaces = 0
+					}
+					fmt.Printf("     %s·%s %s%s^ %s%s%s\n", colorGray, colorReset, repeatString(" ", spaces), colorRed, colorYellow, e.Code, colorReset)
+				} else {
+					// Context line
+					fmt.Printf(" %s%3d%s %s│%s %s\n", colorGray, lineNum, colorReset, colorGray, colorReset, lineContent)
+				}
+			}
+		}
+
+		fmt.Printf("   %s╰────%s\n", colorGray, colorReset)
+
+		if i < len(errors)-1 {
+			fmt.Printf("\n")
+		}
+	}
+
+	fmt.Printf("\n%sFound %d error(s).%s\n", colorRed, len(errors), colorReset)
+}
+
+func splitLines(content string) []string {
+	lines := []string{}
+	current := ""
+
+	for _, ch := range content {
+		if ch == '\n' {
+			lines = append(lines, current)
+			current = ""
+		} else if ch != '\r' {
+			current += string(ch)
+		}
+	}
+
+	if current != "" {
+		lines = append(lines, current)
+	}
+
+	return lines
+}
+
+func repeatString(s string, count int) string {
+	result := ""
+	for i := 0; i < count; i++ {
+		result += s
+	}
+	return result
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

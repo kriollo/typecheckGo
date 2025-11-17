@@ -1,7 +1,9 @@
 // Test file with intentional errors
 
 // Error: undefined variable
-const x = undefinedVar;
+const x = "undefinedVar";
+
+a = y + x;
 
 // Error: wrong number of arguments
 function greet(name: string) {
