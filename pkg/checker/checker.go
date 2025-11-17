@@ -21,6 +21,7 @@ type TypeChecker struct {
 	varTypeCache    map[string]*types.Type // Cache types by variable name
 	inferencer      *types.TypeInferencer
 	currentFunction *ast.FunctionDeclaration // Track current function for return type checking
+	config          interface{}              // TSConfig - using interface{} to avoid circular import
 }
 
 // TypeError represents a type checking error
@@ -129,6 +130,10 @@ func (tc *TypeChecker) checkStatement(stmt ast.Statement, filename string) {
 		tc.checkForStatement(s, filename)
 	case *ast.WhileStatement:
 		tc.checkWhileStatement(s, filename)
+	case *ast.TypeAliasDeclaration:
+		tc.checkTypeAliasDeclaration(s, filename)
+	case *ast.InterfaceDeclaration:
+		tc.checkInterfaceDeclaration(s, filename)
 	default:
 		// Unknown statement type
 		tc.addError(filename, stmt.Pos().Line, stmt.Pos().Column,
@@ -1036,5 +1041,24 @@ func (tc *TypeChecker) checkExportDeclaration(exportDecl *ast.ExportDeclaration,
 		tc.addError(filename, exportDecl.Pos().Line, exportDecl.Pos().Column,
 			fmt.Sprintf("Module '%s' has no exported member", sourceStr),
 			"TS2305", "error")
+	}
+}
+
+
+func (tc *TypeChecker) checkTypeAliasDeclaration(decl *ast.TypeAliasDeclaration, filename string) {
+	// Type aliases are just declarations, no runtime checking needed
+	// We just verify the name is valid
+	if decl.ID != nil && !isValidIdentifier(decl.ID.Name) {
+		tc.addError(filename, decl.ID.Pos().Line, decl.ID.Pos().Column,
+			fmt.Sprintf("Invalid type name: '%s'", decl.ID.Name), "TS1003", "error")
+	}
+}
+
+func (tc *TypeChecker) checkInterfaceDeclaration(decl *ast.InterfaceDeclaration, filename string) {
+	// Interfaces are just declarations, no runtime checking needed
+	// We just verify the name is valid
+	if decl.ID != nil && !isValidIdentifier(decl.ID.Name) {
+		tc.addError(filename, decl.ID.Pos().Line, decl.ID.Pos().Column,
+			fmt.Sprintf("Invalid interface name: '%s'", decl.ID.Name), "TS1003", "error")
 	}
 }

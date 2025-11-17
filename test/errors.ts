@@ -19,6 +19,12 @@ message(); // Not a function
 // Error: undefined function
 unknownFunction();
 
-// Valid code
-const validVar = 42;
+// Valid code with type annotations
+const validVar: number = 42;
+const greeting: string = "Hello";
 console.log(validVar);
+
+const getStatusClass = (status: number): string => {
+    return "bg-green-100";
+};
+const result = getStatusClass(1);

@@ -47,6 +47,10 @@ func (b *Binder) bindStatement(stmt ast.Statement) {
 		b.bindForStatement(s)
 	case *ast.WhileStatement:
 		b.bindWhileStatement(s)
+	case *ast.TypeAliasDeclaration:
+		b.bindTypeAliasDeclaration(s)
+	case *ast.InterfaceDeclaration:
+		b.bindInterfaceDeclaration(s)
 	default:
 		// Unknown statement type
 		fmt.Printf("Warning: Unknown statement type: %T\n", stmt)
@@ -364,4 +368,19 @@ func (b *Binder) bindArrowFunction(arrow *ast.ArrowFunctionExpression) {
 // GetSymbolTable returns the symbol table
 func (b *Binder) GetSymbolTable() *SymbolTable {
 	return b.table
+}
+
+
+func (b *Binder) bindTypeAliasDeclaration(decl *ast.TypeAliasDeclaration) {
+	// Register the type alias in the symbol table
+	if decl.ID != nil {
+		b.table.DefineSymbol(decl.ID.Name, TypeSymbol, decl, false)
+	}
+}
+
+func (b *Binder) bindInterfaceDeclaration(decl *ast.InterfaceDeclaration) {
+	// Register the interface in the symbol table
+	if decl.ID != nil {
+		b.table.DefineSymbol(decl.ID.Name, TypeSymbol, decl, false)
+	}
 }

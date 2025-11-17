@@ -28,6 +28,10 @@ const (
 	IntersectionType
 	LiteralType
 	TypeParameterType
+	MappedType
+	ConditionalType
+	TemplateLiteralType
+	IndexedAccessType
 )
 
 func (tk TypeKind) String() string {
@@ -70,6 +74,14 @@ func (tk TypeKind) String() string {
 		return "literal"
 	case TypeParameterType:
 		return "type parameter"
+	case MappedType:
+		return "mapped type"
+	case ConditionalType:
+		return "conditional type"
+	case TemplateLiteralType:
+		return "template literal type"
+	case IndexedAccessType:
+		return "indexed access type"
 	default:
 		return "unknown"
 	}
@@ -81,10 +93,32 @@ type Type struct {
 	Name       string
 	Properties map[string]*Type
 	ElementType *Type // Para arrays
-	Parameters []*Type // Para funciones
+	Parameters []*Type // Para funciones y type parameters
 	ReturnType *Type // Para funciones
 	Types      []*Type // Para unions/intersections
 	Value      interface{} // Para literal types
+
+	// Para mapped types: { [K in keyof T]: U }
+	TypeParameter *Type // K
+	Constraint    *Type // keyof T
+	MappedType    *Type // U
+
+	// Para conditional types: T extends U ? X : Y
+	CheckType *Type // T
+	ExtendsType *Type // U
+	TrueType  *Type // X
+	FalseType *Type // Y
+
+	// Para template literal types
+	TemplateParts []string // Las partes literales
+	TemplateTypes []*Type  // Los tipos interpolados
+
+	// Para indexed access types: T[K]
+	ObjectType *Type // T
+	IndexType  *Type // K
+
+	// Para type parameters con constraints
+	Default *Type // Tipo por defecto
 }
 
 // NewPrimitiveType crea un tipo primitivo
@@ -137,6 +171,55 @@ func NewLiteralType(value interface{}) *Type {
 	}
 }
 
+// NewMappedType crea un mapped type { [K in T]: U }
+func NewMappedType(typeParam *Type, constraint *Type, mappedType *Type) *Type {
+	return &Type{
+		Kind:          MappedType,
+		TypeParameter: typeParam,
+		Constraint:    constraint,
+		MappedType:    mappedType,
+	}
+}
+
+// NewConditionalType crea un conditional type T extends U ? X : Y
+func NewConditionalType(checkType *Type, extendsType *Type, trueType *Type, falseType *Type) *Type {
+	return &Type{
+		Kind:        ConditionalType,
+		CheckType:   checkType,
+		ExtendsType: extendsType,
+		TrueType:    trueType,
+		FalseType:   falseType,
+	}
+}
+
+// NewTemplateLiteralType crea un template literal type
+func NewTemplateLiteralType(parts []string, types []*Type) *Type {
+	return &Type{
+		Kind:          TemplateLiteralType,
+		TemplateParts: parts,
+		TemplateTypes: types,
+	}
+}
+
+// NewIndexedAccessType crea un indexed access type T[K]
+func NewIndexedAccessType(objectType *Type, indexType *Type) *Type {
+	return &Type{
+		Kind:       IndexedAccessType,
+		ObjectType: objectType,
+		IndexType:  indexType,
+	}
+}
+
+// NewTypeParameter crea un type parameter
+func NewTypeParameter(name string, constraint *Type, defaultType *Type) *Type {
+	return &Type{
+		Kind:       TypeParameterType,
+		Name:       name,
+		Constraint: constraint,
+		Default:    defaultType,
+	}
+}
+
 // String retorna una representación en string del tipo
 func (t *Type) String() string {
 	if t == nil {
@@ -176,7 +259,43 @@ func (t *Type) String() string {
 		return strings.Join(types, " & ")
 
 	case LiteralType:
+		if str, ok := t.Value.(string); ok {
+			return fmt.Sprintf("'%s'", str)
+		}
 		return fmt.Sprintf("%v", t.Value)
+
+	case MappedType:
+		return fmt.Sprintf("{ [%s in %s]: %s }",
+			t.TypeParameter.String(),
+			t.Constraint.String(),
+			t.MappedType.String())
+
+	case ConditionalType:
+		return fmt.Sprintf("%s extends %s ? %s : %s",
+			t.CheckType.String(),
+			t.ExtendsType.String(),
+			t.TrueType.String(),
+			t.FalseType.String())
+
+	case TemplateLiteralType:
+		result := "`"
+		for i, part := range t.TemplateParts {
+			result += part
+			if i < len(t.TemplateTypes) {
+				result += "${" + t.TemplateTypes[i].String() + "}"
+			}
+		}
+		result += "`"
+		return result
+
+	case IndexedAccessType:
+		return fmt.Sprintf("%s[%s]", t.ObjectType.String(), t.IndexType.String())
+
+	case TypeParameterType:
+		if t.Constraint != nil {
+			return fmt.Sprintf("%s extends %s", t.Name, t.Constraint.String())
+		}
+		return t.Name
 
 	case ObjectType:
 		if t.Name != "" {

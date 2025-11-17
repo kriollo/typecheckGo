@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"tstypechecker/pkg/checker"
+	"tstypechecker/pkg/config"
 	"tstypechecker/pkg/parser"
 )
 
@@ -53,18 +54,26 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		rootDir = filepath.Dir(absPath)
 	}
 
+	// Load tsconfig.json if it exists
+	tsConfig, err := config.LoadTSConfig(rootDir)
+	if err != nil {
+		fmt.Printf("Warning: Failed to load tsconfig.json: %v\n", err)
+		fmt.Println("Using default configuration...")
+		tsConfig = config.GetDefaultConfig()
+	}
+
 	// Create type checker with module resolution
 	typeChecker := checker.NewWithModuleResolver(rootDir)
 
 	// Process files
 	if info.IsDir() {
-		return checkDirectory(typeChecker, absPath)
+		return checkDirectory(typeChecker, absPath, tsConfig)
 	} else {
 		return checkFile(typeChecker, absPath)
 	}
 }
 
-func checkDirectory(tc *checker.TypeChecker, dir string) error {
+func checkDirectory(tc *checker.TypeChecker, dir string, tsConfig *config.TSConfig) error {
 	startTime := time.Now()
 
 	var allErrors []checker.TypeError
@@ -82,8 +91,12 @@ func checkDirectory(tc *checker.TypeChecker, dir string) error {
 			return filepath.SkipDir
 		}
 
-		// Only process .ts and .tsx files
-		if !info.IsDir() && (filepath.Ext(path) == ".ts" || filepath.Ext(path) == ".tsx") {
+		// Only process .ts and .tsx files (and .js if allowJs is enabled)
+		ext := filepath.Ext(path)
+		isTypeScriptFile := ext == ".ts" || ext == ".tsx"
+		isJavaScriptFile := ext == ".js" || ext == ".jsx"
+
+		if !info.IsDir() && (isTypeScriptFile || (isJavaScriptFile && tsConfig.CompilerOptions.AllowJs)) {
 			filesChecked++
 
 			// Parse file

@@ -61,10 +61,11 @@ func (v *VariableDeclaration) End() Position { return v.EndPos }
 func (v *VariableDeclaration) stmtNode() {}
 
 type VariableDeclarator struct {
-	ID   *Identifier
-	Init Expression
-	Position Position
-	EndPos   Position
+	ID          *Identifier
+	TypeAnnotation TypeNode
+	Init        Expression
+	Position    Position
+	EndPos      Position
 }
 
 func (v *VariableDeclarator) Type() string { return "VariableDeclarator" }
@@ -181,6 +182,50 @@ func (e *ExportSpecifier) Type() string { return "ExportSpecifier" }
 func (e *ExportSpecifier) Pos() Position { return e.Position }
 func (e *ExportSpecifier) End() Position { return e.EndPos }
 
+// TypeAliasDeclaration represents a type alias (type Name = Type)
+type TypeAliasDeclaration struct {
+	ID              *Identifier
+	TypeAnnotation  TypeNode
+	TypeParameters  []TypeNode // For generics like type Foo<T> = ...
+	Position        Position
+	EndPos          Position
+}
+
+func (t *TypeAliasDeclaration) Type() string { return "TypeAliasDeclaration" }
+func (t *TypeAliasDeclaration) Pos() Position { return t.Position }
+func (t *TypeAliasDeclaration) End() Position { return t.EndPos }
+func (t *TypeAliasDeclaration) stmtNode()     {}
+func (t *TypeAliasDeclaration) declNode()     {}
+
+// InterfaceDeclaration represents an interface declaration
+type InterfaceDeclaration struct {
+	ID             *Identifier
+	Body           []InterfaceProperty
+	Extends        []TypeNode
+	TypeParameters []TypeNode
+	Position       Position
+	EndPos         Position
+}
+
+func (i *InterfaceDeclaration) Type() string { return "InterfaceDeclaration" }
+func (i *InterfaceDeclaration) Pos() Position { return i.Position }
+func (i *InterfaceDeclaration) End() Position { return i.EndPos }
+func (i *InterfaceDeclaration) stmtNode()     {}
+func (i *InterfaceDeclaration) declNode()     {}
+
+// InterfaceProperty represents a property in an interface
+type InterfaceProperty struct {
+	Key      *Identifier
+	Value    TypeNode
+	Optional bool
+	Position Position
+	EndPos   Position
+}
+
+func (i InterfaceProperty) Type() string { return "InterfaceProperty" }
+func (i InterfaceProperty) Pos() Position { return i.Position }
+func (i InterfaceProperty) End() Position { return i.EndPos }
+
 // Common expressions
 type Identifier struct {
 	Name     string
@@ -262,9 +307,10 @@ type TypeNode interface {
 }
 
 type TypeReference struct {
-	Name     string
-	Position Position
-	EndPos   Position
+	Name         string
+	TypeArguments []TypeNode
+	Position     Position
+	EndPos       Position
 }
 
 func (t *TypeReference) Type() string { return "TypeReference" }
@@ -282,6 +328,29 @@ func (u *UnionType) Type() string { return "UnionType" }
 func (u *UnionType) Pos() Position { return u.Position }
 func (u *UnionType) End() Position { return u.EndPos }
 func (u *UnionType) typeNode() {}
+
+type IntersectionType struct {
+	Types    []TypeNode
+	Position Position
+	EndPos   Position
+}
+
+func (i *IntersectionType) Type() string { return "IntersectionType" }
+func (i *IntersectionType) Pos() Position { return i.Position }
+func (i *IntersectionType) End() Position { return i.EndPos }
+func (i *IntersectionType) typeNode() {}
+
+// LiteralType represents a literal type like 'foo' or 42
+type LiteralType struct {
+	Value    interface{}
+	Position Position
+	EndPos   Position
+}
+
+func (l *LiteralType) Type() string { return "LiteralType" }
+func (l *LiteralType) Pos() Position { return l.Position }
+func (l *LiteralType) End() Position { return l.EndPos }
+func (l *LiteralType) typeNode() {}
 
 type FunctionType struct {
 	Params []TypeNode
@@ -400,3 +469,74 @@ func (u *UnaryExpression) Type() string { return "UnaryExpression" }
 func (u *UnaryExpression) Pos() Position { return u.Position }
 func (u *UnaryExpression) End() Position { return u.EndPos }
 func (u *UnaryExpression) exprNode()     {}
+
+// MappedType represents { [K in keyof T]: U }
+type MappedType struct {
+	TypeParameter *Identifier
+	Constraint    TypeNode
+	MappedType    TypeNode
+	Optional      bool // For { [K in T]?: U }
+	Readonly      bool // For { readonly [K in T]: U }
+	Position      Position
+	EndPos        Position
+}
+
+func (m *MappedType) Type() string { return "MappedType" }
+func (m *MappedType) Pos() Position { return m.Position }
+func (m *MappedType) End() Position { return m.EndPos }
+func (m *MappedType) typeNode()     {}
+
+// ConditionalType represents T extends U ? X : Y
+type ConditionalType struct {
+	CheckType   TypeNode
+	ExtendsType TypeNode
+	TrueType    TypeNode
+	FalseType   TypeNode
+	Position    Position
+	EndPos      Position
+}
+
+func (c *ConditionalType) Type() string { return "ConditionalType" }
+func (c *ConditionalType) Pos() Position { return c.Position }
+func (c *ConditionalType) End() Position { return c.EndPos }
+func (c *ConditionalType) typeNode()     {}
+
+// TemplateLiteralType represents `prefix${T}suffix`
+type TemplateLiteralType struct {
+	Parts    []string   // Literal parts
+	Types    []TypeNode // Interpolated types
+	Position Position
+	EndPos   Position
+}
+
+func (t *TemplateLiteralType) Type() string { return "TemplateLiteralType" }
+func (t *TemplateLiteralType) Pos() Position { return t.Position }
+func (t *TemplateLiteralType) End() Position { return t.EndPos }
+func (t *TemplateLiteralType) typeNode()     {}
+
+// IndexedAccessType represents T[K]
+type IndexedAccessType struct {
+	ObjectType TypeNode
+	IndexType  TypeNode
+	Position   Position
+	EndPos     Position
+}
+
+func (i *IndexedAccessType) Type() string { return "IndexedAccessType" }
+func (i *IndexedAccessType) Pos() Position { return i.Position }
+func (i *IndexedAccessType) End() Position { return i.EndPos }
+func (i *IndexedAccessType) typeNode()     {}
+
+// TypeParameter represents a generic type parameter <T extends U = D>
+type TypeParameter struct {
+	Name       *Identifier
+	Constraint TypeNode // extends clause
+	Default    TypeNode // default type
+	Position   Position
+	EndPos     Position
+}
+
+func (t *TypeParameter) Type() string { return "TypeParameter" }
+func (t *TypeParameter) Pos() Position { return t.Position }
+func (t *TypeParameter) End() Position { return t.EndPos }
+func (t *TypeParameter) typeNode()     {}
