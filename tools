@@ -1,0 +1,43 @@
+package main
+
+import (
+	"fmt"
+	"io/ioutil"
+	"log"
+	"os"
+
+	"tstypechecker/pkg/parser"
+)
+
+func main() {
+	if len(os.Args) < 2 {
+		log.Fatal("Usage: safe_parser <file.ts>")
+	}
+
+	filename := os.Args[1]
+	content, err := ioutil.ReadFile(filename)
+	if err != nil {
+		log.Fatalf("Error reading file: %v", err)
+	}
+
+	fmt.Printf("=== SAFE PARSER TEST ===\n")
+	fmt.Printf("File: %s\n", filename)
+	fmt.Printf("Content length: %d characters\n", len(content))
+	fmt.Printf("Content preview: %.100s...\n", string(content))
+	
+	// Parse with timeout protection
+	fmt.Printf("\nParsing...\n")
+	program, err := parser.ParseFile(filename)
+	
+	if err != nil {
+		fmt.Printf("❌ Parse error: %v\n", err)
+		os.Exit(1)
+	} else {
+		fmt.Printf("✅ Parse successful!\n")
+		fmt.Printf("Number of statements: %d\n", len(program.Body))
+		
+		for i, stmt := range program.Body {
+			fmt.Printf("Statement %d: %T\n", i+1, stmt)
+		}
+	}
+}

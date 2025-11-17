@@ -1,0 +1,138 @@
+project: TS_Typechecker_Go
+description:
+  "Roadmap práctico: construir un typechecker de TypeScript en Go.
+   Empieza simple, itera, agrega features avanzadas por fases.
+   Cada fase tiene objetivos, entregables y criterios de aceptación."
+
+
+phases[5]{name, duration_weeks, goals, deliverables, acceptance}:
+  - Basico,4: ✅ COMPLETADO
+      goals:
+        - ✅ "Parser + AST estable (usar parser existente)." - Implementado parser recursivo propio con soporte para funciones, variables, if statements, expresiones binarias, imports/exports
+        - ✅ "Tabla de símbolos simple (variables, funciones, imports)." - Tabla de símbolos con scopes jerárquicos implementada
+        - ✅ "Resolución de módulos ES/TS (imports/exports)." - Sistema de resolución de módulos con algoritmo Node.js implementado, exports funcionando, imports: ⚠️ EN PROGRESO (problema de parsing con string literals)
+        - ✅ "Checks sintácticos y errores básicos (tipo: errores de nombre y aridad)." - Implementados checks de nombres no definidos y validación de aridad en funciones
+      deliverables:
+        - ✅ "CLI minimal: check <path> -> lista de errores." - CLI implementado con comando check
+        - ✅ "AST output en JSON/TOON para debugging." - Formatos JSON y TOON implementados
+      acceptance:
+        - ✅ "Procesa proyectos de ejemplo pequeños; detecta nombres no definidos y funciones llamadas con distinto arity." - Funcionando correctamente con archivos de prueba
+
+  - Intermedio,8:
+      goals:
+        - "Sistema de tipos básico: primitivos, objetos planos, funciones, arrays, uniones simples."
+        - "Type inference local (vars, return)."
+        - "Control-flow based narrowing (if typeof / instanceof / null checks) básico."
+        - "Módulos y tipos exportados/importados correctamente tipados."
+      deliverables:
+        - "Graph de dependencias incremental."
+        - "Cache por archivo con hashes y timestamps."
+        - "Reporte de errores con código y span."
+      acceptance:
+        - "Projectos medianos (~10k LOC) checkean rápido con cache incremental (rechecks locales)."
+
+  - Avanzado,12:
+      goals:
+        - "Soporte para: generics, mapped types, conditional types (nivel 1), type aliases, intersection, distributive unions parcial."
+        - "Resolución de overloads y contextual typing básico."
+        - "Inference más profunda en funciones genéricas simples."
+        - "Integración con go routine workers para análisis paralelo por módulos."
+      deliverables:
+        - "Motor de inferencia por capas (local -> module -> global)."
+        - "Pruebas de compatibilidad con patterns comunes de TS (React props, libs comunes)."
+      acceptance:
+        - "Cobertura de features usadas por 80% de repos públicos objetivo (según tu corpus)."
+
+  - Pro,20:
+      goals:
+        - "Soporte avanzado: template literal types (parcial), infer en conditional types (limitado), declaration merging y namespace handling."
+        - "Compatibilidad con .d.ts parsing y conversion simple."
+        - "API LSP: diagnostics, hover, goto, incremental edits."
+        - "Optimización: mem-profiler, GC tuning, lockless caches."
+      deliverables:
+        - "Server LSP estable + benchmarks con proyectos reales."
+        - "Compat mode: marcar diagnósticos con nivel 'strictness' para decidir qué reportar."
+      acceptance:
+        - "LSP adoptable por VSCode; tiempo de cold-check en grandes mono-repo < objetivo (según tu SLA)."
+
+  - Edge/Opt,ongoing:
+      goals:
+        - "Paridad completa con TypeScript (si decides), reimplementación de corner-cases."
+        - "Estrategias de fallback: delegar checks complejos al `tsserver` cuando no se quiere implementar."
+        - "Soporte multiplataforma binario, cross-compile, CI/CD."
+      deliverables:
+        - "Modo híbrido: fast-checker + fallback RPC a tsserver."
+        - "Documentación y guía de migración."
+      acceptance:
+        - "Adopción incremental posible sin romper pipelines existentes."
+
+data_structures:
+  symbol_table:
+    - "Scoped maps: module -> scope tree -> symbol entries (name,type,node,mutability,declSpan)."
+    - "Support for hoisting flags y temporal bindings para `var`/`let`."
+  type:
+    - "TypeID (int) referenciando un pool de tipos para deduplicar."
+    - "Union/Intersection como sets de TypeID."
+    - "Generic type with params + instantiated cache (map[signature] -> instantiation)."
+  graph:
+    - "Dependency DAG por módulo con strong/weak edges (reexports, types-only)."
+    - "Change propagation via topo-order incremental re-eval."
+
+algorithms:
+  parsing: "usar parser existente (oxc, swc) y transformar AST a tu IR Go. NO reescribir desde 0."
+  inference:
+    - "two-phase: gather shapes -> unify -> finalize"
+    - "union widening heuristics para evitar explosión exponencial"
+  constraint_solver:
+    - "worklist algorithm con monotonic fixation y timeout/costo por nodo"
+  incremental:
+    - "file-hash -> dirty-set -> affected-subgraph -> recheck minimal"
+    - "cache serialized TypeIDs + symbol snapshots para warm-start"
+
+concurrency:
+  - "Worker pool por CPU cores - evitar shared mutable state; comunicar con channels immutable messages."
+  - "Shard por módulos o por grupos de archivos (split por entry points)."
+  - "Lockless read caches + version numbers para invalidation."
+
+interop:
+  - "Emit JSON/TOON diagnostics compatible con editors y CI."
+  - "Mode 'check-only' y mode 'lsp-server' para integración."
+  - "Fallback RPC: si feature X no soportada -> llamar tsserver para ese file/diagnostic."
+
+testing:
+  - "Corpus de test: fixtures reales (react, node libs), fuzz inputs y .d.ts cribado."
+  - "Benchmarks: cold vs warm, incremental single-file change, multi-file change."
+  - "Define P0/P1/P2 test suites; tests de performance y memoria automatizados."
+
+observability:
+  - "Tracing por pass (parse, bind, infer, finalize)."
+  - "Metrics: files/s, types_resolved/s, GC-perc, peak_rss."
+  - "Modo verbose con span tree para debug."
+
+deliverables_and_milestones:
+  - "M1 (4w): CLI + parser + symbol table + basic checks."
+  - "M2 (12w): inference básico + incremental cache + worker pool."
+  - "M3 (24w): generics + LSP prototype + benchmarks."
+  - "M4 (48w): advanced types + fallback mode + production LSP."
+
+risks_and_mitigations:
+  - "R: explosion en conditional/template types -> M: cap heuristics y fallback a tsserver."
+  - "R: mismatch con ecosistema TS -> M: soporte .d.ts + tests contra bundles reales."
+  - "R: tiempo de desarrollo -> M: priorizar features que impactan UX y perf antes que paridad."
+
+implementation_notes:
+  - "Lang: Go 1.21+ (por performance y generics)."
+  - "Start: write small prototypes in Go quickly: parser adapter -> AST -> binder."
+  - "Tooling: use pprof, go test -bench, go vet y fuzzing para encontrar regresiones."
+  - "Docs: version the diagnostics and include 'compatibility level' flags."
+
+examples[2]{name, toon}:
+  - "AST debug example",
+    "```toon\nnodes[2]{id,type,span}:\n  1,FunctionDecl,1:0-1:24\n  2,ReturnStmt,1:10-1:24\n```"
+  - "Diagnostics example",
+    "```toon\ndiags[1]{file,line,col,msg,code,severity}:\n  main.ts,12,5,\"Property 'x' does not exist on type 'Foo'\",TS2339,error\n```"
+
+next_steps:
+  - "Implement adapter a parser existente (oxc/swc) — 1 semana."
+  - "Diseñar symbol table y APIs internas (2-3 días)."
+  - "Prototipo minimal CLI que corra checks básicos (2 semanas)."
