@@ -43,7 +43,7 @@ func New() *TypeChecker {
 func NewWithModuleResolver(rootDir string) *TypeChecker {
 	symbolTable := symbols.NewSymbolTable()
 	moduleResolver := modules.NewModuleResolver(rootDir, symbolTable)
-	
+
 	return &TypeChecker{
 		symbolTable:    symbolTable,
 		errors:         []TypeError{},
@@ -57,14 +57,19 @@ func (tc *TypeChecker) CheckFile(filename string, ast *ast.File) []TypeError {
 	tc.errors = []TypeError{}
 	tc.symbolTable.ClearErrors()
 	tc.currentFile = filename
-	
+
 	// Create a binder and bind symbols
 	binder := symbols.NewBinder(tc.symbolTable)
 	binder.BindFile(ast)
-	
+
+	// Process imports and add imported symbols to the symbol table
+	if tc.moduleResolver != nil {
+		tc.processImports(ast, filename)
+	}
+
 	// Perform additional type checking
 	tc.checkFile(ast, filename)
-	
+
 	return tc.errors
 }
 
@@ -79,7 +84,7 @@ func (tc *TypeChecker) checkStatement(stmt ast.Statement, filename string) {
 	if stmt == nil {
 		return
 	}
-	
+
 	switch s := stmt.(type) {
 	case *ast.VariableDeclaration:
 		tc.checkVariableDeclaration(s, filename)
@@ -113,7 +118,7 @@ func (tc *TypeChecker) checkVariableDeclaration(decl *ast.VariableDeclaration, f
 					fmt.Sprintf("Invalid identifier: '%s'", declarator.ID.Name), "TS1003", "error")
 			}
 		}
-		
+
 		// Check initializer if present
 		if declarator.Init != nil {
 			tc.checkExpression(declarator.Init, filename)
@@ -127,7 +132,7 @@ func (tc *TypeChecker) checkFunctionDeclaration(decl *ast.FunctionDeclaration, f
 		tc.addError(filename, decl.ID.Pos().Line, decl.ID.Pos().Column,
 			fmt.Sprintf("Invalid function name: '%s'", decl.ID.Name), "TS1003", "error")
 	}
-	
+
 	// Check parameter names
 	for _, param := range decl.Params {
 		if param.ID != nil {
@@ -137,7 +142,7 @@ func (tc *TypeChecker) checkFunctionDeclaration(decl *ast.FunctionDeclaration, f
 			}
 		}
 	}
-	
+
 	// Check function body in the function's scope
 	if decl.Body != nil {
 		// Find the function scope
@@ -146,10 +151,10 @@ func (tc *TypeChecker) checkFunctionDeclaration(decl *ast.FunctionDeclaration, f
 			// Enter the function scope
 			originalScope := tc.symbolTable.Current
 			tc.symbolTable.Current = functionScope
-			
+
 			// Check the body
 			tc.checkBlockStatement(decl.Body, filename)
-			
+
 			// Restore the original scope
 			tc.symbolTable.Current = originalScope
 		} else {
@@ -166,12 +171,12 @@ func (tc *TypeChecker) checkBlockStatement(block *ast.BlockStatement, filename s
 		// Enter the block scope
 		originalScope := tc.symbolTable.Current
 		tc.symbolTable.Current = blockScope
-		
+
 		// Check all statements in the block
 		for _, stmt := range block.Body {
 			tc.checkStatement(stmt, filename)
 		}
-		
+
 		// Restore the original scope
 		tc.symbolTable.Current = originalScope
 	} else {
@@ -191,28 +196,28 @@ func (tc *TypeChecker) checkReturnStatement(ret *ast.ReturnStatement, filename s
 func (tc *TypeChecker) checkIfStatement(stmt *ast.IfStatement, filename string) {
 	// Check the test condition
 	tc.checkExpression(stmt.Test, filename)
-	
+
 	// Find the if statement scope (if it exists)
 	ifScope := tc.findScopeForNode(stmt)
 	if ifScope != nil {
 		// Enter the if scope
 		originalScope := tc.symbolTable.Current
 		tc.symbolTable.Current = ifScope
-		
+
 		// Check the consequent (then branch)
 		tc.checkStatement(stmt.Consequent, filename)
-		
+
 		// Check the alternate (else branch) if present
 		if stmt.Alternate != nil {
 			tc.checkStatement(stmt.Alternate, filename)
 		}
-		
+
 		// Restore the original scope
 		tc.symbolTable.Current = originalScope
 	} else {
 		// Fallback: check without scope change
 		tc.checkStatement(stmt.Consequent, filename)
-		
+
 		// Check the alternate (else branch) if present
 		if stmt.Alternate != nil {
 			tc.checkStatement(stmt.Alternate, filename)
@@ -224,7 +229,7 @@ func (tc *TypeChecker) checkExpression(expr ast.Expression, filename string) {
 	if expr == nil {
 		return
 	}
-	
+
 	switch e := expr.(type) {
 	case *ast.Identifier:
 		tc.checkIdentifier(e, filename)
@@ -239,7 +244,7 @@ func (tc *TypeChecker) checkExpression(expr ast.Expression, filename string) {
 		// Check both operands
 		tc.checkExpression(e.Left, filename)
 		tc.checkExpression(e.Right, filename)
-		
+
 		// For now, we don't do type checking on binary expressions
 		// In a full implementation, we would check if the types are compatible
 		// with the operator (e.g., can't add a string and a number without coercion)
@@ -261,12 +266,12 @@ func (tc *TypeChecker) checkIdentifier(id *ast.Identifier, filename string) {
 func (tc *TypeChecker) checkCallExpression(call *ast.CallExpression, filename string) {
 	// Check the callee
 	tc.checkExpression(call.Callee, filename)
-	
+
 	// Check all arguments
 	for _, arg := range call.Arguments {
 		tc.checkExpression(arg, filename)
 	}
-	
+
 	// Check if it's a valid function call
 	if id, ok := call.Callee.(*ast.Identifier); ok {
 		// This check is already done in the symbol table, but we can add more
@@ -281,7 +286,7 @@ func (tc *TypeChecker) checkCallExpression(call *ast.CallExpression, filename st
 				actualCount := len(call.Arguments)
 				if actualCount != expectedCount {
 					tc.addError(filename, call.Pos().Line, call.Pos().Column,
-						fmt.Sprintf("Expected %d arguments, but got %d", expectedCount, actualCount), 
+						fmt.Sprintf("Expected %d arguments, but got %d", expectedCount, actualCount),
 						"TS2554", "error")
 				}
 			}
@@ -292,7 +297,7 @@ func (tc *TypeChecker) checkCallExpression(call *ast.CallExpression, filename st
 func (tc *TypeChecker) checkMemberExpression(member *ast.MemberExpression, filename string) {
 	// Check the object
 	tc.checkExpression(member.Object, filename)
-	
+
 	// Check the property
 	if !member.Computed {
 		// Property is an identifier
@@ -352,14 +357,14 @@ func (tc *TypeChecker) findScopeInSubtree(scope *symbols.Scope, targetNode ast.N
 	if scope.Node == targetNode {
 		return scope
 	}
-	
+
 	// Search in child scopes
 	for _, child := range scope.Children {
 		if result := tc.findScopeInSubtree(child, targetNode); result != nil {
 			return result
 		}
 	}
-	
+
 	return nil
 }
 
@@ -373,26 +378,26 @@ func isValidIdentifier(name string) bool {
 	if name == "" {
 		return false
 	}
-	
+
 	// Check if it starts with a letter, underscore, or dollar sign
 	firstChar := name[0]
-	if !((firstChar >= 'a' && firstChar <= 'z') || 
-		 (firstChar >= 'A' && firstChar <= 'Z') || 
+	if !((firstChar >= 'a' && firstChar <= 'z') ||
+		 (firstChar >= 'A' && firstChar <= 'Z') ||
 		 firstChar == '_' || firstChar == '$') {
 		return false
 	}
-	
+
 	// Check remaining characters
 	for i := 1; i < len(name); i++ {
 		char := name[i]
-		if !((char >= 'a' && char <= 'z') || 
-			 (char >= 'A' && char <= 'Z') || 
-			 (char >= '0' && char <= '9') || 
+		if !((char >= 'a' && char <= 'z') ||
+			 (char >= 'A' && char <= 'Z') ||
+			 (char >= '0' && char <= '9') ||
 			 char == '_' || char == '$') {
 			return false
 		}
 	}
-	
+
 	// Check if it's a reserved keyword
 	return !isReservedKeyword(name)
 }
@@ -410,13 +415,13 @@ func isReservedKeyword(name string) bool {
 		"declare", "from", "get", "is", "module", "namespace", "of",
 		"require", "set", "type", "",
 	}
-	
+
 	for _, keyword := range keywords {
 		if name == keyword {
 			return true
 		}
 	}
-	
+
 	return false
 }
 
@@ -425,9 +430,9 @@ func (tc *TypeChecker) FormatErrors(format string) string {
 	if len(tc.errors) == 0 {
 		return "No errors found"
 	}
-	
+
 	var result strings.Builder
-	
+
 	switch format {
 	case "json":
 		result.WriteString("[\n")
@@ -445,21 +450,69 @@ func (tc *TypeChecker) FormatErrors(format string) string {
 			result.WriteString("  }")
 		}
 		result.WriteString("\n]\n")
-		
+
 	case "toon":
 		result.WriteString("diags[" + fmt.Sprintf("%d", len(tc.errors)) + "]{file,line,col,msg,code,severity}:\n")
 		for _, err := range tc.errors {
-			result.WriteString(fmt.Sprintf("  %s,%d,%d,%s,%s,%s\n", 
+			result.WriteString(fmt.Sprintf("  %s,%d,%d,%s,%s,%s\n",
 				err.File, err.Line, err.Column, err.Message, err.Code, err.Severity))
 		}
-		
+
 	default: // text
 		for _, err := range tc.errors {
 			result.WriteString(fmt.Sprintf("%s\n", err.Error()))
 		}
 	}
-	
+
 	return result.String()
+}
+
+// processImports processes all imports in a file and adds imported symbols to the symbol table
+func (tc *TypeChecker) processImports(file *ast.File, filename string) {
+	for _, stmt := range file.Body {
+		if importDecl, ok := stmt.(*ast.ImportDeclaration); ok {
+			tc.processImport(importDecl, filename)
+		}
+	}
+}
+
+// processImport processes a single import declaration
+func (tc *TypeChecker) processImport(importDecl *ast.ImportDeclaration, filename string) {
+	if importDecl.Source == nil {
+		return
+	}
+
+	sourceStr, ok := importDecl.Source.Value.(string)
+	if !ok || sourceStr == "" {
+		return
+	}
+
+	// Load the current module (the file being checked)
+	currentModule, err := tc.moduleResolver.LoadModule(filename, filename)
+	if err != nil {
+		// If we can't load the current module, skip
+		fmt.Printf("DEBUG: Failed to load current module %s: %v\n", filename, err)
+		return
+	}
+
+	importResolver := modules.NewImportResolver(tc.moduleResolver, currentModule)
+	importedSymbols, err := importResolver.ResolveImport(importDecl)
+	if err != nil {
+		// Error will be reported during checkImportDeclaration
+		fmt.Printf("DEBUG: Failed to resolve import from %s: %v\n", sourceStr, err)
+		return
+	}
+
+	fmt.Printf("DEBUG: Resolved %d symbols from %s\n", len(importedSymbols), sourceStr)
+
+	// Add imported symbols to the current scope
+	for name, symbol := range importedSymbols {
+		fmt.Printf("DEBUG: Adding symbol %s (type=%v, isFunc=%v)\n", name, symbol.Type, symbol.IsFunction)
+		// Define the imported symbol in the current scope
+		newSymbol := tc.symbolTable.DefineSymbol(name, symbol.Type, symbol.Node, false)
+		newSymbol.IsFunction = symbol.IsFunction
+		newSymbol.Params = symbol.Params
+	}
 }
 
 // checkImportDeclaration checks import statements
@@ -468,31 +521,31 @@ func (tc *TypeChecker) checkImportDeclaration(importDecl *ast.ImportDeclaration,
 		// If we don't have module resolution, just skip import checking
 		return
 	}
-	
+
 	// Obtener el string del source
 	if importDecl.Source == nil {
 		return
 	}
-	
+
 	sourceStr, ok := importDecl.Source.Value.(string)
 	if !ok || sourceStr == "" {
 		return
 	}
-	
+
 	// Create an import resolver for this file
 	currentModule, err := tc.moduleResolver.ResolveModule(filename, "")
 	if err != nil {
 		// If we can't resolve the current module, we can't check imports
 		return
 	}
-	
+
 	importResolver := modules.NewImportResolver(tc.moduleResolver, currentModule)
-	
+
 	// Try to resolve the import
 	_, err = importResolver.ResolveImport(importDecl)
 	if err != nil {
 		tc.addError(filename, importDecl.Pos().Line, importDecl.Pos().Column,
-			fmt.Sprintf("Cannot find module '%s' or its corresponding type declarations", sourceStr), 
+			fmt.Sprintf("Cannot find module '%s' or its corresponding type declarations", sourceStr),
 			"TS2307", "error")
 	}
 }
@@ -503,31 +556,31 @@ func (tc *TypeChecker) checkExportDeclaration(exportDecl *ast.ExportDeclaration,
 		// If we don't have module resolution, just skip export checking
 		return
 	}
-	
+
 	// Solo verificar re-exports que tienen source
 	if exportDecl.Source == nil || len(exportDecl.Specifiers) == 0 {
 		return
 	}
-	
+
 	sourceStr, ok := exportDecl.Source.Value.(string)
 	if !ok || sourceStr == "" {
 		return
 	}
-	
+
 	// Create an import resolver for this file
 	currentModule, err := tc.moduleResolver.ResolveModule(filename, "")
 	if err != nil {
 		// If we can't resolve the current module, we can't check exports
 		return
 	}
-	
+
 	importResolver := modules.NewImportResolver(tc.moduleResolver, currentModule)
-	
+
 	// Check re-exports
 	err = importResolver.ResolveExport(exportDecl)
 	if err != nil {
 		tc.addError(filename, exportDecl.Pos().Line, exportDecl.Pos().Column,
-			fmt.Sprintf("Module '%s' has no exported member", sourceStr), 
+			fmt.Sprintf("Module '%s' has no exported member", sourceStr),
 			"TS2305", "error")
 	}
 }

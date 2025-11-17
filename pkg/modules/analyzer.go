@@ -22,16 +22,16 @@ func (a *ModuleAnalyzer) AnalyzeModule(module *ResolvedModule, file *ast.File) e
 	if file == nil {
 		return fmt.Errorf("file AST is nil")
 	}
-	
+
 	module.ModuleAST = file
-	
+
 	// Recorrer todas las declaraciones del programa
 	for _, stmt := range file.Body {
 		if err := a.analyzeStatement(module, stmt); err != nil {
 			return err
 		}
 	}
-	
+
 	return nil
 }
 
@@ -63,7 +63,7 @@ func (a *ModuleAnalyzer) analyzeStatement(module *ResolvedModule, stmt ast.State
 			}
 		}
 	}
-	
+
 	return nil
 }
 
@@ -79,19 +79,25 @@ func (a *ModuleAnalyzer) analyzeExportDeclaration(module *ResolvedModule, export
 		}
 		return nil
 	}
-	
+
 	// Named exports
 	if len(export.Specifiers) > 0 {
 		sourceModule := ""
 		if export.Source != nil {
 			sourceModule = export.Source.Value.(string)
 		}
-		
+
 		for _, spec := range export.Specifiers {
+			// Find the original declaration for this export
+			originalNode := a.findDeclaration(module, spec.Local.Name)
+			if originalNode == nil {
+				originalNode = export // Fallback to export node if not found
+			}
+
 			module.Exports[spec.Exported.Name] = &ExportInfo{
 				Name:         spec.Exported.Name,
 				Type:         "named",
-				Node:         export, // Usar el export completo como nodo
+				Node:         originalNode,
 				Position:     spec.Pos(),
 				IsReExport:   spec.Local.Name != spec.Exported.Name,
 				SourceModule: sourceModule,
@@ -99,7 +105,7 @@ func (a *ModuleAnalyzer) analyzeExportDeclaration(module *ResolvedModule, export
 		}
 		return nil
 	}
-	
+
 	// Export de una declaración
 	if export.Declaration != nil {
 		switch decl := export.Declaration.(type) {
@@ -121,7 +127,7 @@ func (a *ModuleAnalyzer) analyzeExportDeclaration(module *ResolvedModule, export
 			}
 		}
 	}
-	
+
 	return nil
 }
 
@@ -131,4 +137,29 @@ func (a *ModuleAnalyzer) isExported(name string) bool {
 	// A menos que estén en una declaración de export
 	// Esta función se usará más adelante cuando implementemos análisis más sofisticado
 	return false
+}
+
+// findDeclaration finds the original declaration of a symbol in the module
+func (a *ModuleAnalyzer) findDeclaration(module *ResolvedModule, name string) ast.Node {
+	if module.ModuleAST == nil {
+		return nil
+	}
+
+	// Search through all top-level statements
+	for _, stmt := range module.ModuleAST.Body {
+		switch s := stmt.(type) {
+		case *ast.FunctionDeclaration:
+			if s.ID != nil && s.ID.Name == name {
+				return s
+			}
+		case *ast.VariableDeclaration:
+			for _, decl := range s.Decls {
+				if decl.ID != nil && decl.ID.Name == name {
+					return s
+				}
+			}
+		}
+	}
+
+	return nil
 }

@@ -30,7 +30,7 @@ func init() {
 
 func runCheck(cmd *cobra.Command, args []string) error {
 	path := args[0]
-	
+
 	// Resolve path
 	absPath, err := filepath.Abs(path)
 	if err != nil {
@@ -43,8 +43,16 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("cannot access path: %w", err)
 	}
 
-	// Create type checker
-	typeChecker := checker.New()
+	// Determine root directory for module resolution
+	var rootDir string
+	if info.IsDir() {
+		rootDir = absPath
+	} else {
+		rootDir = filepath.Dir(absPath)
+	}
+
+	// Create type checker with module resolution
+	typeChecker := checker.NewWithModuleResolver(rootDir)
 
 	// Process files
 	if info.IsDir() {
@@ -56,32 +64,32 @@ func runCheck(cmd *cobra.Command, args []string) error {
 
 func checkDirectory(checker *checker.TypeChecker, dir string) error {
 	fmt.Printf("Checking directory: %s\n", dir)
-	
+
 	// Walk directory and find TypeScript files
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		
+
 		// Skip node_modules and hidden directories
 		if info.IsDir() && (info.Name() == "node_modules" || info.Name()[0] == '.') {
 			return filepath.SkipDir
 		}
-		
+
 		// Only process .ts and .tsx files
 		if !info.IsDir() && (filepath.Ext(path) == ".ts" || filepath.Ext(path) == ".tsx") {
 			return checkFile(checker, path)
 		}
-		
+
 		return nil
 	})
-	
+
 	return err
 }
 
 func checkFile(checker *checker.TypeChecker, filename string) error {
 	fmt.Printf("Checking file: %s\n", filename)
-	
+
 	// Parse file
 	ast, err := parser.ParseFile(filename)
 	if err != nil {
@@ -99,7 +107,7 @@ func checkFile(checker *checker.TypeChecker, filename string) error {
 
 	// Type check
 	errors := checker.CheckFile(filename, ast)
-	
+
 	// Report errors
 	if len(errors) > 0 {
 		fmt.Printf("Found %d errors in %s:\n", len(errors), filename)
@@ -108,7 +116,7 @@ func checkFile(checker *checker.TypeChecker, filename string) error {
 		}
 		return fmt.Errorf("type checking failed")
 	}
-	
+
 	fmt.Printf("✓ No errors found in %s\n", filename)
 	return nil
 }

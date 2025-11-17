@@ -25,7 +25,7 @@ func (ir *ImportResolver) ResolveImport(importDecl *ast.ImportDeclaration) (map[
 	if importDecl == nil {
 		return nil, fmt.Errorf("import declaration is nil")
 	}
-	
+
 	// Resolver el módulo
 	sourceStr := ""
 	if importDecl.Source != nil {
@@ -35,10 +35,10 @@ func (ir *ImportResolver) ResolveImport(importDecl *ast.ImportDeclaration) (map[
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve import '%s': %w", importDecl.Source, err)
 	}
-	
+
 	// Crear mapa de símbolos importados
 	importedSymbols := make(map[string]*symbols.Symbol)
-	
+
 	// Manejar diferentes tipos de imports
 	// Buscar el default specifier en los specifiers
 	var defaultSpecifier *ast.ImportSpecifier
@@ -49,7 +49,7 @@ func (ir *ImportResolver) ResolveImport(importDecl *ast.ImportDeclaration) (map[
 			break
 		}
 	}
-	
+
 	if defaultSpecifier != nil {
 		// Import por defecto: import foo from 'module'
 		if resolvedModule.DefaultExport != nil {
@@ -60,21 +60,37 @@ func (ir *ImportResolver) ResolveImport(importDecl *ast.ImportDeclaration) (map[
 			importedSymbols[defaultSpecifier.Local.Name] = symbol
 		}
 	}
-	
+
 	// Manejar named imports
 	for _, spec := range importDecl.Specifiers {
 		// Saltar el default specifier que ya procesamos
 		if spec.Imported == nil || spec.Local == nil {
 			continue
 		}
-		
+
 		if export, exists := resolvedModule.Exports[spec.Imported.Name]; exists {
+			// Determine the symbol type based on the exported node
+			symbolType := ir.determineSymbolType(export.Node)
+
 			symbol := &symbols.Symbol{
-				Name:     spec.Local.Name,
-				Type:     symbols.VariableSymbol,
-				Node:     export.Node,
-				DeclSpan: export.Position,
+				Name:       spec.Local.Name,
+				Type:       symbolType,
+				Node:       export.Node,
+				DeclSpan:   export.Position,
+				IsFunction: symbolType == symbols.FunctionSymbol,
 			}
+
+			// If it's a function, extract parameter information
+			if funcDecl, ok := export.Node.(*ast.FunctionDeclaration); ok {
+				var params []string
+				for _, param := range funcDecl.Params {
+					if param.ID != nil {
+						params = append(params, param.ID.Name)
+					}
+				}
+				symbol.Params = params
+			}
+
 			importedSymbols[spec.Local.Name] = symbol
 		} else {
 			sourceStr := ""
@@ -84,7 +100,7 @@ func (ir *ImportResolver) ResolveImport(importDecl *ast.ImportDeclaration) (map[
 			return nil, fmt.Errorf("export '%s' not found in module '%s'", spec.Imported.Name, sourceStr)
 		}
 	}
-	
+
 	// Manejar namespace imports: import * as name from 'module'
 	// Buscar namespace specifier (import * as name)
 	var namespaceSpecifier *ast.ImportSpecifier
@@ -94,7 +110,7 @@ func (ir *ImportResolver) ResolveImport(importDecl *ast.ImportDeclaration) (map[
 			break
 		}
 	}
-	
+
 	if namespaceSpecifier != nil {
 		// Crear un símbolo que represente el namespace completo
 		namespaceSymbol := &symbols.Symbol{
@@ -105,7 +121,7 @@ func (ir *ImportResolver) ResolveImport(importDecl *ast.ImportDeclaration) (map[
 		}
 		importedSymbols[namespaceSpecifier.Local.Name] = namespaceSymbol
 	}
-	
+
 	return importedSymbols, nil
 }
 
@@ -114,7 +130,7 @@ func (ir *ImportResolver) ResolveExport(exportDecl *ast.ExportDeclaration) error
 	if exportDecl == nil {
 		return fmt.Errorf("export declaration is nil")
 	}
-	
+
 	// Manejar re-exports: export { foo } from 'module'
 	if exportDecl.Source != nil && len(exportDecl.Specifiers) > 0 {
 		sourceModuleStr := exportDecl.Source.Value.(string)
@@ -123,7 +139,7 @@ func (ir *ImportResolver) ResolveExport(exportDecl *ast.ExportDeclaration) error
 		if err != nil {
 			return fmt.Errorf("failed to resolve re-export source '%s': %w", sourceModuleStr, err)
 		}
-		
+
 		// Verificar que los símbolos existan en el módulo fuente
 		for _, spec := range exportDecl.Specifiers {
 			if _, exists := sourceModule.Exports[spec.Local.Name]; !exists {
@@ -131,7 +147,7 @@ func (ir *ImportResolver) ResolveExport(exportDecl *ast.ExportDeclaration) error
 			}
 		}
 	}
-	
+
 	return nil
 }
 
@@ -140,7 +156,7 @@ func (ir *ImportResolver) GetExportSymbol(module *ResolvedModule, exportName str
 	if module == nil {
 		return nil, fmt.Errorf("module is nil")
 	}
-	
+
 	if export, exists := module.Exports[exportName]; exists {
 		return &symbols.Symbol{
 			Name:     export.Name,
@@ -149,7 +165,7 @@ func (ir *ImportResolver) GetExportSymbol(module *ResolvedModule, exportName str
 			DeclSpan: export.Position,
 		}, nil
 	}
-	
+
 	return nil, fmt.Errorf("export '%s' not found in module '%s'", exportName, module.Specifier)
 }
 
@@ -160,6 +176,18 @@ func (ir *ImportResolver) getSymbolTypeFromExport(export *ExportInfo) symbols.Sy
 		return symbols.VariableSymbol
 	case "namespace":
 		return symbols.ModuleSymbol
+	default:
+		return symbols.VariableSymbol
+	}
+}
+
+// determineSymbolType determines the symbol type based on the AST node
+func (ir *ImportResolver) determineSymbolType(node ast.Node) symbols.SymbolType {
+	switch node.(type) {
+	case *ast.FunctionDeclaration:
+		return symbols.FunctionSymbol
+	case *ast.VariableDeclaration:
+		return symbols.VariableSymbol
 	default:
 		return symbols.VariableSymbol
 	}
