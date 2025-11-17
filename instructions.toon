@@ -39,14 +39,25 @@ phases[5]{name, duration_weeks, goals, deliverables, acceptance}:
       acceptance:
         - ⏳ "Projectos medianos (~10k LOC) checkean rápido con cache incremental (rechecks locales)."
 
+      completed_tasks:
+        - "✅ Sistema de tipos básico implementado (pkg/types/types.go)"
+        - "✅ Primitivos: any, unknown, void, never, undefined, null, boolean, number, string, symbol, bigint"
+        - "✅ Tipos compuestos: FunctionType, ArrayType, UnionType, IntersectionType, LiteralType, ObjectType"
+        - "✅ Objetos globales implementados (pkg/types/globals.go)"
+        - "✅ console, Math, Array, JSON, Object, Promise"
+        - "✅ Funciones globales (parseInt, parseFloat, isNaN, isFinite, setTimeout, setInterval)"
+        - "✅ Parser de arrays literales [1, 2, 3]"
+        - "✅ Checker actualizado para reconocer globales"
+
       next_tasks:
-        - "Implementar sistema de tipos básico (TypeID pool, primitivos: string, number, boolean, any, unknown, void)"
-        - "Agregar objetos globales (console, Object, Array, etc.)"
-        - "Type inference para variables con inicializador"
-        - "Type inference para return statements"
-        - "Validación de tipos en asignaciones y operaciones binarias"
-        - "Soporte para arrays y objetos literales"
-        - "Union types básicos"
+        - "⏳ Implementar objetos literales { key: value } (requiere disambiguación con bloques)"
+        - "⏳ Type inference para variables con inicializador"
+        - "⏳ Type inference para return statements"
+        - "⏳ Validación de tipos en asignaciones"
+        - "⏳ Validación de tipos en operaciones binarias"
+        - "⏳ Union types básicos"
+        - "⏳ Arrow functions"
+        - "⏳ Soporte para clases básicas"
 
   - Avanzado,12:
       goals:

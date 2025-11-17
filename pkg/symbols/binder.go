@@ -54,8 +54,28 @@ func (b *Binder) bindVariableDeclaration(decl *ast.VariableDeclaration) {
 
 	for _, declarator := range decl.Decls {
 		if declarator.ID != nil {
+			// Check if the initializer is a function (arrow or regular)
+			symbolType := VariableSymbol
+			isFunction := false
+			var params []string
+
+			if declarator.Init != nil {
+				switch init := declarator.Init.(type) {
+				case *ast.ArrowFunctionExpression:
+					symbolType = FunctionSymbol
+					isFunction = true
+					for _, param := range init.Params {
+						if param.ID != nil {
+							params = append(params, param.ID.Name)
+						}
+					}
+				}
+			}
+
 			// Define the variable symbol
-			b.table.DefineSymbol(declarator.ID.Name, VariableSymbol, declarator, mutable)
+			symbol := b.table.DefineSymbol(declarator.ID.Name, symbolType, declarator, mutable)
+			symbol.IsFunction = isFunction
+			symbol.Params = params
 
 			// If there's an initializer, bind it
 			if declarator.Init != nil {
@@ -147,6 +167,8 @@ func (b *Binder) bindExpression(expr ast.Expression) {
 		for _, prop := range e.Properties {
 			b.bindExpression(prop.Value)
 		}
+	case *ast.ArrowFunctionExpression:
+		b.bindArrowFunction(e)
 	default:
 		// Unknown expression type
 		fmt.Printf("Warning: Unknown expression type: %T\n", expr)
@@ -263,6 +285,29 @@ func (b *Binder) bindExportDeclaration(decl *ast.ExportDeclaration) {
 			}
 		}
 	}
+}
+
+func (b *Binder) bindArrowFunction(arrow *ast.ArrowFunctionExpression) {
+	// Create a new scope for the arrow function
+	b.table.EnterScope(arrow)
+
+	// Define parameters in the function scope
+	for _, param := range arrow.Params {
+		if param.ID != nil {
+			b.table.DefineSymbol(param.ID.Name, ParameterSymbol, param, false)
+		}
+	}
+
+	// Bind the body
+	switch body := arrow.Body.(type) {
+	case *ast.BlockStatement:
+		b.bindBlockStatement(body)
+	case ast.Expression:
+		b.bindExpression(body)
+	}
+
+	// Exit the function scope
+	b.table.ExitScope()
 }
 
 // GetSymbolTable returns the symbol table

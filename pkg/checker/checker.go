@@ -265,6 +265,8 @@ func (tc *TypeChecker) checkExpression(expr ast.Expression, filename string) {
 		for _, prop := range e.Properties {
 			tc.checkExpression(prop.Value, filename)
 		}
+	case *ast.ArrowFunctionExpression:
+		tc.checkArrowFunction(e, filename)
 	default:
 		// Unknown expression type
 		tc.addError(filename, expr.Pos().Line, expr.Pos().Column,
@@ -316,6 +318,46 @@ func (tc *TypeChecker) checkCallExpression(call *ast.CallExpression, filename st
 				}
 			}
 		}
+	}
+}
+
+func (tc *TypeChecker) checkArrowFunction(arrow *ast.ArrowFunctionExpression, filename string) {
+	// Create a new scope for the arrow function
+	arrowScope := tc.findScopeForNode(arrow)
+	if arrowScope == nil {
+		// If no scope exists, create one temporarily
+		tc.symbolTable.EnterScope(arrow)
+
+		// Define parameters in the function scope
+		for _, param := range arrow.Params {
+			if param.ID != nil {
+				tc.symbolTable.DefineSymbol(param.ID.Name, symbols.ParameterSymbol, param, false)
+			}
+		}
+
+		// Check the body
+		switch body := arrow.Body.(type) {
+		case *ast.BlockStatement:
+			tc.checkBlockStatement(body, filename)
+		case ast.Expression:
+			tc.checkExpression(body, filename)
+		}
+
+		tc.symbolTable.ExitScope()
+	} else {
+		// Use existing scope
+		originalScope := tc.symbolTable.Current
+		tc.symbolTable.Current = arrowScope
+
+		// Check the body
+		switch body := arrow.Body.(type) {
+		case *ast.BlockStatement:
+			tc.checkBlockStatement(body, filename)
+		case ast.Expression:
+			tc.checkExpression(body, filename)
+		}
+
+		tc.symbolTable.Current = originalScope
 	}
 }
 

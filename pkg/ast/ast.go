@@ -330,3 +330,17 @@ type Property struct {
 func (p Property) Type() string { return "Property" }
 func (p Property) Pos() Position { return p.Position }
 func (p Property) End() Position { return p.EndPos }
+
+// ArrowFunctionExpression represents an arrow function (x) => expr
+type ArrowFunctionExpression struct {
+	Params   []*Parameter
+	Body     Node // Can be Expression or BlockStatement
+	Async    bool
+	Position Position
+	EndPos   Position
+}
+
+func (a *ArrowFunctionExpression) Type() string { return "ArrowFunctionExpression" }
+func (a *ArrowFunctionExpression) Pos() Position { return a.Position }
+func (a *ArrowFunctionExpression) End() Position { return a.EndPos }
+func (a *ArrowFunctionExpression) exprNode()     {}

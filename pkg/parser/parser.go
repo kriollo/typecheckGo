@@ -512,8 +512,67 @@ func (p *parser) parseMemberExpression() (ast.Expression, error) {
 func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 	p.skipWhitespaceAndComments()
 
-	// Handle parentheses
+	// Handle parentheses (could be grouped expression or arrow function params)
 	if p.match("(") {
+		savedPos := p.pos
+
+		// Try to parse as arrow function parameters
+		p.advance()
+		p.skipWhitespaceAndComments()
+
+		// Check if this looks like arrow function params
+		isArrowFunc := false
+		if p.match(")") {
+			// Empty params () => ...
+			p.advance()
+			p.skipWhitespaceAndComments()
+			if p.match("=") && p.peek(1) == ">" {
+				isArrowFunc = true
+			}
+		} else if p.matchIdentifier() {
+			// Could be (x) => ... or (x, y) => ...
+			// Save position and try to parse params
+			tempPos := p.pos
+			for !p.match(")") && !p.isAtEnd() {
+				if p.matchIdentifier() {
+					p.advanceWord()
+					p.skipWhitespaceAndComments()
+					if p.match(":") {
+						// Type annotation
+						p.advance()
+						p.skipWhitespaceAndComments()
+						// Skip type
+						for !p.match(",") && !p.match(")") && !p.isAtEnd() {
+							p.advance()
+						}
+					}
+					if p.match(",") {
+						p.advance()
+						p.skipWhitespaceAndComments()
+					}
+				} else {
+					break
+				}
+			}
+			if p.match(")") {
+				p.advance()
+				p.skipWhitespaceAndComments()
+				if p.match("=") && p.peek(1) == ">" {
+					isArrowFunc = true
+				}
+			}
+			// Restore position
+			p.pos = tempPos
+		}
+
+		if isArrowFunc {
+			// Reset to start and parse as arrow function
+			p.pos = savedPos
+			return p.parseArrowFunction()
+		}
+
+		// Reset and parse as grouped expression
+		p.pos = savedPos
 		p.advance()
 		p.skipWhitespaceAndComments()
 
@@ -529,6 +588,22 @@ func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 		p.advance()
 
 		return expr, nil
+	}
+
+	// Single identifier arrow function: x => expr
+	if p.matchIdentifier() {
+		savedPos := p.pos
+		p.advanceWord()
+		p.skipWhitespaceAndComments()
+
+		if p.match("=") && p.peek(1) == ">" {
+			// This is an arrow function
+			p.pos = savedPos
+			return p.parseArrowFunction()
+		}
+
+		// Not an arrow function, restore and parse as identifier
+		p.pos = savedPos
 	}
 
 	if p.matchKeyword("true", "false") {
@@ -1330,6 +1405,117 @@ func (p *parser) parseObjectLiteral() (*ast.ObjectExpression, error) {
 		Properties: properties,
 		Position:   startPos,
 		EndPos:     p.currentPos(),
+	}, nil
+}
+
+// parseArrowFunction parses an arrow function expression
+func (p *parser) parseArrowFunction() (*ast.ArrowFunctionExpression, error) {
+	startPos := p.currentPos()
+
+	var params []*ast.Parameter
+
+	// Parse parameters
+	if p.match("(") {
+		p.advance()
+		p.skipWhitespaceAndComments()
+
+		// Parse parameter list
+		for !p.match(")") && !p.isAtEnd() {
+			id, err := p.parseIdentifier()
+			if err != nil {
+				return nil, err
+			}
+
+			// Handle optional type annotation
+			var paramType ast.TypeNode
+			p.skipWhitespaceAndComments()
+			if p.match(":") {
+				p.advance()
+				p.skipWhitespaceAndComments()
+
+				// Parse type annotation (simplified)
+				typeName, err := p.parseIdentifier()
+				if err != nil {
+					return nil, err
+				}
+
+				paramType = &ast.TypeReference{
+					Name:     typeName.Name,
+					Position: typeName.Pos(),
+					EndPos:   typeName.End(),
+				}
+			}
+
+			param := &ast.Parameter{
+				ID:        id,
+				ParamType: paramType,
+				Position:  id.Pos(),
+				EndPos:    p.currentPos(),
+			}
+
+			params = append(params, param)
+
+			p.skipWhitespaceAndComments()
+			if p.match(",") {
+				p.advance()
+				p.skipWhitespaceAndComments()
+			}
+		}
+
+		if !p.match(")") {
+			return nil, fmt.Errorf("expected ')' after arrow function parameters")
+		}
+		p.advance()
+	} else if p.matchIdentifier() {
+		// Single parameter without parentheses
+		id, err := p.parseIdentifier()
+		if err != nil {
+			return nil, err
+		}
+
+		param := &ast.Parameter{
+			ID:       id,
+			Position: id.Pos(),
+			EndPos:   id.End(),
+		}
+
+		params = append(params, param)
+	}
+
+	p.skipWhitespaceAndComments()
+
+	// Expect =>
+	if !p.match("=") || p.peek(1) != ">" {
+		return nil, fmt.Errorf("expected '=>' in arrow function")
+	}
+	p.advance() // =
+	p.advance() // >
+	p.skipWhitespaceAndComments()
+
+	// Parse body (can be expression or block)
+	var body ast.Node
+	var err error
+
+	if p.match("{") {
+		// Block body
+		body, err = p.parseBlockStatement()
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		// Expression body
+		expr, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		body = expr
+	}
+
+	return &ast.ArrowFunctionExpression{
+		Params:   params,
+		Body:     body,
+		Position: startPos,
+		EndPos:   p.currentPos(),
 	}, nil
 }
 
