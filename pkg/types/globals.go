@@ -186,6 +186,17 @@ func NewGlobalEnvironment() *GlobalEnvironment {
 	env.Objects["NaN"] = Number
 	env.Objects["Infinity"] = Number
 
+	// Register utility types
+	utilityTypes := []string{
+		"Partial", "Required", "Readonly", "Pick", "Omit", "Record",
+		"Exclude", "Extract", "NonNullable", "ReturnType", "Parameters", "Awaited",
+	}
+	for _, name := range utilityTypes {
+		if ut := GetUtilityType(name); ut != nil {
+			env.Types[name] = ut
+		}
+	}
+
 	return env
 }
 

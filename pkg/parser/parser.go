@@ -787,6 +787,73 @@ func (p *parser) parsePostfixExpression() (ast.Expression, error) {
 func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 	p.skipWhitespaceAndComments()
 
+	// Check for generic arrow function: <T>(x: T) => T or <T = unknown>(x: T) => T
+	if p.match("<") {
+		savedPos := p.pos
+		p.advance()
+		p.skipWhitespaceAndComments()
+
+		// Try to determine if this is a generic arrow function
+		// Look for pattern: <identifier [extends ...] [= ...]>
+		isGenericArrow := false
+		if p.matchIdentifier() {
+			// Skip type parameter name
+			p.advanceWord()
+			p.skipWhitespaceAndComments()
+
+			// Skip extends clause if present
+			if p.match("extends") {
+				p.advanceString(7)
+				p.skipWhitespaceAndComments()
+				p.skipTypeAnnotation()
+				p.skipWhitespaceAndComments()
+			}
+
+			// Skip default type if present
+			if p.match("=") {
+				p.advance()
+				p.skipWhitespaceAndComments()
+				p.skipTypeAnnotation()
+				p.skipWhitespaceAndComments()
+			}
+
+			// Check for comma (multiple type params) or closing >
+			if p.match(",") || p.match(">") {
+				// Skip remaining type parameters
+				depth := 1
+				for depth > 0 && !p.isAtEnd() {
+					if p.match("<") {
+						depth++
+						p.advance()
+					} else if p.match(">") {
+						depth--
+						p.advance()
+						if depth == 0 {
+							break
+						}
+					} else {
+						p.advance()
+					}
+				}
+
+				p.skipWhitespaceAndComments()
+
+				// Check if followed by (
+				if p.match("(") {
+					isGenericArrow = true
+				}
+			}
+		}
+
+		if isGenericArrow {
+			p.pos = savedPos
+			return p.parseArrowFunction()
+		}
+
+		// Not a generic arrow function, restore
+		p.pos = savedPos
+	}
+
 	// Handle parentheses (could be grouped expression or arrow function params)
 	if p.match("(") {
 		savedPos := p.pos
@@ -1701,6 +1768,39 @@ func (p *parser) parseArrowFunction() (*ast.ArrowFunctionExpression, error) {
 
 	var params []*ast.Parameter
 
+	// Check for generic type parameters <T, U>
+	if p.match("<") {
+		// Try to parse type parameters
+		savedPos := p.pos
+		p.advance()
+		p.skipWhitespaceAndComments()
+
+		// Simple heuristic: if we see identifier followed by extends, comma, or >
+		// then it's likely a type parameter
+		if p.matchIdentifier() {
+			// Skip type parameters for now - just consume them
+			depth := 1
+			for depth > 0 && !p.isAtEnd() {
+				if p.match("<") {
+					depth++
+					p.advance()
+				} else if p.match(">") {
+					depth--
+					p.advance()
+					if depth == 0 {
+						break
+					}
+				} else {
+					p.advance()
+				}
+			}
+			p.skipWhitespaceAndComments()
+		} else {
+			// Not type parameters, restore position
+			p.pos = savedPos
+		}
+	}
+
 	// Parse parameters
 	if p.match("(") {
 		p.advance()
@@ -2179,6 +2279,81 @@ func (p *parser) parseTypeAnnotationFull() (ast.TypeNode, error) {
 
 	p.skipWhitespaceAndComments()
 
+	// Check for conditional type: T extends U ? X : Y
+	// Only parse as conditional if we see "extends" followed by "?"
+	if p.match("extends") {
+		savedPos := p.pos
+		p.advanceString(7)
+		p.skipWhitespaceAndComments()
+
+		extendsType, err := p.parseTypeAnnotationPrimary()
+		if err != nil {
+			p.pos = savedPos
+			return firstType, nil
+		}
+
+		p.skipWhitespaceAndComments()
+
+		// Check if this is actually a conditional type (has ?)
+		if p.match("?") {
+			p.advance()
+			p.skipWhitespaceAndComments()
+
+			trueType, err := p.parseTypeAnnotationFull()
+			if err != nil {
+				return nil, err
+			}
+
+			p.skipWhitespaceAndComments()
+			if !p.match(":") {
+				return nil, fmt.Errorf("expected ':' in conditional type")
+			}
+			p.advance()
+			p.skipWhitespaceAndComments()
+
+			falseType, err := p.parseTypeAnnotationFull()
+			if err != nil {
+				return nil, err
+			}
+
+			return &ast.ConditionalType{
+				CheckType:   firstType,
+				ExtendsType: extendsType,
+				TrueType:    trueType,
+				FalseType:   falseType,
+				Position:    startPos,
+				EndPos:      p.currentPos(),
+			}, nil
+		} else {
+			// Not a conditional type, restore position
+			p.pos = savedPos
+		}
+	}
+
+	// Check for indexed access type: T[K]
+	if p.match("[") {
+		p.advance()
+		p.skipWhitespaceAndComments()
+
+		indexType, err := p.parseTypeAnnotationFull()
+		if err != nil {
+			return nil, err
+		}
+
+		p.skipWhitespaceAndComments()
+		if !p.match("]") {
+			return nil, fmt.Errorf("expected ']' in indexed access type")
+		}
+		p.advance()
+
+		return &ast.IndexedAccessType{
+			ObjectType: firstType,
+			IndexType:  indexType,
+			Position:   startPos,
+			EndPos:     p.currentPos(),
+		}, nil
+	}
+
 	// Check for union (|) or intersection (&)
 	if p.match("|") {
 		// Union type
@@ -2233,6 +2408,107 @@ func (p *parser) parseTypeAnnotationFull() (ast.TypeNode, error) {
 func (p *parser) parseTypeAnnotationPrimary() (ast.TypeNode, error) {
 	startPos := p.currentPos()
 
+	// Template literal type `prefix${T}suffix`
+	if p.match("`") {
+		return p.parseTemplateLiteralType()
+	}
+
+	// Mapped type or object type { [K in T]: U } or { key: Type }
+	if p.match("{") {
+		savedPos := p.pos
+		p.advance()
+		p.skipWhitespaceAndComments()
+
+		// Check for mapped type: { [K in T]: U }
+		if p.match("[") {
+			p.advance()
+			p.skipWhitespaceAndComments()
+
+			if p.matchIdentifier() {
+				typeParam, err := p.parseIdentifier()
+				if err != nil {
+					return nil, err
+				}
+
+				p.skipWhitespaceAndComments()
+				if p.match("in") {
+					p.advanceString(2)
+					p.skipWhitespaceAndComments()
+
+					// This is a mapped type
+					constraint, err := p.parseTypeAnnotationFull()
+					if err != nil {
+						return nil, err
+					}
+
+					p.skipWhitespaceAndComments()
+					if !p.match("]") {
+						return nil, fmt.Errorf("expected ']' in mapped type")
+					}
+					p.advance()
+
+					p.skipWhitespaceAndComments()
+
+					// Check for optional modifier ?
+					optional := false
+					if p.match("?") {
+						optional = true
+						p.advance()
+						p.skipWhitespaceAndComments()
+					}
+
+					if !p.match(":") {
+						return nil, fmt.Errorf("expected ':' in mapped type")
+					}
+					p.advance()
+					p.skipWhitespaceAndComments()
+
+					mappedType, err := p.parseTypeAnnotationFull()
+					if err != nil {
+						return nil, err
+					}
+
+					p.skipWhitespaceAndComments()
+					if !p.match("}") {
+						return nil, fmt.Errorf("expected '}' in mapped type")
+					}
+					p.advance()
+
+					return &ast.MappedType{
+						TypeParameter: typeParam,
+						Constraint:    constraint,
+						MappedType:    mappedType,
+						Optional:      optional,
+						Position:      startPos,
+						EndPos:        p.currentPos(),
+					}, nil
+				}
+			}
+		}
+
+		// Not a mapped type, restore and parse as object type
+		p.pos = savedPos
+		// For now, just skip object types
+		depth := 1
+		p.advance()
+		for depth > 0 && !p.isAtEnd() {
+			if p.match("{") {
+				depth++
+				p.advance()
+			} else if p.match("}") {
+				depth--
+				p.advance()
+			} else {
+				p.advance()
+			}
+		}
+		return &ast.TypeReference{
+			Name:     "object",
+			Position: startPos,
+			EndPos:   p.currentPos(),
+		}, nil
+	}
+
 	// String literal type ('foo')
 	if p.matchString() {
 		str, err := p.parseStringLiteral()
@@ -2251,6 +2527,24 @@ func (p *parser) parseTypeAnnotationPrimary() (ast.TypeNode, error) {
 		num := p.advanceNumber()
 		return &ast.LiteralType{
 			Value:    num,
+			Position: startPos,
+			EndPos:   p.currentPos(),
+		}, nil
+	}
+
+	// keyof operator
+	if p.match("keyof") {
+		p.advanceString(5)
+		p.skipWhitespaceAndComments()
+
+		operand, err := p.parseTypeAnnotationPrimary()
+		if err != nil {
+			return nil, err
+		}
+
+		// Return a type reference with "keyof" prefix
+		return &ast.TypeReference{
+			Name:     "keyof " + operand.(*ast.TypeReference).Name,
 			Position: startPos,
 			EndPos:   p.currentPos(),
 		}, nil
@@ -2281,4 +2575,62 @@ func (p *parser) parseTypeAnnotationPrimary() (ast.TypeNode, error) {
 	}
 
 	return nil, fmt.Errorf("expected type annotation")
+}
+
+// parseTemplateLiteralType parses a template literal type `prefix${T}suffix`
+func (p *parser) parseTemplateLiteralType() (ast.TypeNode, error) {
+	startPos := p.currentPos()
+
+	if !p.match("`") {
+		return nil, fmt.Errorf("expected '`' at start of template literal type")
+	}
+	p.advance()
+
+	var parts []string
+	var types []ast.TypeNode
+	currentPart := ""
+
+	for !p.match("`") && !p.isAtEnd() {
+		if p.match("$") && p.peek(1) == "{" {
+			// Save current part
+			parts = append(parts, currentPart)
+			currentPart = ""
+
+			// Skip ${
+			p.advance()
+			p.advance()
+			p.skipWhitespaceAndComments()
+
+			// Parse type
+			typ, err := p.parseTypeAnnotationFull()
+			if err != nil {
+				return nil, err
+			}
+			types = append(types, typ)
+
+			p.skipWhitespaceAndComments()
+			if !p.match("}") {
+				return nil, fmt.Errorf("expected '}' in template literal type")
+			}
+			p.advance()
+		} else {
+			currentPart += string(p.current())
+			p.advance()
+		}
+	}
+
+	// Add final part
+	parts = append(parts, currentPart)
+
+	if !p.match("`") {
+		return nil, fmt.Errorf("expected '`' at end of template literal type")
+	}
+	p.advance()
+
+	return &ast.TemplateLiteralType{
+		Parts:    parts,
+		Types:    types,
+		Position: startPos,
+		EndPos:   p.currentPos(),
+	}, nil
 }
