@@ -54,16 +54,51 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		rootDir = filepath.Dir(absPath)
 	}
 
+	// Find tsconfig.json by walking up the directory tree
+	configDir := rootDir
+	for {
+		configPath := filepath.Join(configDir, "tsconfig.json")
+		if _, err := os.Stat(configPath); err == nil {
+			rootDir = configDir
+			break
+		}
+
+		parent := filepath.Dir(configDir)
+		if parent == configDir {
+			// Reached root, no tsconfig.json found
+			break
+		}
+		configDir = parent
+	}
+
 	// Load tsconfig.json if it exists
 	tsConfig, err := config.LoadTSConfig(rootDir)
 	if err != nil {
-		fmt.Printf("Warning: Failed to load tsconfig.json: %v\n", err)
-		fmt.Println("Using default configuration...")
+		// Silently use default configuration
 		tsConfig = config.GetDefaultConfig()
 	}
 
 	// Create type checker with module resolution
 	typeChecker := checker.NewWithModuleResolver(rootDir)
+
+	// Configure type checker with tsconfig options
+	checkerConfig := &checker.CompilerConfig{
+		NoImplicitAny:              tsConfig.CompilerOptions.NoImplicitAny || tsConfig.CompilerOptions.Strict,
+		StrictNullChecks:           tsConfig.CompilerOptions.StrictNullChecks || tsConfig.CompilerOptions.Strict,
+		StrictFunctionTypes:        tsConfig.CompilerOptions.StrictFunctionTypes || tsConfig.CompilerOptions.Strict,
+		NoUnusedLocals:             tsConfig.CompilerOptions.NoUnusedLocals,
+		NoUnusedParameters:         tsConfig.CompilerOptions.NoUnusedParameters,
+		NoImplicitReturns:          tsConfig.CompilerOptions.NoImplicitReturns,
+		NoImplicitThis:             tsConfig.CompilerOptions.NoImplicitThis || tsConfig.CompilerOptions.Strict,
+		StrictBindCallApply:        tsConfig.CompilerOptions.StrictBindCallApply || tsConfig.CompilerOptions.Strict,
+		StrictPropertyInitialization: tsConfig.CompilerOptions.StrictPropertyInitialization || tsConfig.CompilerOptions.Strict,
+		AlwaysStrict:               tsConfig.CompilerOptions.AlwaysStrict || tsConfig.CompilerOptions.Strict,
+		AllowUnreachableCode:       tsConfig.CompilerOptions.AllowUnreachableCode,
+		AllowUnusedLabels:          tsConfig.CompilerOptions.AllowUnusedLabels,
+		NoFallthroughCasesInSwitch: tsConfig.CompilerOptions.NoFallthroughCasesInSwitch,
+		NoUncheckedIndexedAccess:   tsConfig.CompilerOptions.NoUncheckedIndexedAccess,
+	}
+	typeChecker.SetConfig(checkerConfig)
 
 	// Process files
 	if info.IsDir() {

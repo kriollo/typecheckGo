@@ -11,11 +11,15 @@ go build -o tscheck
 # Check a file
 ./tscheck check myfile.ts
 
-# Check a directory
+# Check a directory (automatically loads tsconfig.json if present)
 ./tscheck check ./src
 
 # View AST
 ./tscheck ast myfile.ts
+
+# Output formats
+./tscheck check file.ts -f json  # JSON format
+./tscheck check file.ts -f toon  # TOON format
 ```
 
 ## 📸 Example Output
@@ -110,7 +114,7 @@ Checked 18 files in 6ms. Found errors in 2 file(s).
 - **Multiple Output Formats**: Supports text, JSON, and TOON output formats
 - **Modular Architecture**: Clean separation between parsing, symbol binding, module resolution, and type checking
 
-### Phase 2: Intermediate (🔄 IN PROGRESS - 75%)
+### Phase 2: Intermediate (🔄 IN PROGRESS - 85%)
 - **Type System**: Comprehensive type system with primitives and composite types
   - Primitives: string, number, boolean, any, unknown, void, never, undefined, null, symbol, bigint
   - Composite: Function, Array, Union, Intersection, Literal, Object
@@ -127,6 +131,11 @@ Checked 18 files in 6ms. Found errors in 2 file(s).
   - Typo detection with Levenshtein distance algorithm
   - Context-aware suggestions for type conversions
   - Parameter information for function calls
+- **TSConfig Support**: Automatic loading and parsing of tsconfig.json
+  - Compiler options (target, module, strict, allowJs, etc.)
+  - Path aliases (baseUrl, paths)
+  - Type roots configuration
+  - Extends support for configuration inheritance
 
 ## Installation
 
@@ -243,6 +252,62 @@ let z = message();
 // Sugerencia: Considera convertir el string a número usando Number() o parseInt()
 let num = 10;
 num = "hello";
+```
+
+## TSConfig Support
+
+The type checker automatically loads `tsconfig.json` from the project root. Supported options:
+
+### Compiler Options
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "allowJs": false,
+    "baseUrl": "./",
+    "paths": {
+      "@/*": ["src/*"],
+      "@utils/*": ["src/utils/*"]
+    },
+    "typeRoots": ["./node_modules/@types", "./types"]
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
+```
+
+### Supported Features
+
+- ✅ **Path Aliases**: Resolve imports using `baseUrl` and `paths`
+- ✅ **Type Roots**: Configure directories for type definitions
+- ✅ **Extends**: Inherit configuration from other files
+- ✅ **Include/Exclude**: File patterns (basic support)
+- ✅ **AllowJs**: Check JavaScript files when enabled
+- ⏳ **Strict Mode**: Full enforcement coming soon
+
+### Example
+
+```bash
+# Create tsconfig.json
+cat > tsconfig.json << EOF
+{
+  "compilerOptions": {
+    "strict": true,
+    "baseUrl": "./",
+    "paths": {
+      "@/*": ["src/*"]
+    }
+  }
+}
+EOF
+
+# Check project (automatically uses tsconfig.json)
+./tscheck check ./src
 ```
 
 ## Development

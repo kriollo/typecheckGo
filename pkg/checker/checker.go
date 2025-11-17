@@ -21,7 +21,25 @@ type TypeChecker struct {
 	varTypeCache    map[string]*types.Type // Cache types by variable name
 	inferencer      *types.TypeInferencer
 	currentFunction *ast.FunctionDeclaration // Track current function for return type checking
-	config          interface{}              // TSConfig - using interface{} to avoid circular import
+	config          *CompilerConfig          // Compiler configuration
+}
+
+// CompilerConfig holds the compiler options for type checking
+type CompilerConfig struct {
+	NoImplicitAny              bool
+	StrictNullChecks           bool
+	StrictFunctionTypes        bool
+	NoUnusedLocals             bool
+	NoUnusedParameters         bool
+	NoImplicitReturns          bool
+	NoImplicitThis             bool
+	StrictBindCallApply        bool
+	StrictPropertyInitialization bool
+	AlwaysStrict               bool
+	AllowUnreachableCode       bool
+	AllowUnusedLabels          bool
+	NoFallthroughCasesInSwitch bool
+	NoUncheckedIndexedAccess   bool
 }
 
 // TypeError represents a type checking error
@@ -52,6 +70,27 @@ func New() *TypeChecker {
 		typeCache:    typeCache,
 		varTypeCache: make(map[string]*types.Type),
 		inferencer:   inferencer,
+		config:       getDefaultConfig(),
+	}
+}
+
+// getDefaultConfig returns default compiler configuration
+func getDefaultConfig() *CompilerConfig {
+	return &CompilerConfig{
+		NoImplicitAny:              false,
+		StrictNullChecks:           false,
+		StrictFunctionTypes:        false,
+		NoUnusedLocals:             false,
+		NoUnusedParameters:         false,
+		NoImplicitReturns:          false,
+		NoImplicitThis:             false,
+		StrictBindCallApply:        false,
+		StrictPropertyInitialization: false,
+		AlwaysStrict:               false,
+		AllowUnreachableCode:       true,
+		AllowUnusedLabels:          true,
+		NoFallthroughCasesInSwitch: false,
+		NoUncheckedIndexedAccess:   false,
 	}
 }
 
@@ -70,6 +109,7 @@ func NewWithModuleResolver(rootDir string) *TypeChecker {
 		moduleResolver: moduleResolver,
 		globalEnv:      globalEnv,
 		typeCache:      typeCache,
+		config:         getDefaultConfig(),
 		varTypeCache:   make(map[string]*types.Type),
 		inferencer:     inferencer,
 	}
@@ -150,6 +190,16 @@ func (tc *TypeChecker) checkVariableDeclaration(decl *ast.VariableDeclaration, f
 					fmt.Sprintf("Invalid identifier: '%s'", declarator.ID.Name), "TS1003", "error")
 			}
 
+			// Check for implicit any
+			if tc.GetConfig().NoImplicitAny {
+				// If no type annotation and no initializer, it's implicit any
+				if declarator.TypeAnnotation == nil && declarator.Init == nil {
+					tc.addError(filename, declarator.ID.Pos().Line, declarator.ID.Pos().Column,
+						fmt.Sprintf("Variable '%s' implicitly has an 'any' type.", declarator.ID.Name),
+						"TS7005", "error")
+				}
+			}
+
 			// Infer type from initializer if present
 			if declarator.Init != nil {
 				tc.checkExpression(declarator.Init, filename)
@@ -157,12 +207,26 @@ func (tc *TypeChecker) checkVariableDeclaration(decl *ast.VariableDeclaration, f
 				// Infer the type of the initializer
 				inferredType := tc.inferencer.InferType(declarator.Init)
 
+				// Check if inferred type is 'any' and noImplicitAny is enabled
+				if tc.GetConfig().NoImplicitAny && inferredType.Kind == types.AnyType {
+					// Only report if there's no explicit type annotation
+					if declarator.TypeAnnotation == nil {
+						tc.addError(filename, declarator.ID.Pos().Line, declarator.ID.Pos().Column,
+							fmt.Sprintf("Variable '%s' implicitly has an 'any' type.", declarator.ID.Name),
+							"TS7005", "error")
+					}
+				}
+
 				// Store the inferred type in the cache
 				tc.typeCache[declarator] = inferredType
 				tc.typeCache[declarator.ID] = inferredType
 
 				// Also store it by variable name for easy lookup
 				tc.varTypeCache[declarator.ID.Name] = inferredType
+			} else if declarator.TypeAnnotation == nil {
+				// No initializer and no type annotation - implicit any
+				tc.typeCache[declarator.ID] = types.Any
+				tc.varTypeCache[declarator.ID.Name] = types.Any
 			}
 		}
 	}
@@ -175,12 +239,19 @@ func (tc *TypeChecker) checkFunctionDeclaration(decl *ast.FunctionDeclaration, f
 			fmt.Sprintf("Invalid function name: '%s'", decl.ID.Name), "TS1003", "error")
 	}
 
-	// Check parameter names
+	// Check parameter names and types
 	for _, param := range decl.Params {
 		if param.ID != nil {
 			if !isValidIdentifier(param.ID.Name) {
 				tc.addError(filename, param.ID.Pos().Line, param.ID.Pos().Column,
 					fmt.Sprintf("Invalid parameter name: '%s'", param.ID.Name), "TS1003", "error")
+			}
+
+			// Check for implicit any in parameters
+			if tc.GetConfig().NoImplicitAny && param.ParamType == nil {
+				tc.addError(filename, param.ID.Pos().Line, param.ID.Pos().Column,
+					fmt.Sprintf("Parameter '%s' implicitly has an 'any' type.", param.ID.Name),
+					"TS7006", "error")
 			}
 		}
 	}
@@ -1061,4 +1132,25 @@ func (tc *TypeChecker) checkInterfaceDeclaration(decl *ast.InterfaceDeclaration,
 		tc.addError(filename, decl.ID.Pos().Line, decl.ID.Pos().Column,
 			fmt.Sprintf("Invalid interface name: '%s'", decl.ID.Name), "TS1003", "error")
 	}
+}
+
+// SetConfig configures the type checker with compiler options
+func (tc *TypeChecker) SetConfig(config *CompilerConfig) {
+	tc.config = config
+}
+
+// SetConfigFromTSConfig configures the type checker from a tsconfig.json structure
+func (tc *TypeChecker) SetConfigFromTSConfig(tsconfig interface{}) {
+	// This method accepts interface{} to avoid circular imports
+	// The actual TSConfig struct should be passed from the caller
+	// For now, we'll use reflection or type assertion if needed
+	tc.config = getDefaultConfig()
+}
+
+// GetConfig returns the current compiler configuration
+func (tc *TypeChecker) GetConfig() *CompilerConfig {
+	if tc.config == nil {
+		tc.config = getDefaultConfig()
+	}
+	return tc.config
 }

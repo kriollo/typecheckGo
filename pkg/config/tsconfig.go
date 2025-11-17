@@ -19,33 +19,107 @@ type TSConfig struct {
 // CompilerOptions represents the compiler options in tsconfig.json
 type CompilerOptions struct {
 	// Module resolution
-	BaseUrl           string            `json:"baseUrl"`
+	BaseUrl           string              `json:"baseUrl"`
 	Paths             map[string][]string `json:"paths"`
-	RootDir           string            `json:"rootDir"`
-	TypeRoots         []string          `json:"typeRoots"`
-	Types             []string          `json:"types"`
-	ModuleResolution  string            `json:"moduleResolution"`
+	RootDir           string              `json:"rootDir"`
+	TypeRoots         []string            `json:"typeRoots"`
+	Types             []string            `json:"types"`
+	ModuleResolution  string              `json:"moduleResolution"`
 
-	// Type checking
-	Strict            bool              `json:"strict"`
-	NoImplicitAny     bool              `json:"noImplicitAny"`
-	StrictNullChecks  bool              `json:"strictNullChecks"`
-	StrictFunctionTypes bool            `json:"strictFunctionTypes"`
-	NoUnusedLocals    bool              `json:"noUnusedLocals"`
-	NoUnusedParameters bool             `json:"noUnusedParameters"`
-	NoImplicitReturns bool              `json:"noImplicitReturns"`
+	// Type checking - Strict mode flags
+	Strict                     bool `json:"strict"`
+	NoImplicitAny              bool `json:"noImplicitAny"`
+	StrictNullChecks           bool `json:"strictNullChecks"`
+	StrictFunctionTypes        bool `json:"strictFunctionTypes"`
+	StrictBindCallApply        bool `json:"strictBindCallApply"`
+	StrictPropertyInitialization bool `json:"strictPropertyInitialization"`
+	NoImplicitThis             bool `json:"noImplicitThis"`
+	AlwaysStrict               bool `json:"alwaysStrict"`
 
-	// Output
-	OutDir            string            `json:"outDir"`
-	RootDirs          []string          `json:"rootDirs"`
+	// Additional type checking
+	NoUnusedLocals             bool `json:"noUnusedLocals"`
+	NoUnusedParameters         bool `json:"noUnusedParameters"`
+	NoImplicitReturns          bool `json:"noImplicitReturns"`
+	NoFallthroughCasesInSwitch bool `json:"noFallthroughCasesInSwitch"`
+	NoUncheckedIndexedAccess   bool `json:"noUncheckedIndexedAccess"`
+	NoImplicitOverride         bool `json:"noImplicitOverride"`
+	NoPropertyAccessFromIndexSignature bool `json:"noPropertyAccessFromIndexSignature"`
+	AllowUnusedLabels          bool `json:"allowUnusedLabels"`
+	AllowUnreachableCode       bool `json:"allowUnreachableCode"`
+	ExactOptionalPropertyTypes bool `json:"exactOptionalPropertyTypes"`
 
-	// Other
-	Target            string            `json:"target"`
-	Module            string            `json:"module"`
-	Lib               []string          `json:"lib"`
-	AllowJs           bool              `json:"allowJs"`
-	CheckJs           bool              `json:"checkJs"`
-	SkipLibCheck      bool              `json:"skipLibCheck"`
+	// Module & Resolution
+	Module               string   `json:"module"`
+	ModuleSuffixes       []string `json:"moduleSuffixes"`
+	ResolveJsonModule    bool     `json:"resolveJsonModule"`
+	NoResolve            bool     `json:"noResolve"`
+	AllowArbitraryExtensions bool `json:"allowArbitraryExtensions"`
+
+	// JavaScript support
+	AllowJs              bool `json:"allowJs"`
+	CheckJs              bool `json:"checkJs"`
+	MaxNodeModuleJsDepth int  `json:"maxNodeModuleJsDepth"`
+
+	// Emit
+	Declaration              bool   `json:"declaration"`
+	DeclarationMap           bool   `json:"declarationMap"`
+	EmitDeclarationOnly      bool   `json:"emitDeclarationOnly"`
+	SourceMap                bool   `json:"sourceMap"`
+	OutFile                  string `json:"outFile"`
+	OutDir                   string `json:"outDir"`
+	RemoveComments           bool   `json:"removeComments"`
+	NoEmit                   bool   `json:"noEmit"`
+	ImportHelpers            bool   `json:"importHelpers"`
+	DownlevelIteration       bool   `json:"downlevelIteration"`
+	InlineSourceMap          bool   `json:"inlineSourceMap"`
+	InlineSources            bool   `json:"inlineSources"`
+	NewLine                  string `json:"newLine"`
+	StripInternal            bool   `json:"stripInternal"`
+	NoEmitHelpers            bool   `json:"noEmitHelpers"`
+	NoEmitOnError            bool   `json:"noEmitOnError"`
+	PreserveConstEnums       bool   `json:"preserveConstEnums"`
+	DeclarationDir           string `json:"declarationDir"`
+
+	// Interop constraints
+	IsolatedModules          bool `json:"isolatedModules"`
+	AllowSyntheticDefaultImports bool `json:"allowSyntheticDefaultImports"`
+	EsModuleInterop          bool `json:"esModuleInterop"`
+	PreserveSymlinks         bool `json:"preserveSymlinks"`
+	ForceConsistentCasingInFileNames bool `json:"forceConsistentCasingInFileNames"`
+
+	// Language and environment
+	Target                   string   `json:"target"`
+	Lib                      []string `json:"lib"`
+	JSX                      string   `json:"jsx"`
+	ExperimentalDecorators   bool     `json:"experimentalDecorators"`
+	EmitDecoratorMetadata    bool     `json:"emitDecoratorMetadata"`
+	JSXFactory               string   `json:"jsxFactory"`
+	JSXFragmentFactory       string   `json:"jsxFragmentFactory"`
+	JSXImportSource          string   `json:"jsxImportSource"`
+	ReactNamespace           string   `json:"reactNamespace"`
+	NoLib                    bool     `json:"noLib"`
+	UseDefineForClassFields  bool     `json:"useDefineForClassFields"`
+	ModuleDetection          string   `json:"moduleDetection"`
+
+	// Completeness
+	SkipDefaultLibCheck      bool `json:"skipDefaultLibCheck"`
+	SkipLibCheck             bool `json:"skipLibCheck"`
+
+	// Advanced
+	Charset                  string `json:"charset"`
+	KeyofStringsOnly         bool   `json:"keyofStringsOnly"`
+	NoStrictGenericChecks    bool   `json:"noStrictGenericChecks"`
+	SuppressExcessPropertyErrors bool `json:"suppressExcessPropertyErrors"`
+	SuppressImplicitAnyIndexErrors bool `json:"suppressImplicitAnyIndexErrors"`
+	NoErrorTruncation        bool   `json:"noErrorTruncation"`
+	PreserveWatchOutput      bool   `json:"preserveWatchOutput"`
+	AssumeChangesOnlyAffectDirectDependencies bool `json:"assumeChangesOnlyAffectDirectDependencies"`
+
+	// Output formatting
+	Pretty                   bool `json:"pretty"`
+
+	// Watch options (not used in type checking but part of config)
+	RootDirs                 []string `json:"rootDirs"`
 }
 
 // LoadTSConfig loads and parses a tsconfig.json file
@@ -176,6 +250,18 @@ func applyDefaults(config *TSConfig) {
 	if len(config.Exclude) == 0 {
 		config.Exclude = []string{"node_modules"}
 	}
+
+	// Apply strict mode implications
+	// When strict is true, it enables all strict type checking options
+	if config.CompilerOptions.Strict {
+		config.CompilerOptions.NoImplicitAny = true
+		config.CompilerOptions.StrictNullChecks = true
+		config.CompilerOptions.StrictFunctionTypes = true
+		config.CompilerOptions.StrictBindCallApply = true
+		config.CompilerOptions.StrictPropertyInitialization = true
+		config.CompilerOptions.NoImplicitThis = true
+		config.CompilerOptions.AlwaysStrict = true
+	}
 }
 
 // ResolvePathAlias resolves a path using the paths configuration
@@ -296,4 +382,123 @@ func matchPattern(path, pattern string) bool {
 
 	// Exact match
 	return path == pattern
+}
+
+// IsStrictMode returns true if strict mode is enabled
+func (c *CompilerOptions) IsStrictMode() bool {
+	return c.Strict
+}
+
+// ShouldCheckImplicitAny returns true if implicit any should be reported as error
+func (c *CompilerOptions) ShouldCheckImplicitAny() bool {
+	return c.NoImplicitAny || c.Strict
+}
+
+// ShouldCheckNullability returns true if null/undefined checks are enabled
+func (c *CompilerOptions) ShouldCheckNullability() bool {
+	return c.StrictNullChecks || c.Strict
+}
+
+// ShouldCheckFunctionTypes returns true if strict function type checks are enabled
+func (c *CompilerOptions) ShouldCheckFunctionTypes() bool {
+	return c.StrictFunctionTypes || c.Strict
+}
+
+// ShouldCheckUnusedLocals returns true if unused local variables should be reported
+func (c *CompilerOptions) ShouldCheckUnusedLocals() bool {
+	return c.NoUnusedLocals
+}
+
+// ShouldCheckUnusedParameters returns true if unused parameters should be reported
+func (c *CompilerOptions) ShouldCheckUnusedParameters() bool {
+	return c.NoUnusedParameters
+}
+
+// ShouldCheckImplicitReturns returns true if functions must explicitly return
+func (c *CompilerOptions) ShouldCheckImplicitReturns() bool {
+	return c.NoImplicitReturns
+}
+
+// ShouldCheckImplicitThis returns true if 'this' must be explicitly typed
+func (c *CompilerOptions) ShouldCheckImplicitThis() bool {
+	return c.NoImplicitThis || c.Strict
+}
+
+// ShouldAllowUnreachableCode returns true if unreachable code is allowed
+func (c *CompilerOptions) ShouldAllowUnreachableCode() bool {
+	return c.AllowUnreachableCode
+}
+
+// ShouldAllowUnusedLabels returns true if unused labels are allowed
+func (c *CompilerOptions) ShouldAllowUnusedLabels() bool {
+	return c.AllowUnusedLabels
+}
+
+// GetTarget returns the ECMAScript target version
+func (c *CompilerOptions) GetTarget() string {
+	if c.Target == "" {
+		return "ES2015"
+	}
+	return c.Target
+}
+
+// GetModule returns the module system
+func (c *CompilerOptions) GetModule() string {
+	if c.Module == "" {
+		return "commonjs"
+	}
+	return c.Module
+}
+
+// GetLib returns the library files to include
+func (c *CompilerOptions) GetLib() []string {
+	if len(c.Lib) == 0 {
+		// Default libs based on target
+		target := c.GetTarget()
+		switch target {
+		case "ES3":
+			return []string{"lib.es3.d.ts"}
+		case "ES5":
+			return []string{"lib.es5.d.ts"}
+		case "ES6", "ES2015":
+			return []string{"lib.es2015.d.ts"}
+		case "ES2016":
+			return []string{"lib.es2016.d.ts"}
+		case "ES2017":
+			return []string{"lib.es2017.d.ts"}
+		case "ES2018":
+			return []string{"lib.es2018.d.ts"}
+		case "ES2019":
+			return []string{"lib.es2019.d.ts"}
+		case "ES2020":
+			return []string{"lib.es2020.d.ts"}
+		case "ES2021":
+			return []string{"lib.es2021.d.ts"}
+		case "ES2022":
+			return []string{"lib.es2022.d.ts"}
+		case "ESNext":
+			return []string{"lib.esnext.d.ts"}
+		default:
+			return []string{"lib.es2015.d.ts"}
+		}
+	}
+	return c.Lib
+}
+
+// ShouldCheckJS returns true if JavaScript files should be type checked
+func (c *CompilerOptions) ShouldCheckJS() bool {
+	return c.CheckJs
+}
+
+// ShouldAllowJS returns true if JavaScript files are allowed
+func (c *CompilerOptions) ShouldAllowJS() bool {
+	return c.AllowJs
+}
+
+// GetModuleResolution returns the module resolution strategy
+func (c *CompilerOptions) GetModuleResolution() string {
+	if c.ModuleResolution == "" {
+		return "node"
+	}
+	return c.ModuleResolution
 }

@@ -1,0 +1,33 @@
+{
+  "name": "typecheker",
+  "version": "1.0.0",
+  "description": "A **production-ready** TypeScript type checker written in Go that covers ~75% of TypeScript features used in real-world projects.",
+  "main": "index.js",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "tsc": "tsc --noEmit",
+    "tsc:file": "tsc --noEmit",
+    "check": "go run . check",
+    "compare": "npm run tsc && npm run check",
+    "compare:file": "tsc --noEmit $npm_config_file && go run . check $npm_config_file"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kriollo/typecheckGo.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/kriollo/typecheckGo/issues"
+  },
+  "homepage": "https://github.com/kriollo/typecheckGo#readme",
+  "devDependencies": {
+    "@typescript/native-preview": "^7.0.0-dev.20251117.1",
+    "typescript": "^5.9.3"
+  }
+}
