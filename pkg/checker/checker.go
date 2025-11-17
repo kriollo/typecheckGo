@@ -12,14 +12,15 @@ import (
 
 // TypeChecker coordinates type checking operations
 type TypeChecker struct {
-	symbolTable    *symbols.SymbolTable
-	errors         []TypeError
-	moduleResolver *modules.ModuleResolver
-	currentFile    string
-	globalEnv      *types.GlobalEnvironment
-	typeCache      map[ast.Node]*types.Type
-	varTypeCache   map[string]*types.Type // Cache types by variable name
-	inferencer     *types.TypeInferencer
+	symbolTable     *symbols.SymbolTable
+	errors          []TypeError
+	moduleResolver  *modules.ModuleResolver
+	currentFile     string
+	globalEnv       *types.GlobalEnvironment
+	typeCache       map[ast.Node]*types.Type
+	varTypeCache    map[string]*types.Type // Cache types by variable name
+	inferencer      *types.TypeInferencer
+	currentFunction *ast.FunctionDeclaration // Track current function for return type checking
 }
 
 // TypeError represents a type checking error
@@ -181,6 +182,10 @@ func (tc *TypeChecker) checkFunctionDeclaration(decl *ast.FunctionDeclaration, f
 
 	// Check function body in the function's scope
 	if decl.Body != nil {
+		// Set current function for return type checking
+		previousFunction := tc.currentFunction
+		tc.currentFunction = decl
+
 		// Find the function scope
 		functionScope := tc.findScopeForNode(decl)
 		if functionScope != nil {
@@ -197,6 +202,9 @@ func (tc *TypeChecker) checkFunctionDeclaration(decl *ast.FunctionDeclaration, f
 			// Fallback: check without scope change
 			tc.checkBlockStatement(decl.Body, filename)
 		}
+
+		// Restore previous function
+		tc.currentFunction = previousFunction
 	}
 }
 
@@ -226,6 +234,40 @@ func (tc *TypeChecker) checkBlockStatement(block *ast.BlockStatement, filename s
 func (tc *TypeChecker) checkReturnStatement(ret *ast.ReturnStatement, filename string) {
 	if ret.Argument != nil {
 		tc.checkExpression(ret.Argument, filename)
+
+		// Infer the type of the return value
+		returnType := tc.inferencer.InferType(ret.Argument)
+
+		// Store the return type for the current function
+		if tc.currentFunction != nil {
+			// Check if we already have a cached return type for this function
+			existingReturnType, exists := tc.typeCache[tc.currentFunction]
+
+			if exists {
+				// Verify that all returns have compatible types
+				if !tc.isAssignableTo(returnType, existingReturnType) {
+					msg := fmt.Sprintf("Type '%s' is not assignable to type '%s'.", returnType.String(), existingReturnType.String())
+					msg += "\n  Sugerencia: Todas las rutas de retorno deben devolver el mismo tipo"
+					tc.addError(filename, ret.Argument.Pos().Line, ret.Argument.Pos().Column, msg, "TS2322", "error")
+				}
+			} else {
+				// First return statement, cache the type
+				tc.typeCache[tc.currentFunction] = returnType
+			}
+		}
+	} else {
+		// Return without value (void)
+		if tc.currentFunction != nil {
+			existingReturnType, exists := tc.typeCache[tc.currentFunction]
+			if exists && existingReturnType.Kind != types.VoidType && existingReturnType.Kind != types.AnyType {
+				msg := fmt.Sprintf("A function whose declared type is neither 'void' nor 'any' must return a value.")
+				msg += "\n  Sugerencia: Agrega un valor de retorno o cambia el tipo de retorno a 'void'"
+				tc.addError(filename, ret.Pos().Line, ret.Pos().Column, msg, "TS2355", "error")
+			} else if !exists {
+				// First return is void
+				tc.typeCache[tc.currentFunction] = types.Void
+			}
+		}
 	}
 }
 

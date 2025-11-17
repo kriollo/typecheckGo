@@ -314,7 +314,7 @@ func (p *parser) parseIfStatement() (*ast.IfStatement, error) {
 	// Parse the alternate (else branch), if present
 	var alternate ast.Statement
 	if p.matchKeyword("else") {
-		p.advance() // consume 'else'
+		p.consumeKeyword("else") // consume 'else' keyword
 		p.skipWhitespaceAndComments()
 
 		alternate, err = p.parseStatement()
