@@ -8,10 +8,10 @@ A **production-ready** TypeScript type checker written in Go that covers ~75% of
 # Build
 go build -o tscheck
 
-# Check a file
+# Check a file (automatically discovers tsconfig.json)
 ./tscheck check myfile.ts
 
-# Check a directory (automatically loads tsconfig.json if present)
+# Check a directory
 ./tscheck check ./src
 
 # View AST
@@ -21,6 +21,26 @@ go build -o tscheck
 ./tscheck check file.ts -f json  # JSON format
 ./tscheck check file.ts -f toon  # TOON format
 ```
+
+## 🔍 Compare with TypeScript
+
+```bash
+# Install TypeScript (if not already installed)
+npm install --save-dev typescript
+
+# Run comparison script
+./compare.ps1 test/file.ts
+
+# Compare full project
+./compare.ps1 test
+```
+
+The checker automatically discovers and respects your `tsconfig.json` configuration, including:
+- ✅ `strict` mode and all strict flags
+- ✅ `noImplicitAny` - detects implicit any types
+- ✅ `strictNullChecks` - null/undefined checking
+- ✅ Module resolution with `paths` and `baseUrl`
+- ✅ `include`/`exclude` patterns
 
 ## 📸 Example Output
 
