@@ -17,7 +17,13 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "`n--- TypeScript Official (tsc) ---`n" -ForegroundColor Green
-npx tsc --noEmit $File 2>&1 | Out-String | Write-Host
+# If checking a single file, use strict mode to match tsconfig
+if (Test-Path $File -PathType Leaf) {
+    npx tsc --noEmit --strict $File 2>&1 | Out-String | Write-Host
+} else {
+    # For directories, use project mode
+    npx tsc --noEmit --project tsconfig.json 2>&1 | Out-String | Write-Host
+}
 
 $tscExitCode = $LASTEXITCODE
 
