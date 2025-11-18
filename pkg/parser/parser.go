@@ -2869,7 +2869,68 @@ func (p *parser) parseArrowFunction() (*ast.ArrowFunctionExpression, error) {
 
 // parseTypeAnnotation parses a TypeScript type annotation
 func (p *parser) parseTypeAnnotation() (ast.TypeNode, error) {
+	// Parse the primary type
+	primaryType, err := p.parseTypePrimaryNode()
+	if err != nil {
+		return nil, err
+	}
+
+	// Check for union or intersection types (| or &)
+	p.skipWhitespaceAndComments()
+	if p.match("|") || p.match("&") {
+		// We have a union/intersection type - just consume it and return simplified
+		for p.match("|") || p.match("&") {
+			p.advance()
+			p.skipWhitespaceAndComments()
+			// Parse the next type
+			_, err := p.parseTypePrimaryNode()
+			if err != nil {
+				return nil, err
+			}
+			p.skipWhitespaceAndComments()
+		}
+		// Return the primary type (unions are not fully represented in AST yet)
+		return primaryType, nil
+	}
+
+	return primaryType, nil
+}
+
+// parseTypePrimaryNode parses a single type (without unions/intersections)
+func (p *parser) parseTypePrimaryNode() (ast.TypeNode, error) {
 	startPos := p.currentPos()
+
+	// Parse object types (e.g., { prop: Type })
+	if p.match("{") {
+		// For now, just skip the object type and return a placeholder
+		p.advance()
+		depth := 1
+		iterations := 0
+		for depth > 0 && !p.isAtEnd() && iterations < maxParserIterations {
+			iterations++
+			if p.match("{") {
+				depth++
+			} else if p.match("}") {
+				depth--
+			}
+			p.advance()
+		}
+		return &ast.TypeReference{
+			Name:     "{ ... }", // Placeholder for object type
+			Position: startPos,
+			EndPos:   p.currentPos(),
+		}, nil
+	}
+
+	// Parse string literal types (e.g., 'id' | 'name')
+	if p.matchString() {
+		str := p.advanceStringLiteral()
+		return &ast.TypeReference{
+			Name:     str, // Store the full string literal with quotes
+			Position: startPos,
+			EndPos:   p.currentPos(),
+		}, nil
+	}
 
 	// Parse simple type reference (e.g., string, number, MyType)
 	if p.matchIdentifier() {
@@ -2938,10 +2999,6 @@ func (p *parser) parseTypeAnnotation() (ast.TypeNode, error) {
 
 		return typeRef, nil
 	}
-
-	// Parse union type (e.g., string | number)
-	// For now, just parse the first type
-	// TODO: Implement full union type support
 
 	return nil, fmt.Errorf("expected type annotation at %s", p.currentPos())
 }

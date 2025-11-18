@@ -53,6 +53,8 @@ func (b *Binder) bindStatement(stmt ast.Statement) {
 		b.bindInterfaceDeclaration(s)
 	case *ast.ClassDeclaration:
 		b.bindClassDeclaration(s)
+	case *ast.SwitchStatement:
+		b.bindSwitchStatement(s)
 	default:
 		// Unknown statement type
 		fmt.Printf("Warning: Unknown statement type: %T\n", stmt)
@@ -200,6 +202,8 @@ func (b *Binder) bindExpression(expr ast.Expression) {
 	case *ast.SuperExpression:
 		// 'super' doesn't need binding
 		return
+	case *ast.ConditionalExpression:
+		b.bindConditionalExpression(e)
 	default:
 		// Unknown expression type
 		fmt.Printf("Warning: Unknown expression type: %T\n", expr)
@@ -360,6 +364,43 @@ func (b *Binder) bindWhileStatement(stmt *ast.WhileStatement) {
 	}
 }
 
+func (b *Binder) bindSwitchStatement(stmt *ast.SwitchStatement) {
+	// Bind discriminant
+	if stmt.Discriminant != nil {
+		b.bindExpression(stmt.Discriminant)
+	}
+
+	// Bind all cases
+	for _, switchCase := range stmt.Cases {
+		// Bind test expression (nil for default case)
+		if switchCase.Test != nil {
+			b.bindExpression(switchCase.Test)
+		}
+
+		// Bind all consequent statements
+		for _, consequent := range switchCase.Consequent {
+			b.bindStatement(consequent)
+		}
+	}
+}
+
+func (b *Binder) bindConditionalExpression(expr *ast.ConditionalExpression) {
+	// Bind test (condition)
+	if expr.Test != nil {
+		b.bindExpression(expr.Test)
+	}
+
+	// Bind consequent (true branch)
+	if expr.Consequent != nil {
+		b.bindExpression(expr.Consequent)
+	}
+
+	// Bind alternate (false branch)
+	if expr.Alternate != nil {
+		b.bindExpression(expr.Alternate)
+	}
+}
+
 func (b *Binder) bindArrowFunction(arrow *ast.ArrowFunctionExpression) {
 	// Create a new scope for the arrow function
 	b.table.EnterScope(arrow)
@@ -387,7 +428,6 @@ func (b *Binder) bindArrowFunction(arrow *ast.ArrowFunctionExpression) {
 func (b *Binder) GetSymbolTable() *SymbolTable {
 	return b.table
 }
-
 
 func (b *Binder) bindTypeAliasDeclaration(decl *ast.TypeAliasDeclaration) {
 	// Register the type alias in the symbol table
