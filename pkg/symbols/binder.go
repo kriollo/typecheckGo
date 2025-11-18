@@ -401,14 +401,21 @@ func (b *Binder) bindInterfaceDeclaration(decl *ast.InterfaceDeclaration) {
 func (b *Binder) bindClassDeclaration(decl *ast.ClassDeclaration) {
 	// Add class to symbol table
 	symbol := &Symbol{
-		Name: decl.ID.Name,
-		Kind: "class",
-		Decl: decl,
+		Name:       decl.ID.Name,
+		Type:       TypeSymbol, // Classes are types
+		Node:       decl,
+		DeclSpan:   decl.Pos(),
+		IsFunction: false,
 	}
-	b.table.Define(symbol)
+	b.table.Current.Symbols[symbol.Name] = symbol
 
 	// Create a new scope for the class
-	classScope := NewScope(b.table.Current)
+	classScope := &Scope{
+		Parent:  b.table.Current,
+		Symbols: make(map[string]*Symbol),
+		Level:   b.table.Current.Level + 1,
+		Node:    decl,
+	}
 	b.table.Current = classScope
 
 	// Bind class members
@@ -417,16 +424,39 @@ func (b *Binder) bindClassDeclaration(decl *ast.ClassDeclaration) {
 		case *ast.MethodDefinition:
 			// Add method to class scope
 			methodSymbol := &Symbol{
-				Name: m.Key.Name,
-				Kind: "method",
-				Decl: m,
+				Name:       m.Key.Name,
+				Type:       FunctionSymbol,
+				Node:       m,
+				DeclSpan:   m.Pos(),
+				IsFunction: true,
 			}
-			b.table.Define(methodSymbol)
+			b.table.Current.Symbols[methodSymbol.Name] = methodSymbol
 
 			// Bind method body
 			if m.Value != nil && m.Value.Body != nil {
-				methodScope := NewScope(b.table.Current)
+				methodScope := &Scope{
+					Parent:  b.table.Current,
+					Symbols: make(map[string]*Symbol),
+					Level:   b.table.Current.Level + 1,
+					Node:    m,
+				}
 				b.table.Current = methodScope
+
+				// Add parameters to method scope
+				if m.Value.Params != nil {
+					for _, param := range m.Value.Params {
+						if param.ID != nil {
+							paramSymbol := &Symbol{
+								Name:     param.ID.Name,
+								Type:     ParameterSymbol,
+								Node:     param,
+								DeclSpan: param.Pos(),
+							}
+							b.table.Current.Symbols[paramSymbol.Name] = paramSymbol
+						}
+					}
+				}
+
 				b.bindBlockStatement(m.Value.Body)
 				b.table.Current = methodScope.Parent
 			}
@@ -434,11 +464,12 @@ func (b *Binder) bindClassDeclaration(decl *ast.ClassDeclaration) {
 		case *ast.PropertyDefinition:
 			// Add property to class scope
 			propSymbol := &Symbol{
-				Name: m.Key.Name,
-				Kind: "property",
-				Decl: m,
+				Name:     m.Key.Name,
+				Type:     VariableSymbol,
+				Node:     m,
+				DeclSpan: m.Pos(),
 			}
-			b.table.Define(propSymbol)
+			b.table.Current.Symbols[propSymbol.Name] = propSymbol
 
 			// Bind property initializer if present
 			if m.Value != nil {
