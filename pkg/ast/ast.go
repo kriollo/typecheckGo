@@ -707,3 +707,46 @@ func (s *SuperExpression) Type() string { return "SuperExpression" }
 func (s *SuperExpression) Pos() Position { return s.Position }
 func (s *SuperExpression) End() Position { return s.EndPos }
 func (s *SuperExpression) exprNode()     {}
+
+// TaggedTemplateExpression represents tagged template literals like String.raw`template`
+type TaggedTemplateExpression struct {
+	Tag      Expression
+	Quasi    *TemplateLiteral
+	Position Position
+	EndPos   Position
+}
+
+func (t *TaggedTemplateExpression) Type() string { return "TaggedTemplateExpression" }
+func (t *TaggedTemplateExpression) Pos() Position { return t.Position }
+func (t *TaggedTemplateExpression) End() Position { return t.EndPos }
+func (t *TaggedTemplateExpression) exprNode()     {}
+
+// TemplateLiteral represents template literals with ${} expressions
+type TemplateLiteral struct {
+	Quasis      []TemplateElement
+	Expressions []Expression
+	Position    Position
+	EndPos      Position
+}
+
+func (t *TemplateLiteral) Type() string { return "TemplateLiteral" }
+func (t *TemplateLiteral) Pos() Position { return t.Position }
+func (t *TemplateLiteral) End() Position { return t.EndPos }
+func (t *TemplateLiteral) exprNode()     {}
+
+// TemplateElement represents a part of a template literal
+type TemplateElement struct {
+	Value    TemplateElementValue
+	Position Position
+	EndPos   Position
+}
+
+func (t TemplateElement) Type() string { return "TemplateElement" }
+func (t TemplateElement) Pos() Position { return t.Position }
+func (t TemplateElement) End() Position { return t.EndPos }
+
+// TemplateElementValue contains the raw and cooked string values
+type TemplateElementValue struct {
+	Raw    string
+	Cooked string
+}

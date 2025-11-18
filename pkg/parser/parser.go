@@ -819,24 +819,54 @@ func (p *parser) parseMemberExpression() (ast.Expression, error) {
 		return nil, nil
 	}
 
-	p.skipWhitespaceAndComments()
-
-	if p.match(".") {
-		startPos := left.Pos()
-		p.advance()
-
-		prop, err := p.parseIdentifier()
-		if err != nil {
-			return nil, err
+	// Handle chained member expressions (e.g., document.head.append)
+	for {
+		p.skipWhitespaceAndComments()
+		
+		if p.match(".") {
+			startPos := left.Pos()
+			p.advance()
+			p.skipWhitespaceAndComments()
+			
+			prop, err := p.parseIdentifier()
+			if err != nil {
+				return nil, err
+			}
+			
+			left = &ast.MemberExpression{
+				Object:   left,
+				Property: prop,
+				Computed: false,
+				Position: startPos,
+				EndPos:   p.currentPos(),
+			}
+		} else if p.match("[") {
+			// Handle computed member expressions (e.g., obj[prop])
+			startPos := left.Pos()
+			p.advance()
+			p.skipWhitespaceAndComments()
+			
+			prop, err := p.parseExpression()
+			if err != nil {
+				return nil, err
+			}
+			
+			p.skipWhitespaceAndComments()
+			if !p.match("]") {
+				return nil, fmt.Errorf("expected ']' in computed member expression")
+			}
+			p.advance()
+			
+			left = &ast.MemberExpression{
+				Object:   left,
+				Property: prop,
+				Computed: true,
+				Position: startPos,
+				EndPos:   p.currentPos(),
+			}
+		} else {
+			break
 		}
-
-		return &ast.MemberExpression{
-			Object:   left,
-			Property: prop,
-			Computed: false,
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		}, nil
 	}
 
 	return left, nil
