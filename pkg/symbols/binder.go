@@ -272,6 +272,20 @@ func (b *Binder) bindImportDeclaration(decl *ast.ImportDeclaration) {
 				if spec.Local != nil {
 					// Create an import symbol that references the module
 					b.table.AddImport(moduleName, spec.Local.Name, "", false, false)
+
+					// Also register the imported identifier as a symbol in the current scope
+					// so it can be resolved during type checking
+					// This prevents cascade "Cannot find name" errors when module resolution fails
+					symbol := &Symbol{
+						Name:     spec.Local.Name,
+						Type:     VariableSymbol,
+						Node:     decl,
+						Mutable:  false,
+						Scope:    b.table.Current,
+						DeclSpan: spec.Local.Position,
+						Hoisted:  false,
+					}
+					b.table.Current.Symbols[spec.Local.Name] = symbol
 				}
 			}
 		}

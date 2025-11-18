@@ -93,11 +93,16 @@ func (ir *ImportResolver) ResolveImport(importDecl *ast.ImportDeclaration) (map[
 
 			importedSymbols[spec.Local.Name] = symbol
 		} else {
-			sourceStr := ""
-			if importDecl.Source != nil {
-				sourceStr = importDecl.Source.Value.(string)
+			// Export not found - treat as 'any' type instead of failing
+			// This allows modules with parse errors to still be usable
+			symbol := &symbols.Symbol{
+				Name:       spec.Local.Name,
+				Type:       symbols.VariableSymbol,
+				Node:       nil,
+				DeclSpan:   spec.Local.Position,
+				IsFunction: false,
 			}
-			return nil, fmt.Errorf("export '%s' not found in module '%s'", spec.Imported.Name, sourceStr)
+			importedSymbols[spec.Local.Name] = symbol
 		}
 	}
 

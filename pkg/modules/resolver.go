@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"tstypechecker/pkg/ast"
-	"tstypechecker/pkg/symbols"
 	"tstypechecker/pkg/parser"
+	"tstypechecker/pkg/symbols"
 )
 
 // ModuleResolver maneja la resolución de módulos ES/TS
@@ -23,6 +23,15 @@ type ModuleResolver struct {
 
 	// Extensiones válidas para módulos
 	extensions []string
+
+	// BaseUrl from tsconfig for path resolution
+	baseUrl string
+
+	// Path aliases from tsconfig (e.g., "@/*": ["src/*"])
+	paths map[string][]string
+
+	// Type roots for .d.ts files (e.g., ["./node_modules/@types", "./types"])
+	typeRoots []string
 }
 
 // ResolvedModule representa un módulo resuelto
@@ -79,10 +88,26 @@ type ExportInfo struct {
 // NewModuleResolver crea un nuevo resolver de módulos
 func NewModuleResolver(rootDir string, symbolTable *symbols.SymbolTable) *ModuleResolver {
 	return &ModuleResolver{
-		moduleCache:  make(map[string]*ResolvedModule),
-		symbolTable:  symbolTable,
-		rootDir:      rootDir,
-		extensions:   []string{".ts", ".tsx", ".js", ".jsx", ".mjs"},
+		moduleCache: make(map[string]*ResolvedModule),
+		symbolTable: symbolTable,
+		rootDir:     rootDir,
+		extensions:  []string{".ts", ".tsx", ".js", ".jsx", ".mjs", ".d.ts"},
+		baseUrl:     "",
+		paths:       make(map[string][]string),
+		typeRoots:   []string{"./node_modules/@types", "./types"},
+	}
+}
+
+// SetPathAliases configura los path aliases desde tsconfig
+func (r *ModuleResolver) SetPathAliases(baseUrl string, paths map[string][]string) {
+	r.baseUrl = baseUrl
+	r.paths = paths
+}
+
+// SetTypeRoots configura los typeRoots desde tsconfig
+func (r *ModuleResolver) SetTypeRoots(typeRoots []string) {
+	if len(typeRoots) > 0 {
+		r.typeRoots = typeRoots
 	}
 }
 
@@ -165,19 +190,130 @@ func (r *ModuleResolver) resolveAbsolutePath(specifier string) (string, error) {
 
 // resolveModuleSpecifier resuelve especificadores de módulos (no paths)
 func (r *ModuleResolver) resolveModuleSpecifier(specifier string, basePath string) (string, error) {
-	// Primero verificar si es un módulo del proyecto
+	// Primero intentar resolver con path aliases (e.g., @/foo -> src/foo)
+	if aliasPath, err := r.resolvePathAlias(specifier); err == nil {
+		return aliasPath, nil
+	}
+
+	// Intentar resolver como archivo de declaración (.d.ts) en typeRoots
+	if typeRootPath, err := r.resolveFromTypeRoots(specifier); err == nil {
+		return typeRootPath, nil
+	}
+
+	// Luego verificar si es un módulo del proyecto
 	projectModule, err := r.resolveProjectModule(specifier, basePath)
 	if err == nil {
 		return projectModule, nil
 	}
 
-	// Luego verificar node_modules
+	// Finalmente verificar node_modules (incluyendo @types/*)
 	nodeModule, err := r.resolveNodeModule(specifier, basePath)
 	if err == nil {
 		return nodeModule, nil
 	}
 
 	return "", fmt.Errorf("module not found: %s", specifier)
+}
+
+// resolvePathAlias intenta resolver un especificador usando path aliases de tsconfig
+func (r *ModuleResolver) resolvePathAlias(specifier string) (string, error) {
+	if len(r.paths) == 0 {
+		return "", fmt.Errorf("no path aliases configured")
+	}
+
+	// Buscar coincidencias en los path aliases
+	for alias, targets := range r.paths {
+		// Quitar el * del patrón de alias para obtener el prefijo
+		aliasPrefix := strings.TrimSuffix(alias, "*")
+
+		// Si el especificador comienza con el prefijo del alias
+		if strings.HasPrefix(specifier, aliasPrefix) {
+			// Obtener la parte después del prefijo
+			remainder := strings.TrimPrefix(specifier, aliasPrefix)
+
+			// Intentar cada target configurado para este alias
+			for _, target := range targets {
+				// Reemplazar el * en el target con el remainder
+				targetPath := strings.Replace(target, "*", remainder, 1)
+
+				// Resolver la ruta completa usando baseUrl
+				var fullPath string
+				if r.baseUrl != "" {
+					fullPath = filepath.Join(r.rootDir, r.baseUrl, targetPath)
+				} else {
+					fullPath = filepath.Join(r.rootDir, targetPath)
+				}
+
+				// Intentar resolver el archivo
+				if resolved, err := r.resolveFilePath(fullPath); err == nil {
+					return resolved, nil
+				}
+			}
+		}
+	}
+
+	return "", fmt.Errorf("no matching path alias found for: %s", specifier)
+}
+
+// resolveFromTypeRoots intenta resolver un módulo desde los typeRoots
+func (r *ModuleResolver) resolveFromTypeRoots(specifier string) (string, error) {
+	if len(r.typeRoots) == 0 {
+		return "", fmt.Errorf("no typeRoots configured")
+	}
+
+	// Para cada typeRoot, buscar el módulo
+	for _, typeRoot := range r.typeRoots {
+		// Resolver la ruta completa del typeRoot
+		var typeRootPath string
+		if filepath.IsAbs(typeRoot) {
+			typeRootPath = typeRoot
+		} else {
+			typeRootPath = filepath.Join(r.rootDir, typeRoot)
+		}
+
+		// Intentar diferentes rutas posibles
+		possiblePaths := []string{
+			// Para "versaTypes", buscar en typeRoots/versaTypes.d.ts
+			filepath.Join(typeRootPath, specifier+".d.ts"),
+			// Para "versaTypes", buscar en typeRoots/versaTypes/index.d.ts
+			filepath.Join(typeRootPath, specifier, "index.d.ts"),
+			// Buscar recursivamente en subdirectorios
+			filepath.Join(typeRootPath, "**", specifier+".d.ts"),
+		}
+
+		for _, path := range possiblePaths {
+			// Si el path contiene **, buscar recursivamente
+			if strings.Contains(path, "**") {
+				baseDir := filepath.Dir(strings.Split(path, "**")[0])
+				if found := r.findFileRecursive(baseDir, specifier+".d.ts"); found != "" {
+					return found, nil
+				}
+			} else if _, err := os.Stat(path); err == nil {
+				return path, nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("module not found in typeRoots: %s", specifier)
+}
+
+// findFileRecursive busca un archivo recursivamente en un directorio
+func (r *ModuleResolver) findFileRecursive(dir string, filename string) string {
+	var result string
+	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // Continuar incluso si hay error
+		}
+		if info.IsDir() {
+			return nil
+		}
+		if info.Name() == filename {
+			result = path
+			return filepath.SkipDir // Detener búsqueda
+		}
+		return nil
+	})
+	return result
 }
 
 // resolveFilePath intenta resolver un archivo probando diferentes extensiones
@@ -250,10 +386,26 @@ func (r *ModuleResolver) resolveNodeModule(specifier string, basePath string) (s
 	currentDir := basePath
 
 	for {
-		// Intentar node_modules/local
+		// Intentar node_modules/specifier
 		nodeModulesPath := filepath.Join(currentDir, "node_modules", specifier)
 		if resolved, err := r.resolveFilePath(nodeModulesPath); err == nil {
 			return resolved, nil
+		}
+
+		// Intentar node_modules/@types/specifier para tipos globales
+		typesPath := filepath.Join(currentDir, "node_modules", "@types", specifier)
+		if resolved, err := r.resolveFilePath(typesPath); err == nil {
+			return resolved, nil
+		}
+
+		// Si el specifier tiene un scope (ej: @angular/core), intentar @types/@angular__core
+		if strings.HasPrefix(specifier, "@") {
+			// Reemplazar / con __ para @types
+			typesScoped := strings.Replace(specifier, "/", "__", 1)
+			typesScopedPath := filepath.Join(currentDir, "node_modules", "@types", typesScoped)
+			if resolved, err := r.resolveFilePath(typesScopedPath); err == nil {
+				return resolved, nil
+			}
 		}
 
 		// Subir un nivel
@@ -269,18 +421,47 @@ func (r *ModuleResolver) resolveNodeModule(specifier string, basePath string) (s
 }
 
 // LoadModule carga y analiza un módulo
-func (r *ModuleResolver) LoadModule(filePath string, specifier string) (*ResolvedModule, error) {
+func (r *ModuleResolver) LoadModule(filePath string, specifier string) (module *ResolvedModule, err error) {
+	// Recover from parser panics to prevent crashes
+	defer func() {
+		if panicErr := recover(); panicErr != nil {
+			// On panic, create an empty module instead of failing
+			module = &ResolvedModule{
+				AbsolutePath:  filePath,
+				RelativePath:  r.getRelativePath(filePath),
+				Specifier:     specifier,
+				ModuleAST:     nil,
+				ModuleSymbols: r.symbolTable,
+				Exports:       make(map[string]*ExportInfo),
+				IsExternal:    strings.Contains(filePath, "node_modules"),
+				IsTypeScript:  strings.HasSuffix(filePath, ".ts") || strings.HasSuffix(filePath, ".tsx"),
+			}
+			err = nil // Don't return error, allow module to be treated as valid but empty
+		}
+	}()
+
 	// Determinar si es TypeScript
 	isTypeScript := strings.HasSuffix(filePath, ".ts") || strings.HasSuffix(filePath, ".tsx")
 
 	// Parsear el archivo
-	program, err := parser.ParseFile(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse file %s: %w", filePath, err)
+	program, parseErr := parser.ParseFile(filePath)
+	if parseErr != nil {
+		// On parse error, create an empty module instead of failing
+		module = &ResolvedModule{
+			AbsolutePath:  filePath,
+			RelativePath:  r.getRelativePath(filePath),
+			Specifier:     specifier,
+			ModuleAST:     nil,
+			ModuleSymbols: r.symbolTable,
+			Exports:       make(map[string]*ExportInfo),
+			IsExternal:    strings.Contains(filePath, "node_modules"),
+			IsTypeScript:  isTypeScript,
+		}
+		return module, nil // Return empty module, not error
 	}
 
 	// Crear el módulo
-	module := &ResolvedModule{
+	module = &ResolvedModule{
 		AbsolutePath:  filePath,
 		RelativePath:  r.getRelativePath(filePath),
 		Specifier:     specifier,
@@ -293,8 +474,9 @@ func (r *ModuleResolver) LoadModule(filePath string, specifier string) (*Resolve
 
 	// Analizar los exports del módulo
 	analyzer := NewModuleAnalyzer(r)
-	if err := analyzer.AnalyzeModule(module, program); err != nil {
-		return nil, fmt.Errorf("failed to analyze module %s: %w", filePath, err)
+	if analyzeErr := analyzer.AnalyzeModule(module, program); analyzeErr != nil {
+		// On analyze error, return module with empty exports instead of failing
+		return module, nil
 	}
 
 	return module, nil

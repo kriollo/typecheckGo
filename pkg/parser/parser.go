@@ -153,6 +153,11 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 		return p.parseExportDeclaration()
 	}
 
+	// Declare keyword (for .d.ts files)
+	if p.matchKeyword("declare") {
+		return p.parseDeclareStatement()
+	}
+
 	// Type declarations
 	if p.matchKeyword("type") {
 		return p.parseTypeAliasDeclaration()
@@ -914,6 +919,8 @@ func (p *parser) parseBinaryExpression() (ast.Expression, error) {
 			op = "&&"
 		} else if p.match("||") {
 			op = "||"
+		} else if p.match("??") {
+			op = "??"
 		} else if p.matchKeyword("in") {
 			op = "in"
 		} else if p.matchKeyword("instanceof") {
@@ -974,6 +981,11 @@ func (p *parser) parseCallExpression() (ast.Expression, error) {
 		return nil, err
 	}
 
+	// Check for nil left expression
+	if left == nil {
+		return nil, fmt.Errorf("unexpected nil expression in call chain")
+	}
+
 	// Loop para manejar chains como: obj.method().prop.method2()
 	iterations := 0
 	for iterations < maxParserIterations {
@@ -1018,6 +1030,9 @@ func (p *parser) parseCallExpression() (ast.Expression, error) {
 
 		// Check for optional chaining ?. or regular .
 		if p.match("?.") {
+			if left == nil {
+				return nil, fmt.Errorf("unexpected nil expression before optional chaining")
+			}
 			startPos := left.Pos()
 			p.advanceString(2) // consume ?.
 			p.skipWhitespaceAndComments()
@@ -1039,6 +1054,9 @@ func (p *parser) parseCallExpression() (ast.Expression, error) {
 		}
 
 		if p.match(".") {
+			if left == nil {
+				return nil, fmt.Errorf("unexpected nil expression before member access")
+			}
 			startPos := left.Pos()
 			p.advance()
 			p.skipWhitespaceAndComments()
@@ -1061,6 +1079,9 @@ func (p *parser) parseCallExpression() (ast.Expression, error) {
 
 		if p.match("[") {
 			// Computed member expression
+			if left == nil {
+				return nil, fmt.Errorf("unexpected nil expression before computed property")
+			}
 			startPos := left.Pos()
 			p.advance()
 			p.skipWhitespaceAndComments()
@@ -2691,6 +2712,27 @@ func (p *parser) parseObjectLiteral() (*ast.ObjectExpression, error) {
 			}
 			properties = append(properties, spread)
 		} else {
+			// Check for async modifier (for method shorthand) BEFORE parsing key
+			isAsync := false
+			if p.matchKeyword("async") {
+				isAsync = true
+				p.advanceWord()
+				p.skipWhitespaceAndComments()
+			}
+
+			// Check for getter/setter (ES5: get prop() {} or set prop(value) {})
+			isGetter := false
+			isSetter := false
+			if p.matchKeyword("get") {
+				isGetter = true
+				p.advanceWord()
+				p.skipWhitespaceAndComments()
+			} else if p.matchKeyword("set") {
+				isSetter = true
+				p.advanceWord()
+				p.skipWhitespaceAndComments()
+			}
+
 			// Regular property
 			var key ast.Expression
 			var err error
@@ -2714,9 +2756,73 @@ func (p *parser) parseObjectLiteral() (*ast.ObjectExpression, error) {
 
 			p.skipWhitespaceAndComments()
 
-			// Check for shorthand property (ES6: {url} instead of {url: url})
+			// Check for method shorthand (ES6: method() {} or async method() {} instead of method: function() {})
+			// Also handles getters and setters
 			var value ast.Expression
-			if p.match(":") {
+			if p.match("(") {
+				// Method shorthand: key() { body } or async key() { body }
+				// Or getter: get key() { body }
+				// Or setter: set key(value) { body }
+				// Parse as a function expression
+				p.advance() // consume "("
+				p.skipWhitespaceAndComments()
+
+				// Parse parameters
+				var params []*ast.Parameter
+				paramIterations := 0
+				for !p.match(")") && !p.isAtEnd() && paramIterations < maxParserIterations {
+					paramIterations++
+					param, err := p.parseParameter()
+					if err != nil {
+						return nil, err
+					}
+					params = append(params, param)
+
+					p.skipWhitespaceAndComments()
+					if p.match(",") {
+						p.advance()
+						p.skipWhitespaceAndComments()
+					} else if !p.match(")") {
+						return nil, fmt.Errorf("expected ',' or ')' in parameter list at %s", p.currentPos())
+					}
+				}
+
+				// Validate getter/setter parameter counts
+				if isGetter && len(params) > 0 {
+					return nil, fmt.Errorf("getter should not have parameters at %s", p.currentPos())
+				}
+				if isSetter && len(params) != 1 {
+					return nil, fmt.Errorf("setter must have exactly one parameter at %s", p.currentPos())
+				}
+
+				if !p.match(")") {
+					return nil, fmt.Errorf("expected ')' after parameters at %s", p.currentPos())
+				}
+				p.advance()
+				p.skipWhitespaceAndComments()
+
+				// Parse function body
+				if !p.match("{") {
+					return nil, fmt.Errorf("expected '{' for method body at %s", p.currentPos())
+				}
+
+				body, err := p.parseBlockStatement()
+				if err != nil {
+					return nil, err
+				}
+
+				// Create a function expression (getters/setters are treated as regular functions for now)
+				value = &ast.ArrowFunctionExpression{
+					Params:   params,
+					Body:     body,
+					Async:    isAsync,
+					Position: propStartPos,
+					EndPos:   p.currentPos(),
+				}
+			} else if isAsync || isGetter || isSetter {
+				// If we saw 'async', 'get', or 'set' but no '(', it's an error
+				return nil, fmt.Errorf("expected '(' after modifier keyword in method shorthand at %s", p.currentPos())
+			} else if p.match(":") {
 				// Regular property: key: value
 				p.advance() // consume ":"
 				p.skipWhitespaceAndComments()
@@ -2841,6 +2947,33 @@ func (p *parser) parseArrowFunction() (*ast.ArrowFunctionExpression, error) {
 				}
 				param := &ast.Parameter{
 					ID:       &ast.Identifier{Name: "destructured_param", Position: startPos, EndPos: p.currentPos()},
+					Position: startPos,
+					EndPos:   p.currentPos(),
+				}
+				params = append(params, param)
+				p.skipWhitespaceAndComments()
+				if p.match(",") {
+					p.advance()
+					p.skipWhitespaceAndComments()
+				}
+				continue
+			}
+
+			// HACK: Handle array destructuring as a placeholder (e.g., [name, value])
+			if p.match("[") {
+				startPos := p.currentPos()
+				p.advance()
+				depth := 1
+				for depth > 0 && !p.isAtEnd() {
+					if p.match("[") {
+						depth++
+					} else if p.match("]") {
+						depth--
+					}
+					p.advance()
+				}
+				param := &ast.Parameter{
+					ID:       &ast.Identifier{Name: "destructured_array_param", Position: startPos, EndPos: p.currentPos()},
 					Position: startPos,
 					EndPos:   p.currentPos(),
 				}
@@ -3399,7 +3532,7 @@ func (p *parser) parseInterfaceDeclaration() (*ast.InterfaceDeclaration, error) 
 	iterations := 0
 	for !p.match("}") && !p.isAtEnd() && iterations < maxParserIterations {
 		iterations++
-		// Parse property
+		// Parse property or method signature
 		key, err := p.parseIdentifier()
 		if err != nil {
 			return nil, err
@@ -3407,34 +3540,197 @@ func (p *parser) parseInterfaceDeclaration() (*ast.InterfaceDeclaration, error) 
 
 		p.skipWhitespaceAndComments()
 
-		// Check for optional marker
-		optional := false
-		if p.match("?") {
-			optional = true
+		// Check if it's a method signature (has < for generics or ( for params)
+		if p.match("<") || p.match("(") {
+			// Parse method signature
+
+			// Parse type parameters if present
+			var methodTypeParams []ast.TypeNode
+			if p.match("<") {
+				p.advance()
+				p.skipWhitespaceAndComments()
+
+				paramIterations := 0
+				for !p.match(">") && !p.isAtEnd() && paramIterations < maxParserIterations {
+					paramIterations++
+
+					// Parse type parameter name
+					typeParam, err := p.parseIdentifier()
+					if err != nil {
+						return nil, err
+					}
+
+					p.skipWhitespaceAndComments()
+
+					// Parse extends constraint if present
+					if p.matchKeyword("extends") {
+						p.consumeKeyword("extends")
+						p.skipWhitespaceAndComments()
+
+						// Parse the constraint type (can be complex like "keyof HTMLElementTagNameMap")
+						// We need to consume tokens until we hit , or > or =
+						constraintDepth := 0
+						for !p.isAtEnd() {
+							if p.match("<") {
+								constraintDepth++
+								p.advance()
+							} else if p.match(">") {
+								if constraintDepth == 0 {
+									break
+								}
+								constraintDepth--
+								p.advance()
+							} else if (p.match(",") || p.match("=")) && constraintDepth == 0 {
+								break
+							} else {
+								p.advance()
+							}
+							p.skipWhitespaceAndComments()
+						}
+					}
+
+					p.skipWhitespaceAndComments()
+
+					// Parse default type if present (e.g., = Element)
+					if p.match("=") {
+						p.advance()
+						p.skipWhitespaceAndComments()
+
+						// Consume default type until we hit , or >
+						defaultDepth := 0
+						for !p.isAtEnd() {
+							if p.match("<") {
+								defaultDepth++
+								p.advance()
+							} else if p.match(">") {
+								if defaultDepth == 0 {
+									break
+								}
+								defaultDepth--
+								p.advance()
+							} else if p.match(",") && defaultDepth == 0 {
+								break
+							} else {
+								p.advance()
+							}
+							p.skipWhitespaceAndComments()
+						}
+					}
+
+					methodTypeParams = append(methodTypeParams, &ast.TypeReference{
+						Name:     typeParam.Name,
+						Position: typeParam.Pos(),
+						EndPos:   typeParam.End(),
+					})
+
+					p.skipWhitespaceAndComments()
+					if p.match(",") {
+						p.advance()
+						p.skipWhitespaceAndComments()
+					}
+				}
+
+				if !p.match(">") {
+					return nil, fmt.Errorf("expected '>' after method type parameters")
+				}
+				p.advance()
+				p.skipWhitespaceAndComments()
+			}
+
+			// Parse method parameters
+			if !p.match("(") {
+				return nil, fmt.Errorf("expected '(' for method parameters")
+			}
 			p.advance()
 			p.skipWhitespaceAndComments()
-		}
 
-		// Expect :
-		if !p.match(":") {
-			return nil, fmt.Errorf("expected ':' after property name in interface")
-		}
-		p.advance()
-		p.skipWhitespaceAndComments()
+			// Skip method parameters (we're just parsing structure, not full semantics)
+			paramDepth := 1
+			for paramDepth > 0 && !p.isAtEnd() {
+				if p.match("(") {
+					paramDepth++
+					p.advance()
+				} else if p.match(")") {
+					paramDepth--
+					p.advance()
+				} else {
+					p.advance()
+				}
+				p.skipWhitespaceAndComments()
+			}
 
-		// Parse property type
-		propType, err := p.parseTypeAnnotationFull()
-		if err != nil {
-			return nil, err
-		}
+			p.skipWhitespaceAndComments()
 
-		body = append(body, ast.InterfaceProperty{
-			Key:      key,
-			Value:    propType,
-			Optional: optional,
-			Position: key.Pos(),
-			EndPos:   p.currentPos(),
-		})
+			// Parse return type after :
+			if p.match(":") {
+				p.advance()
+				p.skipWhitespaceAndComments()
+
+				// Skip the entire return type (can be very complex with indexed access, unions, etc.)
+				// We'll consume tokens until we hit ; or , or } at depth 0
+				depth := 0
+				for !p.isAtEnd() {
+					if p.match("<") || p.match("[") || p.match("{") || p.match("(") {
+						depth++
+						p.advance()
+					} else if p.match(">") || p.match("]") || p.match("}") || p.match(")") {
+						if depth > 0 {
+							depth--
+						}
+						p.advance()
+					} else if (p.match(";") || p.match(",")) && depth == 0 {
+						break
+					} else if p.match("}") && depth == 0 {
+						// End of interface body
+						break
+					} else {
+						p.advance()
+					}
+					p.skipWhitespaceAndComments()
+				}
+			}
+
+			// Add as a property with function type (simplified representation)
+			body = append(body, ast.InterfaceProperty{
+				Key:      key,
+				Value:    &ast.TypeReference{Name: "Function", Position: key.Pos(), EndPos: p.currentPos()},
+				Optional: false,
+				Position: key.Pos(),
+				EndPos:   p.currentPos(),
+			})
+
+		} else {
+			// Parse property signature
+
+			// Check for optional marker
+			optional := false
+			if p.match("?") {
+				optional = true
+				p.advance()
+				p.skipWhitespaceAndComments()
+			}
+
+			// Expect :
+			if !p.match(":") {
+				return nil, fmt.Errorf("expected ':' after property name in interface")
+			}
+			p.advance()
+			p.skipWhitespaceAndComments()
+
+			// Parse property type
+			propType, err := p.parseTypeAnnotationFull()
+			if err != nil {
+				return nil, err
+			}
+
+			body = append(body, ast.InterfaceProperty{
+				Key:      key,
+				Value:    propType,
+				Optional: optional,
+				Position: key.Pos(),
+				EndPos:   p.currentPos(),
+			})
+		}
 
 		p.skipWhitespaceAndComments()
 
@@ -3457,6 +3753,222 @@ func (p *parser) parseInterfaceDeclaration() (*ast.InterfaceDeclaration, error) 
 		TypeParameters: typeParameters,
 		Position:       startPos,
 		EndPos:         p.currentPos(),
+	}, nil
+}
+
+// parseDeclareStatement parses a declare statement (for .d.ts files)
+func (p *parser) parseDeclareStatement() (ast.Statement, error) {
+	startPos := p.currentPos()
+	p.consumeKeyword("declare")
+	p.skipWhitespaceAndComments()
+
+	// Check what's being declared
+	if p.matchKeyword("module") {
+		return p.parseDeclareModule(startPos)
+	}
+
+	if p.matchKeyword("namespace") {
+		return p.parseDeclareNamespace(startPos)
+	}
+
+	if p.matchKeyword("global") {
+		return p.parseDeclareGlobal(startPos)
+	}
+
+	// declare var/let/const
+	if p.matchKeyword("var", "let", "const") {
+		return p.parseVariableDeclaration()
+	}
+
+	// declare function
+	if p.matchKeyword("function") {
+		return p.parseFunctionDeclaration()
+	}
+
+	// declare class
+	if p.matchKeyword("class") {
+		return p.parseClassDeclaration()
+	}
+
+	// declare interface
+	if p.matchKeyword("interface") {
+		return p.parseInterfaceDeclaration()
+	}
+
+	// declare type
+	if p.matchKeyword("type") {
+		return p.parseTypeAliasDeclaration()
+	}
+
+	return nil, fmt.Errorf("unexpected token after 'declare' keyword")
+}
+
+// parseDeclareModule parses: declare module 'name' { ... }
+func (p *parser) parseDeclareModule(startPos ast.Position) (ast.Statement, error) {
+	p.consumeKeyword("module")
+	p.skipWhitespaceAndComments()
+
+	// Parse module name (string literal)
+	var moduleName string
+	if p.match("'") || p.match("\"") {
+		quote := p.current()
+		p.advance()
+		nameStart := p.pos
+		for !p.match(quote) && !p.isAtEnd() {
+			p.advance()
+		}
+		moduleName = p.source[nameStart:p.pos]
+		p.expect(quote)
+	} else {
+		// Could be an identifier for namespace-style module
+		id, err := p.parseIdentifier()
+		if err != nil {
+			return nil, err
+		}
+		moduleName = id.Name
+	}
+
+	// Use moduleName to avoid unused variable warning (could be used for metadata later)
+	_ = moduleName
+
+	p.skipWhitespaceAndComments()
+
+	// Parse module body
+	if !p.match("{") {
+		return nil, fmt.Errorf("expected '{' after module name")
+	}
+	p.advance()
+	p.skipWhitespaceAndComments()
+
+	var body []ast.Statement
+	iterations := 0
+	for !p.match("}") && !p.isAtEnd() && iterations < maxParserIterations {
+		iterations++
+		stmt, err := p.parseStatement()
+		if err != nil {
+			// Skip to next statement on error
+			for !p.match(";") && !p.match("}") && !p.isAtEnd() {
+				p.advance()
+			}
+			if p.match(";") {
+				p.advance()
+			}
+			continue
+		}
+		if stmt != nil {
+			body = append(body, stmt)
+		}
+		p.skipWhitespaceAndComments()
+	}
+
+	if !p.match("}") {
+		return nil, fmt.Errorf("expected '}' at end of declare module")
+	}
+	p.advance()
+
+	// Return as a block statement (simplified representation)
+	return &ast.BlockStatement{
+		Body:     body,
+		Position: startPos,
+		EndPos:   p.currentPos(),
+	}, nil
+}
+
+// parseDeclareNamespace parses: declare namespace Name { ... }
+func (p *parser) parseDeclareNamespace(startPos ast.Position) (ast.Statement, error) {
+	p.consumeKeyword("namespace")
+	p.skipWhitespaceAndComments()
+
+	// Parse namespace name
+	_, err := p.parseIdentifier()
+	if err != nil {
+		return nil, err
+	}
+
+	p.skipWhitespaceAndComments()
+
+	// Parse namespace body
+	if !p.match("{") {
+		return nil, fmt.Errorf("expected '{' after namespace name")
+	}
+	p.advance()
+	p.skipWhitespaceAndComments()
+
+	var body []ast.Statement
+	iterations := 0
+	for !p.match("}") && !p.isAtEnd() && iterations < maxParserIterations {
+		iterations++
+		stmt, err := p.parseStatement()
+		if err != nil {
+			// Skip to next statement on error
+			for !p.match(";") && !p.match("}") && !p.isAtEnd() {
+				p.advance()
+			}
+			if p.match(";") {
+				p.advance()
+			}
+			continue
+		}
+		if stmt != nil {
+			body = append(body, stmt)
+		}
+		p.skipWhitespaceAndComments()
+	}
+
+	if !p.match("}") {
+		return nil, fmt.Errorf("expected '}' at end of namespace")
+	}
+	p.advance()
+
+	return &ast.BlockStatement{
+		Body:     body,
+		Position: startPos,
+		EndPos:   p.currentPos(),
+	}, nil
+}
+
+// parseDeclareGlobal parses: declare global { ... }
+func (p *parser) parseDeclareGlobal(startPos ast.Position) (ast.Statement, error) {
+	p.consumeKeyword("global")
+	p.skipWhitespaceAndComments()
+
+	// Parse global body
+	if !p.match("{") {
+		return nil, fmt.Errorf("expected '{' after 'global'")
+	}
+	p.advance()
+	p.skipWhitespaceAndComments()
+
+	var body []ast.Statement
+	iterations := 0
+	for !p.match("}") && !p.isAtEnd() && iterations < maxParserIterations {
+		iterations++
+		stmt, err := p.parseStatement()
+		if err != nil {
+			// Skip to next statement on error
+			for !p.match(";") && !p.match("}") && !p.isAtEnd() {
+				p.advance()
+			}
+			if p.match(";") {
+				p.advance()
+			}
+			continue
+		}
+		if stmt != nil {
+			body = append(body, stmt)
+		}
+		p.skipWhitespaceAndComments()
+	}
+
+	if !p.match("}") {
+		return nil, fmt.Errorf("expected '}' at end of declare global")
+	}
+	p.advance()
+
+	return &ast.BlockStatement{
+		Body:     body,
+		Position: startPos,
+		EndPos:   p.currentPos(),
 	}, nil
 }
 

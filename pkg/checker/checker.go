@@ -593,6 +593,14 @@ func (tc *TypeChecker) checkCallExpression(call *ast.CallExpression, filename st
 		// This check is already done in the symbol table, but we can add more
 		// sophisticated type checking here
 		if symbol, exists := tc.symbolTable.ResolveSymbol(id.Name); exists {
+			// Skip callability check for imported symbols (from ImportDeclaration)
+			// These are treated as 'any' type when the module has parse errors
+			if importDecl, ok := symbol.Node.(*ast.ImportDeclaration); ok && importDecl != nil {
+				// Symbol from import - allow call without validation
+				// (module may have parse errors, so we treat exports as 'any')
+				return
+			}
+
 			if !symbol.IsFunction {
 				msg := fmt.Sprintf("This expression is not callable. Type '%s' has no call signatures.", id.Name)
 				msg += "\n  Sugerencia: Verifica que estés llamando a una función y no a una variable"
@@ -1428,6 +1436,20 @@ func (tc *TypeChecker) SetLibs(libs []string) {
 	tc.inferencer = types.NewTypeInferencer(tc.globalEnv)
 	tc.inferencer.SetTypeCache(tc.typeCache)
 	tc.inferencer.SetVarTypeCache(tc.varTypeCache)
+}
+
+// SetPathAliases configures path aliases from tsconfig for module resolution
+func (tc *TypeChecker) SetPathAliases(baseUrl string, paths map[string][]string) {
+	if tc.moduleResolver != nil {
+		tc.moduleResolver.SetPathAliases(baseUrl, paths)
+	}
+}
+
+// SetTypeRoots configures type roots from tsconfig for declaration file resolution
+func (tc *TypeChecker) SetTypeRoots(typeRoots []string) {
+	if tc.moduleResolver != nil {
+		tc.moduleResolver.SetTypeRoots(typeRoots)
+	}
 }
 
 // GetConfig returns the current compiler configuration

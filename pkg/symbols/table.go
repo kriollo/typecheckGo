@@ -62,27 +62,27 @@ type Scope struct {
 
 // SymbolTable manages all symbols and scopes
 type SymbolTable struct {
-	Global   *Scope
-	Current  *Scope
-	Modules  map[string]*ModuleInfo
-	Errors   []SymbolError
+	Global  *Scope
+	Current *Scope
+	Modules map[string]*ModuleInfo
+	Errors  []SymbolError
 }
 
 // ModuleInfo contains information about a module
 type ModuleInfo struct {
-	Name        string
-	Path        string
-	Exports     map[string]*Symbol
-	Imports     map[string]*ImportInfo
-	IsExternal  bool
+	Name       string
+	Path       string
+	Exports    map[string]*Symbol
+	Imports    map[string]*ImportInfo
+	IsExternal bool
 }
 
 // ImportInfo contains information about an import
 type ImportInfo struct {
-	LocalName  string
-	ModuleName string
-	ExportName string
-	IsDefault  bool
+	LocalName   string
+	ModuleName  string
+	ExportName  string
+	IsDefault   bool
 	IsNamespace bool
 }
 
@@ -105,7 +105,7 @@ func NewSymbolTable() *SymbolTable {
 		Symbols: make(map[string]*Symbol),
 		Level:   0,
 	}
-	
+
 	return &SymbolTable{
 		Global:  global,
 		Current: global,
@@ -122,7 +122,7 @@ func (st *SymbolTable) EnterScope(node ast.Node) *Scope {
 		Level:   st.Current.Level + 1,
 		Node:    node,
 	}
-	
+
 	st.Current.Children = append(st.Current.Children, scope)
 	st.Current = scope
 	return scope
@@ -139,20 +139,29 @@ func (st *SymbolTable) ExitScope() {
 func (st *SymbolTable) DefineSymbol(name string, symbolType SymbolType, node ast.Node, mutable bool) *Symbol {
 	// Check if symbol already exists in current scope
 	if existing, exists := st.Current.Symbols[name]; exists {
-		st.addError(fmt.Sprintf("'%s' is already defined", name), 
-			node.Pos(), "TS2451", "error")
+		// Only add error if node is not nil
+		if node != nil {
+			st.addError(fmt.Sprintf("'%s' is already defined", name),
+				node.Pos(), "TS2451", "error")
+		}
 		return existing
 	}
-	
+
+	// Get position from node if available, otherwise use zero position
+	var declSpan ast.Position
+	if node != nil {
+		declSpan = node.Pos()
+	}
+
 	symbol := &Symbol{
 		Name:     name,
 		Type:     symbolType,
 		Node:     node,
 		Mutable:  mutable,
 		Scope:    st.Current,
-		DeclSpan: node.Pos(),
+		DeclSpan: declSpan,
 	}
-	
+
 	st.Current.Symbols[name] = symbol
 	return symbol
 }
@@ -161,7 +170,7 @@ func (st *SymbolTable) DefineSymbol(name string, symbolType SymbolType, node ast
 func (st *SymbolTable) DefineFunction(name string, node *ast.FunctionDeclaration) *Symbol {
 	symbol := st.DefineSymbol(name, FunctionSymbol, node, false)
 	symbol.IsFunction = true
-	
+
 	// Extract parameter names
 	var params []string
 	for _, param := range node.Params {
@@ -170,7 +179,7 @@ func (st *SymbolTable) DefineFunction(name string, node *ast.FunctionDeclaration
 		}
 	}
 	symbol.Params = params
-	
+
 	return symbol
 }
 
@@ -191,7 +200,7 @@ func (st *SymbolTable) ResolveSymbolInScope(name string, scope *Scope) (*Symbol,
 	if scope == nil {
 		return nil, false
 	}
-	
+
 	symbol, exists := scope.Symbols[name]
 	return symbol, exists
 }
@@ -203,14 +212,14 @@ func (st *SymbolTable) CheckSymbolUsage(name string, usagePos ast.Position, expe
 		st.addError(fmt.Sprintf("Cannot find name '%s'", name), usagePos, "TS2304", "error")
 		return false
 	}
-	
+
 	// Check type compatibility
 	if expectedType != VariableSymbol && symbol.Type != expectedType {
-		st.addError(fmt.Sprintf("'%s' is a %s, expected %s", name, symbol.Type, expectedType), 
+		st.addError(fmt.Sprintf("'%s' is a %s, expected %s", name, symbol.Type, expectedType),
 			usagePos, "TS2322", "error")
 		return false
 	}
-	
+
 	return true
 }
 
@@ -221,20 +230,20 @@ func (st *SymbolTable) CheckFunctionCall(name string, usagePos ast.Position, arg
 		st.addError(fmt.Sprintf("Cannot find name '%s'", name), usagePos, "TS2304", "error")
 		return false
 	}
-	
+
 	if !symbol.IsFunction {
 		st.addError(fmt.Sprintf("'%s' is not a function", name), usagePos, "TS2349", "error")
 		return false
 	}
-	
+
 	// Check parameter count
 	expectedCount := len(symbol.Params)
 	if argCount != expectedCount {
-		st.addError(fmt.Sprintf("Expected %d arguments, but got %d", expectedCount, argCount), 
+		st.addError(fmt.Sprintf("Expected %d arguments, but got %d", expectedCount, argCount),
 			usagePos, "TS2554", "error")
 		return false
 	}
-	
+
 	return true
 }
 
@@ -264,14 +273,14 @@ func (st *SymbolTable) Dump() string {
 func (st *SymbolTable) dumpScope(scope *Scope, builder *strings.Builder, indent int) {
 	indentStr := strings.Repeat("  ", indent)
 	builder.WriteString(fmt.Sprintf("%sScope Level %d:\n", indentStr, scope.Level))
-	
+
 	for name, symbol := range scope.Symbols {
 		builder.WriteString(fmt.Sprintf("%s  %s: %s (%s)\n", indentStr, name, symbol.Type, symbol.Name))
 		if symbol.IsFunction {
 			builder.WriteString(fmt.Sprintf("%s    params: %v\n", indentStr, symbol.Params))
 		}
 	}
-	
+
 	for _, child := range scope.Children {
 		st.dumpScope(child, builder, indent+1)
 	}
@@ -296,7 +305,7 @@ func (st *SymbolTable) DefineModule(name, path string) *ModuleInfo {
 		Exports: make(map[string]*Symbol),
 		Imports: make(map[string]*ImportInfo),
 	}
-	
+
 	st.Modules[name] = module
 	return module
 }
@@ -311,7 +320,7 @@ func (st *SymbolTable) AddExport(moduleName, exportName string, symbol *Symbol) 
 	if !exists {
 		module = st.DefineModule(moduleName, "")
 	}
-	
+
 	module.Exports[exportName] = symbol
 }
 
@@ -320,7 +329,7 @@ func (st *SymbolTable) AddImport(moduleName, localName, exportName string, isDef
 	if !exists {
 		module = st.DefineModule(moduleName, "")
 	}
-	
+
 	importInfo := &ImportInfo{
 		LocalName:   localName,
 		ModuleName:  moduleName,
@@ -328,6 +337,6 @@ func (st *SymbolTable) AddImport(moduleName, localName, exportName string, isDef
 		IsDefault:   isDefault,
 		IsNamespace: isNamespace,
 	}
-	
+
 	module.Imports[localName] = importInfo
 }

@@ -100,6 +100,16 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	libs := tsConfig.CompilerOptions.GetLib()
 	typeChecker.SetLibs(libs)
 
+	// Configure path aliases from tsconfig
+	if tsConfig.CompilerOptions.BaseUrl != "" || len(tsConfig.CompilerOptions.Paths) > 0 {
+		typeChecker.SetPathAliases(tsConfig.CompilerOptions.BaseUrl, tsConfig.CompilerOptions.Paths)
+	}
+
+	// Configure type roots from tsconfig
+	if len(tsConfig.CompilerOptions.TypeRoots) > 0 {
+		typeChecker.SetTypeRoots(tsConfig.CompilerOptions.TypeRoots)
+	}
+
 	// Configure type checker with tsconfig options
 	// Note: When strict is true, individual flags can still be explicitly disabled
 	checkerConfig := &checker.CompilerConfig{
@@ -266,6 +276,16 @@ func checkCodeInput(code string, name string) error {
 	// Configure type checker with libs from tsconfig
 	libs := tsConfig.CompilerOptions.GetLib()
 	typeChecker.SetLibs(libs)
+
+	// Configure path aliases from tsconfig
+	if tsConfig.CompilerOptions.BaseUrl != "" || len(tsConfig.CompilerOptions.Paths) > 0 {
+		typeChecker.SetPathAliases(tsConfig.CompilerOptions.BaseUrl, tsConfig.CompilerOptions.Paths)
+	}
+
+	// Configure type roots from tsconfig
+	if len(tsConfig.CompilerOptions.TypeRoots) > 0 {
+		typeChecker.SetTypeRoots(tsConfig.CompilerOptions.TypeRoots)
+	}
 
 	// Configure type checker with tsconfig options
 	checkerConfig := &checker.CompilerConfig{

@@ -304,6 +304,45 @@ func NewGlobalEnvironmentWithLibs(libs []string) *GlobalEnvironment {
 			"dataset":             Any,
 		})
 
+		// HTMLInputElement type
+		htmlInputElementType := NewObjectType("HTMLInputElement", map[string]*Type{
+			"value":       String,
+			"checked":     Boolean,
+			"disabled":    Boolean,
+			"type":        String,
+			"name":        String,
+			"placeholder": String,
+			"required":    Boolean,
+			"readOnly":    Boolean,
+			"min":         String,
+			"max":         String,
+			"step":        String,
+			"pattern":     String,
+			"focus":       NewFunctionType([]*Type{}, Void),
+			"blur":        NewFunctionType([]*Type{}, Void),
+			"select":      NewFunctionType([]*Type{}, Void),
+		})
+
+		// HTMLFormElement type
+		htmlFormElementType := NewObjectType("HTMLFormElement", map[string]*Type{
+			"submit":   NewFunctionType([]*Type{}, Void),
+			"reset":    NewFunctionType([]*Type{}, Void),
+			"elements": Any,
+			"length":   Number,
+			"method":   String,
+			"action":   String,
+			"target":   String,
+			"enctype":  String,
+		})
+
+		// HTMLButtonElement type
+		htmlButtonElementType := NewObjectType("HTMLButtonElement", map[string]*Type{
+			"disabled": Boolean,
+			"type":     String,
+			"value":    String,
+			"click":    NewFunctionType([]*Type{}, Void),
+		})
+
 		// HTMLImageElement type
 		htmlImageElementType := NewObjectType("HTMLImageElement", map[string]*Type{
 			"src":    String,
@@ -330,15 +369,32 @@ func NewGlobalEnvironmentWithLibs(libs []string) *GlobalEnvironment {
 			"disconnect": NewFunctionType([]*Type{}, Void),
 		})
 
+		// FormData type
+		formDataType := NewObjectType("FormData", map[string]*Type{
+			"append":  NewFunctionType([]*Type{String, Any}, Void),
+			"delete":  NewFunctionType([]*Type{String}, Void),
+			"get":     NewFunctionType([]*Type{String}, Any),
+			"getAll":  NewFunctionType([]*Type{String}, NewArrayType(Any)),
+			"has":     NewFunctionType([]*Type{String}, Boolean),
+			"set":     NewFunctionType([]*Type{String, Any}, Void),
+			"entries": NewFunctionType([]*Type{}, Any),
+			"keys":    NewFunctionType([]*Type{}, Any),
+			"values":  NewFunctionType([]*Type{}, Any),
+		})
+
 		// Register DOM globals
 		env.Objects["document"] = documentType
 		env.Objects["window"] = windowType
 		env.Objects["fetch"] = NewFunctionType([]*Type{String, Any}, promiseType)
 		env.Objects["Event"] = eventType
 		env.Objects["HTMLElement"] = htmlElementType
+		env.Objects["HTMLInputElement"] = htmlInputElementType
+		env.Objects["HTMLFormElement"] = htmlFormElementType
+		env.Objects["HTMLButtonElement"] = htmlButtonElementType
 		env.Objects["HTMLImageElement"] = htmlImageElementType
 		env.Objects["Response"] = responseType
 		env.Objects["IntersectionObserver"] = intersectionObserverType
+		env.Objects["FormData"] = formDataType
 	}
 
 	// Constantes globales

@@ -1,36 +1,29 @@
 {
-  "compilerOptions": {
-    "target": "ES2020",
-    "module":"nodenext",
-    "declaration": true,
-    "lib": ["ES2020", "DOM"],
-    "outDir": "./dist",
-    "rootDir": "./",
-    "baseUrl": "./",
-    "paths": {
-      "@/*": ["src/*"],
-      "@utils/*": ["src/utils/*"],
-      "@types/*": ["src/types/*"]
+    "compilerOptions": {
+        "target": "ES2020",
+        "module": "nodenext",
+        "declaration": true,
+        "lib": ["ES2020", "DOM"],
+        "outDir": "./dist",
+        "rootDir": "./",
+        "baseUrl": "./",
+        "paths": {
+            "@/*": ["src/*"],
+            "P@/*": ["./assets/*"],
+            "N@/*": ["./node_modules/*"]
+        },
+        "strict": true,
+        "noImplicitAny": false,
+        "strictNullChecks": true,
+        "noUnusedLocals": false,
+        "noUnusedParameters": false,
+        "noImplicitReturns": false,
+        "skipLibCheck": true,
+        "allowJs": false,
+        "checkJs": false,
+        "moduleResolution": "nodenext",
+        "typeRoots": ["./node_modules/@types", "./types", "./src/jscontrollers/types"]
     },
-    "strict": true,
-    "noImplicitAny": false,
-    "strictNullChecks": true,
-    "noUnusedLocals": false,
-    "noUnusedParameters": false,
-    "noImplicitReturns": false,
-    "skipLibCheck": true,
-    "allowJs": false,
-    "checkJs": false,
-    "moduleResolution": "nodenext",
-    "typeRoots": ["./node_modules/@types", "./types"]
-  },
-  "include": [
-    "test/**/*",
-    "pkg/**/*"
-  ],
-  "exclude": [
-    "node_modules",
-    "dist",
-    "**/*.spec.ts"
-  ]
+    "include": ["test/**/*", "pkg/**/*"],
+    "exclude": ["node_modules", "dist", "**/*.spec.ts"]
 }

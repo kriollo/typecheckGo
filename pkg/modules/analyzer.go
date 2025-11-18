@@ -69,18 +69,7 @@ func (a *ModuleAnalyzer) analyzeStatement(module *ResolvedModule, stmt ast.State
 
 // analyzeExportDeclaration analiza una declaración de export
 func (a *ModuleAnalyzer) analyzeExportDeclaration(module *ResolvedModule, export *ast.ExportDeclaration) error {
-	// Export por defecto - se detecta si no hay especificadores ni source
-	if len(export.Specifiers) == 0 && export.Source == nil && export.Declaration != nil {
-		module.DefaultExport = &ExportInfo{
-			Name:     "default",
-			Type:     "default",
-			Node:     export.Declaration,
-			Position: export.Pos(),
-		}
-		return nil
-	}
-
-	// Named exports
+	// Named exports with specifiers (e.g., export { foo, bar })
 	if len(export.Specifiers) > 0 {
 		sourceModule := ""
 		if export.Source != nil {
@@ -106,7 +95,7 @@ func (a *ModuleAnalyzer) analyzeExportDeclaration(module *ResolvedModule, export
 		return nil
 	}
 
-	// Export de una declaración
+	// Export de una declaración (e.g., export const foo = 42; export function bar() {})
 	if export.Declaration != nil {
 		switch decl := export.Declaration.(type) {
 		case *ast.FunctionDeclaration:
@@ -124,6 +113,14 @@ func (a *ModuleAnalyzer) analyzeExportDeclaration(module *ResolvedModule, export
 					Node:     decl,
 					Position: decl.Pos(),
 				}
+			}
+		default:
+			// This might be a default export (e.g., export default expression)
+			module.DefaultExport = &ExportInfo{
+				Name:     "default",
+				Type:     "default",
+				Node:     export.Declaration,
+				Position: export.Pos(),
 			}
 		}
 	}
