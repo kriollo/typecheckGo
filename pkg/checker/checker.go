@@ -1172,19 +1172,42 @@ func (tc *TypeChecker) checkClassDeclaration(decl *ast.ClassDeclaration, filenam
 			fmt.Sprintf("Invalid class name: '%s'", decl.ID.Name), "TS1003", "error")
 	}
 
+	// Find the class scope
+	classScope := tc.findScopeForNode(decl)
+	if classScope == nil {
+		// If we can't find the scope, skip member checking
+		return
+	}
+
+	// Save current scope
+	originalScope := tc.symbolTable.Current
+
+	// Enter class scope
+	tc.symbolTable.Current = classScope
+
 	// Check members
 	for _, member := range decl.Body {
 		switch m := member.(type) {
 		case *ast.MethodDefinition:
 			// Check method
 			if m.Value != nil && m.Value.Body != nil {
-				// Set current function for return type checking
-				previousFunction := tc.currentFunction
-				tc.currentFunction = nil // Methods are not FunctionDeclaration
+				// Find method scope
+				methodScope := tc.findScopeForNode(m)
+				if methodScope != nil {
+					// Set current function for return type checking
+					previousFunction := tc.currentFunction
+					tc.currentFunction = nil // Methods are not FunctionDeclaration
 
-				tc.checkBlockStatement(m.Value.Body, filename)
+					// Enter method scope
+					tc.symbolTable.Current = methodScope
 
-				tc.currentFunction = previousFunction
+					tc.checkBlockStatement(m.Value.Body, filename)
+
+					// Restore class scope
+					tc.symbolTable.Current = classScope
+
+					tc.currentFunction = previousFunction
+				}
 			}
 
 		case *ast.PropertyDefinition:
@@ -1194,6 +1217,9 @@ func (tc *TypeChecker) checkClassDeclaration(decl *ast.ClassDeclaration, filenam
 			}
 		}
 	}
+
+	// Restore original scope
+	tc.symbolTable.Current = originalScope
 }
 
 func (tc *TypeChecker) checkNewExpression(expr *ast.NewExpression, filename string) {
