@@ -502,6 +502,44 @@ func (w *WhileStatement) Pos() Position { return w.Position }
 func (w *WhileStatement) End() Position { return w.EndPos }
 func (w *WhileStatement) stmtNode()     {}
 
+// TryStatement represents try-catch-finally
+type TryStatement struct {
+	Block     *BlockStatement
+	Handler   *CatchClause    // can be nil
+	Finalizer *BlockStatement // can be nil
+	Position  Position
+	EndPos    Position
+}
+
+func (t *TryStatement) Type() string  { return "TryStatement" }
+func (t *TryStatement) Pos() Position { return t.Position }
+func (t *TryStatement) End() Position { return t.EndPos }
+func (t *TryStatement) stmtNode()     {}
+
+// CatchClause represents catch clause
+type CatchClause struct {
+	Param    *Identifier // can be nil for catch without parameter
+	Body     *BlockStatement
+	Position Position
+	EndPos   Position
+}
+
+func (c *CatchClause) Type() string  { return "CatchClause" }
+func (c *CatchClause) Pos() Position { return c.Position }
+func (c *CatchClause) End() Position { return c.EndPos }
+
+// ThrowStatement represents throw statement
+type ThrowStatement struct {
+	Argument Expression
+	Position Position
+	EndPos   Position
+}
+
+func (t *ThrowStatement) Type() string  { return "ThrowStatement" }
+func (t *ThrowStatement) Pos() Position { return t.Position }
+func (t *ThrowStatement) End() Position { return t.EndPos }
+func (t *ThrowStatement) stmtNode()     {}
+
 // AssignmentExpression represents an assignment x = value
 type AssignmentExpression struct {
 	Left     Expression

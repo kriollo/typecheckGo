@@ -55,6 +55,10 @@ func (b *Binder) bindStatement(stmt ast.Statement) {
 		b.bindClassDeclaration(s)
 	case *ast.SwitchStatement:
 		b.bindSwitchStatement(s)
+	case *ast.TryStatement:
+		b.bindTryStatement(s)
+	case *ast.ThrowStatement:
+		b.bindThrowStatement(s)
 	default:
 		// Unknown statement type
 		fmt.Printf("Warning: Unknown statement type: %T\n", stmt)
@@ -422,6 +426,43 @@ func (b *Binder) bindArrowFunction(arrow *ast.ArrowFunctionExpression) {
 
 	// Exit the function scope
 	b.table.ExitScope()
+}
+
+func (b *Binder) bindTryStatement(stmt *ast.TryStatement) {
+	// Bind the try block
+	if stmt.Block != nil {
+		b.bindBlockStatement(stmt.Block)
+	}
+
+	// Bind the catch clause
+	if stmt.Handler != nil {
+		// Create a new scope for the catch clause
+		b.table.EnterScope(stmt.Handler)
+
+		// Define the catch parameter if present
+		if stmt.Handler.Param != nil {
+			b.table.DefineSymbol(stmt.Handler.Param.Name, VariableSymbol, stmt.Handler.Param, false)
+		}
+
+		// Bind the catch block
+		if stmt.Handler.Body != nil {
+			b.bindBlockStatement(stmt.Handler.Body)
+		}
+
+		b.table.ExitScope()
+	}
+
+	// Bind the finally block
+	if stmt.Finalizer != nil {
+		b.bindBlockStatement(stmt.Finalizer)
+	}
+}
+
+func (b *Binder) bindThrowStatement(stmt *ast.ThrowStatement) {
+	// Bind the expression being thrown
+	if stmt.Argument != nil {
+		b.bindExpression(stmt.Argument)
+	}
 }
 
 // GetSymbolTable returns the symbol table

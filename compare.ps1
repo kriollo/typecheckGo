@@ -39,7 +39,7 @@ Write-Host "TypeScript exit code: $tscExitCode" -ForegroundColor $(if ($tscExitC
 Write-Host "tscheck exit code:    $tscheckExitCode" -ForegroundColor $(if ($tscheckExitCode -eq 0) { "Green" } else { "Red" })
 
 if ($tscExitCode -eq $tscheckExitCode) {
-    Write-Host "`n✓ Exit codes match!" -ForegroundColor Green
+    Write-Host "`nExit codes match!" -ForegroundColor Green
 } else {
-    Write-Host "`n✗ Exit codes differ" -ForegroundColor Yellow
+    Write-Host "`nExit codes differ" -ForegroundColor Yellow
 }

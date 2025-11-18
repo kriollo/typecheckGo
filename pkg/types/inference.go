@@ -6,22 +6,29 @@ import (
 
 // TypeInferencer infiere tipos de expresiones
 type TypeInferencer struct {
-	globalEnv *GlobalEnvironment
-	typeCache map[ast.Node]*Type
-	depth     int // Para evitar recursión infinita
+	globalEnv    *GlobalEnvironment
+	typeCache    map[ast.Node]*Type
+	varTypeCache map[string]*Type
+	depth        int // Para evitar recursión infinita
 }
 
 // NewTypeInferencer crea un nuevo inferenciador de tipos
 func NewTypeInferencer(globalEnv *GlobalEnvironment) *TypeInferencer {
 	return &TypeInferencer{
-		globalEnv: globalEnv,
-		typeCache: make(map[ast.Node]*Type),
+		globalEnv:    globalEnv,
+		typeCache:    make(map[ast.Node]*Type),
+		varTypeCache: make(map[string]*Type),
 	}
 }
 
 // SetTypeCache sets the type cache (shared with checker)
 func (ti *TypeInferencer) SetTypeCache(cache map[ast.Node]*Type) {
 	ti.typeCache = cache
+}
+
+// SetVarTypeCache sets the variable type cache (shared with checker)
+func (ti *TypeInferencer) SetVarTypeCache(cache map[string]*Type) {
+	ti.varTypeCache = cache
 }
 
 // InferType infiere el tipo de una expresión
@@ -42,7 +49,15 @@ func (ti *TypeInferencer) InferType(expr ast.Expression) *Type {
 	case *ast.Literal:
 		return ti.inferLiteralType(e)
 	case *ast.Identifier:
-		// Por ahora retornamos unknown, necesitaríamos la symbol table
+		// First check if we have a cached type for this specific node
+		if cachedType, ok := ti.typeCache[e]; ok {
+			return cachedType
+		}
+		// Then check by variable name
+		if cachedType, ok := ti.varTypeCache[e.Name]; ok {
+			return cachedType
+		}
+		// If not found in cache, return Unknown
 		return Unknown
 	case *ast.BinaryExpression:
 		return ti.inferBinaryExpressionType(e)

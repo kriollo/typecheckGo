@@ -96,6 +96,10 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	// Create type checker with module resolution
 	typeChecker := checker.NewWithModuleResolver(rootDir)
 
+	// Configure type checker with libs from tsconfig
+	libs := tsConfig.CompilerOptions.GetLib()
+	typeChecker.SetLibs(libs)
+
 	// Configure type checker with tsconfig options
 	// Note: When strict is true, individual flags can still be explicitly disabled
 	checkerConfig := &checker.CompilerConfig{
@@ -258,6 +262,10 @@ func checkCodeInput(code string, name string) error {
 
 	// Create type checker with module resolution
 	typeChecker := checker.NewWithModuleResolver(rootDir)
+
+	// Configure type checker with libs from tsconfig
+	libs := tsConfig.CompilerOptions.GetLib()
+	typeChecker.SetLibs(libs)
 
 	// Configure type checker with tsconfig options
 	checkerConfig := &checker.CompilerConfig{

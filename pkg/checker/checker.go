@@ -62,18 +62,20 @@ func (e TypeError) Error() string {
 func New() *TypeChecker {
 	globalEnv := types.NewGlobalEnvironment()
 	typeCache := make(map[ast.Node]*types.Type)
+	varTypeCache := make(map[string]*types.Type)
 	inferencer := types.NewTypeInferencer(globalEnv)
 	inferencer.SetTypeCache(typeCache)
+	inferencer.SetVarTypeCache(varTypeCache)
 
 	return &TypeChecker{
-		symbolTable:  symbols.NewSymbolTable(),
-		errors:       []TypeError{},
-		globalEnv:    globalEnv,
-		typeCache:    typeCache,
-		varTypeCache: make(map[string]*types.Type),
+		symbolTable:    symbols.NewSymbolTable(),
+		errors:         []TypeError{},
+		globalEnv:      globalEnv,
+		typeCache:      typeCache,
+		varTypeCache:   varTypeCache,
 		typeAliasCache: make(map[string]*types.Type),
-		inferencer:   inferencer,
-		config:       getDefaultConfig(),
+		inferencer:     inferencer,
+		config:         getDefaultConfig(),
 	}
 }
 
@@ -103,8 +105,10 @@ func NewWithModuleResolver(rootDir string) *TypeChecker {
 	moduleResolver := modules.NewModuleResolver(rootDir, symbolTable)
 	globalEnv := types.NewGlobalEnvironment()
 	typeCache := make(map[ast.Node]*types.Type)
+	varTypeCache := make(map[string]*types.Type)
 	inferencer := types.NewTypeInferencer(globalEnv)
 	inferencer.SetTypeCache(typeCache)
+	inferencer.SetVarTypeCache(varTypeCache)
 
 	return &TypeChecker{
 		symbolTable:    symbolTable,
@@ -113,7 +117,7 @@ func NewWithModuleResolver(rootDir string) *TypeChecker {
 		globalEnv:      globalEnv,
 		typeCache:      typeCache,
 		config:         getDefaultConfig(),
-		varTypeCache:   make(map[string]*types.Type),
+		varTypeCache:   varTypeCache,
 		typeAliasCache: make(map[string]*types.Type),
 		inferencer:     inferencer,
 	}
@@ -182,6 +186,10 @@ func (tc *TypeChecker) checkStatement(stmt ast.Statement, filename string) {
 		tc.checkClassDeclaration(s, filename)
 	case *ast.SwitchStatement:
 		tc.checkSwitchStatement(s, filename)
+	case *ast.TryStatement:
+		tc.checkTryStatement(s, filename)
+	case *ast.ThrowStatement:
+		tc.checkThrowStatement(s, filename)
 	default:
 		// Unknown statement type - just a warning, don't block compilation
 		fmt.Fprintf(os.Stderr, "Warning: Unknown statement type: %T\n", stmt)
@@ -207,6 +215,12 @@ func (tc *TypeChecker) checkVariableDeclaration(decl *ast.VariableDeclaration, f
 				}
 			}
 
+			// Determine the declared type from type annotation
+			var declaredType *types.Type
+			if declarator.TypeAnnotation != nil {
+				declaredType = tc.convertTypeNode(declarator.TypeAnnotation)
+			}
+
 			// Infer type from initializer if present
 			if declarator.Init != nil {
 				tc.checkExpression(declarator.Init, filename)
@@ -224,13 +238,28 @@ func (tc *TypeChecker) checkVariableDeclaration(decl *ast.VariableDeclaration, f
 					}
 				}
 
-				// Store the inferred type in the cache
-				tc.typeCache[declarator] = inferredType
-				tc.typeCache[declarator.ID] = inferredType
-
-				// Also store it by variable name for easy lookup
-				tc.varTypeCache[declarator.ID.Name] = inferredType
-			} else if declarator.TypeAnnotation == nil {
+				// If there's a type annotation, check compatibility with initializer type
+				if declaredType != nil {
+					if !tc.isAssignableTo(inferredType, declaredType) {
+						tc.addError(filename, declarator.Init.Pos().Line, declarator.Init.Pos().Column,
+							fmt.Sprintf("Type '%s' is not assignable to type '%s'.", inferredType.String(), declaredType.String()),
+							"TS2322", "error")
+					}
+					// Store the declared type (not the inferred type) in the cache
+					tc.typeCache[declarator] = declaredType
+					tc.typeCache[declarator.ID] = declaredType
+					tc.varTypeCache[declarator.ID.Name] = declaredType
+				} else {
+					// No type annotation, store the inferred type
+					tc.typeCache[declarator] = inferredType
+					tc.typeCache[declarator.ID] = inferredType
+					tc.varTypeCache[declarator.ID.Name] = inferredType
+				}
+			} else if declarator.TypeAnnotation != nil {
+				// No initializer but has type annotation
+				tc.typeCache[declarator.ID] = declaredType
+				tc.varTypeCache[declarator.ID.Name] = declaredType
+			} else {
 				// No initializer and no type annotation - implicit any
 				tc.typeCache[declarator.ID] = types.Any
 				tc.varTypeCache[declarator.ID.Name] = types.Any
@@ -244,6 +273,15 @@ func (tc *TypeChecker) checkFunctionDeclaration(decl *ast.FunctionDeclaration, f
 	if !isValidIdentifier(decl.ID.Name) {
 		tc.addError(filename, decl.ID.Pos().Line, decl.ID.Pos().Column,
 			fmt.Sprintf("Invalid function name: '%s'", decl.ID.Name), "TS1003", "error")
+	}
+
+	// Check if async function is used without Promise support
+	if decl.Async {
+		if !tc.globalEnv.HasGlobal("Promise") {
+			tc.addError(filename, decl.Pos().Line, decl.Pos().Column,
+				"An async function or method in ES5 requires the 'Promise' constructor.  Make sure you have a declaration for the 'Promise' constructor or include 'ES2015' in your '--lib' option.",
+				"TS2705", "error")
+		}
 	}
 
 	// Check parameter names and types
@@ -588,6 +626,15 @@ func (tc *TypeChecker) checkCallExpression(call *ast.CallExpression, filename st
 }
 
 func (tc *TypeChecker) checkArrowFunction(arrow *ast.ArrowFunctionExpression, filename string) {
+	// Check if async arrow function is used without Promise support
+	if arrow.Async {
+		if !tc.globalEnv.HasGlobal("Promise") {
+			tc.addError(filename, arrow.Pos().Line, arrow.Pos().Column,
+				"An async function or method in ES5 requires the 'Promise' constructor.  Make sure you have a declaration for the 'Promise' constructor or include 'ES2015' in your '--lib' option.",
+				"TS2705", "error")
+		}
+	}
+
 	// Create a new scope for the arrow function
 	arrowScope := tc.findScopeForNode(arrow)
 	if arrowScope == nil {
@@ -631,6 +678,34 @@ func (tc *TypeChecker) checkMemberExpression(member *ast.MemberExpression, filen
 	// Check the object
 	tc.checkExpression(member.Object, filename)
 
+	// Get the type of the object
+	objectType := tc.getExpressionType(member.Object)
+
+	// TODO: Check if trying to access property on unknown type
+	// This is disabled for now because it requires proper type inference for:
+	// - Promise unwrapping (await expressions)
+	// - Function return types
+	// - Call expressions
+	// Without these, we get too many false positives
+	/*
+		if objectType.Kind == types.UnknownType {
+			if !member.Computed {
+				if objId, ok := member.Object.(*ast.Identifier); ok {
+					// Check if this is a catch parameter by looking it up in symbol table
+					if symbol, exists := tc.symbolTable.ResolveSymbol(objId.Name); exists {
+						// Only report TS18046 if it's a variable (likely catch param) with unknown type
+						if symbol.Type == symbols.VariableSymbol {
+							tc.addError(filename, member.Object.Pos().Line, member.Object.Pos().Column,
+								fmt.Sprintf("'%s' is of type 'unknown'.", tc.getObjectName(member.Object)),
+								"TS18046", "error")
+							return
+						}
+					}
+				}
+			}
+		}
+	*/
+
 	// Check the property
 	if !member.Computed {
 		// Property is an identifier
@@ -643,10 +718,35 @@ func (tc *TypeChecker) checkMemberExpression(member *ast.MemberExpression, filen
 				tc.addError(filename, id.Pos().Line, id.Pos().Column,
 					fmt.Sprintf("Invalid property name: '%s'", id.Name), "TS1003", "error")
 			}
+
+			// Check if property exists on the object type
+			if objectType.Kind == types.ObjectType && objectType.Properties != nil {
+				if _, exists := objectType.Properties[id.Name]; !exists {
+					// Property doesn't exist on this type
+					// Only report if the object type is not Any or Unknown
+					if objectType.Kind != types.AnyType && objectType.Kind != types.UnknownType {
+						tc.addError(filename, id.Pos().Line, id.Pos().Column,
+							fmt.Sprintf("Property '%s' does not exist on type '%s'.", id.Name, objectType.String()),
+							"TS2339", "error")
+					}
+				}
+			}
 		}
 	} else {
 		// Property is a computed expression
 		tc.checkExpression(member.Property, filename)
+	}
+}
+
+// getObjectName returns a readable name for an expression (for error messages)
+func (tc *TypeChecker) getObjectName(expr ast.Expression) string {
+	switch e := expr.(type) {
+	case *ast.Identifier:
+		return e.Name
+	case *ast.MemberExpression:
+		return tc.getObjectName(e.Object) + "." + tc.getObjectName(e.Property)
+	default:
+		return "object"
 	}
 }
 
@@ -1049,6 +1149,48 @@ func (tc *TypeChecker) checkSwitchStatement(stmt *ast.SwitchStatement, filename 
 	}
 }
 
+// checkTryStatement checks try-catch-finally statements
+func (tc *TypeChecker) checkTryStatement(stmt *ast.TryStatement, filename string) {
+	// Check the try block
+	if stmt.Block != nil {
+		tc.checkBlockStatement(stmt.Block, filename)
+	}
+
+	// Check the catch clause
+	if stmt.Handler != nil {
+		// Create a new scope for the catch clause
+		tc.symbolTable.EnterScope(stmt.Handler)
+
+		// Define the catch parameter if present
+		if stmt.Handler.Param != nil {
+			// In TypeScript, catch parameters are implicitly 'any' or 'unknown' depending on useUnknownInCatchVariables
+			// For now, we'll use 'unknown' as it's stricter
+			tc.symbolTable.DefineSymbol(stmt.Handler.Param.Name, symbols.VariableSymbol, stmt.Handler.Param, false)
+			tc.varTypeCache[stmt.Handler.Param.Name] = types.Unknown
+		}
+
+		// Check the catch block
+		if stmt.Handler.Body != nil {
+			tc.checkBlockStatement(stmt.Handler.Body, filename)
+		}
+
+		tc.symbolTable.ExitScope()
+	}
+
+	// Check the finally block
+	if stmt.Finalizer != nil {
+		tc.checkBlockStatement(stmt.Finalizer, filename)
+	}
+}
+
+// checkThrowStatement checks throw statements
+func (tc *TypeChecker) checkThrowStatement(stmt *ast.ThrowStatement, filename string) {
+	// Check the expression being thrown
+	if stmt.Argument != nil {
+		tc.checkExpression(stmt.Argument, filename)
+	}
+}
+
 // checkImportDeclaration checks import statements
 func (tc *TypeChecker) checkImportDeclaration(importDecl *ast.ImportDeclaration, filename string) {
 	if tc.moduleResolver == nil {
@@ -1093,6 +1235,11 @@ func (tc *TypeChecker) getExpressionType(expr ast.Expression) *types.Type {
 			return cachedType
 		}
 
+		// Check if it's a global
+		if globalType, exists := tc.globalEnv.GetObject(id.Name); exists {
+			return globalType
+		}
+
 		// If not in cache, try to infer from the symbol table
 		if symbol, exists := tc.symbolTable.ResolveSymbol(id.Name); exists {
 			// Check if we have a cached type for the symbol's declaration
@@ -1114,6 +1261,31 @@ func (tc *TypeChecker) getExpressionType(expr ast.Expression) *types.Type {
 			}
 		}
 		// If we couldn't find a type, return any (to avoid false positives)
+		return types.Any
+	}
+
+	// For member expressions, resolve the property type
+	if member, ok := expr.(*ast.MemberExpression); ok {
+		objectType := tc.getExpressionType(member.Object)
+
+		// If object is an ObjectType, try to get the property type
+		if objectType.Kind == types.ObjectType && objectType.Properties != nil {
+			if !member.Computed {
+				if propId, ok := member.Property.(*ast.Identifier); ok {
+					if propType, exists := objectType.Properties[propId.Name]; exists {
+						return propType
+					}
+				}
+			} else {
+				// For computed properties, return Any for now
+				return types.Any
+			}
+		}
+
+		// If we can't resolve it, return the object type or Any
+		if objectType.Kind != types.UnknownType {
+			return objectType
+		}
 		return types.Any
 	}
 
@@ -1247,6 +1419,15 @@ func (tc *TypeChecker) SetConfigFromTSConfig(tsconfig interface{}) {
 	// The actual TSConfig struct should be passed from the caller
 	// For now, we'll use reflection or type assertion if needed
 	tc.config = getDefaultConfig()
+}
+
+// SetLibs reconfigures the global environment based on library configuration
+func (tc *TypeChecker) SetLibs(libs []string) {
+	tc.globalEnv = types.NewGlobalEnvironmentWithLibs(libs)
+	// Update inferencer with new global environment
+	tc.inferencer = types.NewTypeInferencer(tc.globalEnv)
+	tc.inferencer.SetTypeCache(tc.typeCache)
+	tc.inferencer.SetVarTypeCache(tc.varTypeCache)
 }
 
 // GetConfig returns the current compiler configuration

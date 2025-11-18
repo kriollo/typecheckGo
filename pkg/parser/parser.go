@@ -137,76 +137,12 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 		return p.parseSwitchStatement()
 	}
 
-	// HACK: Skip try-catch-finally blocks for now
 	if p.matchKeyword("try") {
-		p.advanceWord() // consume 'try'
-		p.skipWhitespaceAndComments()
-		// Skip try block
-		if p.match("{") {
-			p.advance()
-			depth := 1
-			for depth > 0 && !p.isAtEnd() {
-				if p.match("{") {
-					depth++
-				} else if p.match("}") {
-					depth--
-				}
-				p.advance()
-			}
-		}
-		p.skipWhitespaceAndComments()
-		// Skip catch block if present
-		if p.matchKeyword("catch") {
-			p.advanceWord()
-			p.skipWhitespaceAndComments()
-			// Skip catch parameter
-			if p.match("(") {
-				p.advance()
-				depth := 1
-				for depth > 0 && !p.isAtEnd() {
-					if p.match("(") {
-						depth++
-					} else if p.match(")") {
-						depth--
-					}
-					p.advance()
-				}
-			}
-			p.skipWhitespaceAndComments()
-			// Skip catch block
-			if p.match("{") {
-				p.advance()
-				depth := 1
-				for depth > 0 && !p.isAtEnd() {
-					if p.match("{") {
-						depth++
-					} else if p.match("}") {
-						depth--
-					}
-					p.advance()
-				}
-			}
-		}
-		p.skipWhitespaceAndComments()
-		// Skip finally block if present
-		if p.matchKeyword("finally") {
-			p.advanceWord()
-			p.skipWhitespaceAndComments()
-			if p.match("{") {
-				p.advance()
-				depth := 1
-				for depth > 0 && !p.isAtEnd() {
-					if p.match("{") {
-						depth++
-					} else if p.match("}") {
-						depth--
-					}
-					p.advance()
-				}
-			}
-		}
-		// Return empty statement (we skipped the whole thing)
-		return nil, nil
+		return p.parseTryStatement()
+	}
+
+	if p.matchKeyword("throw") {
+		return p.parseThrowStatement()
 	}
 
 	if p.matchKeyword("import") {
@@ -2515,6 +2451,168 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// parseTryStatement parses try-catch-finally statements
+func (p *parser) parseTryStatement() (ast.Statement, error) {
+	startPos := p.currentPos()
+
+	// Consume 'try'
+	p.advanceWord()
+	p.skipWhitespaceAndComments()
+
+	// Parse try block (required)
+	if !p.match("{") {
+		return nil, fmt.Errorf("expected '{' after 'try' at %s", p.currentPos())
+	}
+
+	tryBlock, err := p.parseBlockStatement()
+	if err != nil {
+		return nil, err
+	}
+
+	p.skipWhitespaceAndComments()
+
+	var handler *ast.CatchClause
+	var finalizer *ast.BlockStatement
+
+	// Parse catch clause (optional)
+	if p.matchKeyword("catch") {
+		catchStartPos := p.currentPos()
+		p.advanceWord()
+		p.skipWhitespaceAndComments()
+
+		var param *ast.Identifier
+
+		// Parse catch parameter (optional in modern JavaScript/TypeScript)
+		if p.match("(") {
+			p.advance()
+			p.skipWhitespaceAndComments()
+
+			if !p.match(")") {
+				// Parse parameter name
+				paramName := p.advanceWord()
+				if paramName == "" {
+					return nil, fmt.Errorf("expected parameter name in catch clause at %s", p.currentPos())
+				}
+
+				param = &ast.Identifier{
+					Name:     paramName,
+					Position: p.currentPos(),
+					EndPos:   p.currentPos(),
+				}
+
+				// Skip optional type annotation for catch parameter
+				p.skipWhitespaceAndComments()
+				if p.match(":") {
+					p.advance()
+					p.skipTypeAnnotation()
+				}
+
+				p.skipWhitespaceAndComments()
+			}
+
+			if !p.match(")") {
+				return nil, fmt.Errorf("expected ')' after catch parameter at %s", p.currentPos())
+			}
+			p.advance()
+			p.skipWhitespaceAndComments()
+		}
+
+		// Parse catch block (required)
+		if !p.match("{") {
+			return nil, fmt.Errorf("expected '{' after catch clause at %s", p.currentPos())
+		}
+
+		catchBlock, err := p.parseBlockStatement()
+		if err != nil {
+			return nil, err
+		}
+
+		handler = &ast.CatchClause{
+			Param:    param,
+			Body:     catchBlock,
+			Position: catchStartPos,
+			EndPos:   catchBlock.End(),
+		}
+
+		p.skipWhitespaceAndComments()
+	}
+
+	// Parse finally block (optional)
+	if p.matchKeyword("finally") {
+		p.advanceWord()
+		p.skipWhitespaceAndComments()
+
+		if !p.match("{") {
+			return nil, fmt.Errorf("expected '{' after 'finally' at %s", p.currentPos())
+		}
+
+		finalizerBlock, err := p.parseBlockStatement()
+		if err != nil {
+			return nil, err
+		}
+
+		finalizer = finalizerBlock
+	}
+
+	// At least one of catch or finally must be present
+	if handler == nil && finalizer == nil {
+		return nil, fmt.Errorf("missing catch or finally after try at %s", startPos)
+	}
+
+	endPos := p.currentPos()
+	if finalizer != nil {
+		endPos = finalizer.End()
+	} else if handler != nil {
+		endPos = handler.End()
+	} else {
+		endPos = tryBlock.End()
+	}
+
+	return &ast.TryStatement{
+		Block:     tryBlock,
+		Handler:   handler,
+		Finalizer: finalizer,
+		Position:  startPos,
+		EndPos:    endPos,
+	}, nil
+}
+
+// parseThrowStatement parses throw statements
+func (p *parser) parseThrowStatement() (ast.Statement, error) {
+	startPos := p.currentPos()
+
+	// Consume 'throw'
+	p.advanceWord()
+
+	// Note: In JavaScript/TypeScript, there must be no line terminator between 'throw' and its expression
+	// For simplicity, we'll just skip whitespace but not newlines for now
+	// In a production parser, you'd need to track if you crossed a newline
+
+	p.skipWhitespaceAndComments()
+
+	// Parse the expression to throw
+	expr, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+
+	if expr == nil {
+		return nil, fmt.Errorf("expected expression after 'throw' at %s", p.currentPos())
+	}
+
+	// Optional semicolon
+	p.skipWhitespaceAndComments()
+	if p.match(";") {
+		p.advance()
+	}
+
+	return &ast.ThrowStatement{
+		Argument: expr,
+		Position: startPos,
+		EndPos:   p.currentPos(),
+	}, nil
 }
 
 // parseArrayLiteral parses an array literal [1, 2, 3]
