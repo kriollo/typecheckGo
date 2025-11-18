@@ -82,17 +82,18 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	typeChecker := checker.NewWithModuleResolver(rootDir)
 
 	// Configure type checker with tsconfig options
+	// Note: When strict is true, individual flags can still be explicitly disabled
 	checkerConfig := &checker.CompilerConfig{
-		NoImplicitAny:              tsConfig.CompilerOptions.NoImplicitAny || tsConfig.CompilerOptions.Strict,
-		StrictNullChecks:           tsConfig.CompilerOptions.StrictNullChecks || tsConfig.CompilerOptions.Strict,
-		StrictFunctionTypes:        tsConfig.CompilerOptions.StrictFunctionTypes || tsConfig.CompilerOptions.Strict,
+		NoImplicitAny:              tsConfig.CompilerOptions.NoImplicitAny,
+		StrictNullChecks:           tsConfig.CompilerOptions.StrictNullChecks,
+		StrictFunctionTypes:        tsConfig.CompilerOptions.StrictFunctionTypes,
 		NoUnusedLocals:             tsConfig.CompilerOptions.NoUnusedLocals,
 		NoUnusedParameters:         tsConfig.CompilerOptions.NoUnusedParameters,
 		NoImplicitReturns:          tsConfig.CompilerOptions.NoImplicitReturns,
-		NoImplicitThis:             tsConfig.CompilerOptions.NoImplicitThis || tsConfig.CompilerOptions.Strict,
-		StrictBindCallApply:        tsConfig.CompilerOptions.StrictBindCallApply || tsConfig.CompilerOptions.Strict,
-		StrictPropertyInitialization: tsConfig.CompilerOptions.StrictPropertyInitialization || tsConfig.CompilerOptions.Strict,
-		AlwaysStrict:               tsConfig.CompilerOptions.AlwaysStrict || tsConfig.CompilerOptions.Strict,
+		NoImplicitThis:             tsConfig.CompilerOptions.NoImplicitThis,
+		StrictBindCallApply:        tsConfig.CompilerOptions.StrictBindCallApply,
+		StrictPropertyInitialization: tsConfig.CompilerOptions.StrictPropertyInitialization,
+		AlwaysStrict:               tsConfig.CompilerOptions.AlwaysStrict,
 		AllowUnreachableCode:       tsConfig.CompilerOptions.AllowUnreachableCode,
 		AllowUnusedLabels:          tsConfig.CompilerOptions.AllowUnusedLabels,
 		NoFallthroughCasesInSwitch: tsConfig.CompilerOptions.NoFallthroughCasesInSwitch,
@@ -269,25 +270,30 @@ func reportErrorsWithContext(filename string, errors []checker.TypeError) {
 		return
 	}
 
-	// Use first error's file if filename is empty
-	if filename == "" && len(errors) > 0 {
-		filename = errors[0].File
+	// Group errors by file
+	errorsByFile := make(map[string][]checker.TypeError)
+	for _, e := range errors {
+		errorsByFile[e.File] = append(errorsByFile[e.File], e)
 	}
-	// Read file content for context
-	content, err := os.ReadFile(filename)
-	if err != nil {
-		// Fallback to simple error reporting
-		fmt.Printf("\nFound %d errors in %s:\n", len(errors), filename)
-		for _, e := range errors {
-			fmt.Printf("  %s:%d:%d - %s (%s)\n", e.File, e.Line, e.Column, e.Message, e.Code)
-		}
-		return
-	}
-
-	lines := splitLines(string(content))
 
 	fmt.Printf("\n")
-	for i, e := range errors {
+
+	// Process each file separately
+	for file, fileErrors := range errorsByFile {
+		// Read file content for context
+		content, err := os.ReadFile(file)
+		if err != nil {
+			// Fallback to simple error reporting
+			fmt.Printf("\nFound %d errors in %s:\n", len(fileErrors), file)
+			for _, e := range fileErrors {
+				fmt.Printf("  %s:%d:%d - %s (%s)\n", e.File, e.Line, e.Column, e.Message, e.Code)
+			}
+			continue
+		}
+
+		lines := splitLines(string(content))
+
+		for i, e := range fileErrors {
 		// Show error header with color
 		fmt.Printf("  %s×%s %s%s%s\n", colorRed, colorReset, colorBold, e.Message, colorReset)
 
@@ -342,14 +348,20 @@ func reportErrorsWithContext(filename string, errors []checker.TypeError) {
 			}
 		}
 
-		fmt.Printf("   %s╰────%s\n", colorGray, colorReset)
+			fmt.Printf("   %s╰────%s\n", colorGray, colorReset)
 
-		if i < len(errors)-1 {
-			fmt.Printf("\n")
+			if i < len(fileErrors)-1 {
+				fmt.Printf("\n")
+			}
 		}
 	}
 
-	fmt.Printf("\n%sFound %d error(s).%s\n", colorRed, len(errors), colorReset)
+	// Count total errors
+	totalErrors := 0
+	for _, fileErrors := range errorsByFile {
+		totalErrors += len(fileErrors)
+	}
+	fmt.Printf("\n%sFound %d error(s).%s\n", colorRed, totalErrors, colorReset)
 }
 
 func splitLines(content string) []string {

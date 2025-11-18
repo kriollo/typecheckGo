@@ -134,6 +134,32 @@ func (i *IfStatement) Pos() Position { return i.Position }
 func (i *IfStatement) End() Position { return i.EndPos }
 func (i *IfStatement) stmtNode() {}
 
+// SwitchStatement represents a switch statement
+type SwitchStatement struct {
+	Discriminant Expression
+	Cases        []*SwitchCase
+	Position     Position
+	EndPos       Position
+}
+
+func (s *SwitchStatement) Type() string    { return "SwitchStatement" }
+func (s *SwitchStatement) Pos() Position   { return s.Position }
+func (s *SwitchStatement) End() Position   { return s.EndPos }
+func (s *SwitchStatement) stmtNode()     {}
+
+// SwitchCase represents a case or default clause in a switch statement
+type SwitchCase struct {
+	Test       Expression // nil for default case
+	Consequent []Statement
+	Position   Position
+	EndPos     Position
+}
+
+func (s *SwitchCase) Type() string    { return "SwitchCase" }
+func (s *SwitchCase) Pos() Position   { return s.Position }
+func (s *SwitchCase) End() Position   { return s.EndPos }
+func (s *SwitchCase) stmtNode()     {}
+
 // Import/Export statements
 type ImportDeclaration struct {
 	Specifiers []ImportSpecifier
@@ -270,6 +296,24 @@ type MemberExpression struct {
 	EndPos   Position
 }
 
+func (m *MemberExpression) Type() string { return "MemberExpression" }
+func (m *MemberExpression) Pos() Position { return m.Position }
+func (m *MemberExpression) End() Position { return m.EndPos }
+func (m *MemberExpression) exprNode() {}
+
+type ConditionalExpression struct {
+	Test       Expression
+	Consequent Expression
+	Alternate  Expression
+	Position   Position
+	EndPos     Position
+}
+
+func (c *ConditionalExpression) Type() string { return "ConditionalExpression" }
+func (c *ConditionalExpression) Pos() Position { return c.Position }
+func (c *ConditionalExpression) End() Position { return c.EndPos }
+func (c *ConditionalExpression) exprNode() {}
+
 type BinaryExpression struct {
 	Left     Expression
 	Operator string
@@ -277,11 +321,6 @@ type BinaryExpression struct {
 	Position Position
 	EndPos   Position
 }
-
-func (m *MemberExpression) Type() string { return "MemberExpression" }
-func (m *MemberExpression) Pos() Position { return m.Position }
-func (m *MemberExpression) End() Position { return m.EndPos }
-func (m *MemberExpression) exprNode() {}
 
 func (b *BinaryExpression) Type() string { return "BinaryExpression" }
 func (b *BinaryExpression) Pos() Position { return b.Position }
@@ -378,7 +417,7 @@ func (a *ArrayExpression) exprNode() {}
 
 // ObjectExpression represents an object literal { key: value }
 type ObjectExpression struct {
-	Properties []Property
+	Properties []ObjectPropertyNode
 	Position   Position
 	EndPos     Position
 }
@@ -388,6 +427,12 @@ func (o *ObjectExpression) Pos() Position { return o.Position }
 func (o *ObjectExpression) End() Position { return o.EndPos }
 func (o *ObjectExpression) exprNode() {}
 
+// ObjectPropertyNode is an interface for nodes that can be a property in an object literal
+type ObjectPropertyNode interface {
+	Node
+	objectPropertyNode()
+}
+
 // Property represents a property in an object literal
 type Property struct {
 	Key      Expression
@@ -396,9 +441,23 @@ type Property struct {
 	EndPos   Position
 }
 
-func (p Property) Type() string { return "Property" }
-func (p Property) Pos() Position { return p.Position }
-func (p Property) End() Position { return p.EndPos }
+func (p *Property) Type() string { return "Property" }
+func (p *Property) Pos() Position { return p.Position }
+func (p *Property) End() Position { return p.EndPos }
+func (p *Property) objectPropertyNode() {}
+
+// SpreadElement represents a spread element in an object literal
+type SpreadElement struct {
+	Argument Expression
+	Position Position
+	EndPos   Position
+}
+
+func (s *SpreadElement) Type() string { return "SpreadElement" }
+func (s *SpreadElement) Pos() Position { return s.Position }
+func (s *SpreadElement) End() Position { return s.EndPos }
+func (s *SpreadElement) objectPropertyNode() {}
+func (s *SpreadElement) exprNode() {}
 
 // ArrowFunctionExpression represents an arrow function (x) => expr
 type ArrowFunctionExpression struct {

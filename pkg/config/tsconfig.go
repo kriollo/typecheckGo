@@ -251,17 +251,8 @@ func applyDefaults(config *TSConfig) {
 		config.Exclude = []string{"node_modules"}
 	}
 
-	// Apply strict mode implications
-	// When strict is true, it enables all strict type checking options
-	if config.CompilerOptions.Strict {
-		config.CompilerOptions.NoImplicitAny = true
-		config.CompilerOptions.StrictNullChecks = true
-		config.CompilerOptions.StrictFunctionTypes = true
-		config.CompilerOptions.StrictBindCallApply = true
-		config.CompilerOptions.StrictPropertyInitialization = true
-		config.CompilerOptions.NoImplicitThis = true
-		config.CompilerOptions.AlwaysStrict = true
-	}
+	// No automatic implications - use exactly what's in the config file
+	// All options default to false unless explicitly set
 }
 
 // ResolvePathAlias resolves a path using the paths configuration

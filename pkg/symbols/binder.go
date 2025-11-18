@@ -175,7 +175,12 @@ func (b *Binder) bindExpression(expr ast.Expression) {
 	case *ast.ObjectExpression:
 		// Bind all property values
 		for _, prop := range e.Properties {
-			b.bindExpression(prop.Value)
+			switch p := prop.(type) {
+			case *ast.Property:
+				b.bindExpression(p.Value)
+			case *ast.SpreadElement:
+				b.bindExpression(p.Argument)
+			}
 		}
 	case *ast.ArrowFunctionExpression:
 		b.bindArrowFunction(e)

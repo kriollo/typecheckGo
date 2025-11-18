@@ -105,6 +105,10 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 		return p.parseWhileStatement()
 	}
 
+	if p.matchKeyword("switch") {
+		return p.parseSwitchStatement()
+	}
+
 	if p.matchKeyword("import") {
 		return p.parseImportDeclaration()
 	}
@@ -475,6 +479,92 @@ func (p *parser) parseWhileStatement() (*ast.WhileStatement, error) {
 	}, nil
 }
 
+func (p *parser) parseSwitchStatement() (*ast.SwitchStatement, error) {
+	startPos := p.currentPos()
+
+	p.consumeKeyword("switch")
+	p.skipWhitespaceAndComments()
+
+	p.expect("(")
+	p.skipWhitespaceAndComments()
+
+	discriminant, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+
+	p.skipWhitespaceAndComments()
+	p.expect(")")
+	p.skipWhitespaceAndComments()
+
+	p.expect("{")
+	p.skipWhitespaceAndComments()
+
+	var cases []*ast.SwitchCase
+
+	for !p.match("}") && !p.isAtEnd() {
+		caseStartPos := p.currentPos()
+		var test ast.Expression
+
+		if p.matchKeyword("case") {
+			p.consumeKeyword("case")
+			p.skipWhitespaceAndComments()
+			test, err = p.parseExpression()
+			if err != nil {
+				return nil, err
+			}
+		} else if p.matchKeyword("default") {
+			p.consumeKeyword("default")
+			// test remains nil for default
+		} else {
+			return nil, fmt.Errorf("expected 'case' or 'default' in switch statement at %s", p.currentPos())
+		}
+
+		p.skipWhitespaceAndComments()
+		p.expect(":")
+		p.skipWhitespaceAndComments()
+
+		var consequent []ast.Statement
+		for !p.isAtEnd() && !p.match("case") && !p.match("default") && !p.match("}") {
+			// Allow break statements
+			if p.matchKeyword("break") {
+				p.consumeKeyword("break")
+				p.skipWhitespaceAndComments()
+				if p.match(";") {
+					p.advance()
+				}
+				p.skipWhitespaceAndComments()
+				break // Exit statement loop for this case
+			}
+
+			stmt, err := p.parseStatement()
+			if err != nil {
+				return nil, err
+			}
+			if stmt != nil {
+				consequent = append(consequent, stmt)
+			}
+			p.skipWhitespaceAndComments()
+		}
+
+		cases = append(cases, &ast.SwitchCase{
+			Test:       test,
+			Consequent: consequent,
+			Position:   caseStartPos,
+			EndPos:     p.currentPos(),
+		})
+	}
+
+	p.expect("}")
+
+	return &ast.SwitchStatement{
+		Discriminant: discriminant,
+		Cases:        cases,
+		Position:     startPos,
+		EndPos:       p.currentPos(),
+	}, nil
+}
+
 func (p *parser) parseBlockStatement() (*ast.BlockStatement, error) {
 	startPos := p.currentPos()
 
@@ -512,7 +602,7 @@ func (p *parser) parseExpression() (ast.Expression, error) {
 }
 
 func (p *parser) parseAssignmentExpression() (ast.Expression, error) {
-	left, err := p.parseBinaryExpression()
+	left, err := p.parseConditionalExpression()
 	if err != nil {
 		return nil, err
 	}
@@ -555,11 +645,50 @@ func (p *parser) parseAssignmentExpression() (ast.Expression, error) {
 	return left, nil
 }
 
+func (p *parser) parseConditionalExpression() (ast.Expression, error) {
+	expr, err := p.parseBinaryExpression()
+	if err != nil {
+		return nil, err
+	}
+
+	p.skipWhitespaceAndComments()
+
+	if p.match("?") {
+		p.advance()
+		p.skipWhitespaceAndComments()
+
+		consequent, err := p.parseAssignmentExpression()
+		if err != nil {
+			return nil, err
+		}
+
+		p.skipWhitespaceAndComments()
+		p.expect(":")
+		p.skipWhitespaceAndComments()
+
+		alternate, err := p.parseAssignmentExpression()
+		if err != nil {
+			return nil, err
+		}
+
+		return &ast.ConditionalExpression{
+			Test:       expr,
+			Consequent: consequent,
+			Alternate:  alternate,
+			Position:   expr.Pos(),
+			EndPos:     alternate.End(),
+		}, nil
+	}
+
+	return expr, nil
+}
+
 func (p *parser) parseBinaryExpression() (ast.Expression, error) {
 	left, err := p.parseUnaryExpression()
 	if err != nil {
 		return nil, err
 	}
+
 
 	if left == nil {
 		return nil, nil
@@ -587,6 +716,8 @@ func (p *parser) parseBinaryExpression() (ast.Expression, error) {
 			op = "&&"
 		} else if p.match("||") {
 			op = "||"
+		} else if p.matchKeyword("in") {
+			op = "in"
 		} else if p.match("+") && p.peek(1) != "+" && p.peek(1) != "=" {
 			op = "+"
 		} else if p.match("-") && p.peek(1) != "-" && p.peek(1) != "=" {
@@ -610,8 +741,8 @@ func (p *parser) parseBinaryExpression() (ast.Expression, error) {
 			p.advanceString(len(op))
 			p.skipWhitespaceAndComments()
 
-			// For now, just parse the next call expression (no precedence)
-			right, err := p.parseCallExpression()
+			// Parse the right operand (unary expression to handle typeof, !, etc.)
+			right, err := p.parseUnaryExpression()
 			if err != nil {
 				return nil, err
 			}
@@ -718,7 +849,17 @@ func (p *parser) parseUnaryExpression() (ast.Expression, error) {
 	var op string
 	startPos := p.currentPos()
 
-	if p.peekString(2) == "++" {
+	// Check for keyword unary operators first
+	if p.matchKeyword("typeof") {
+		op = "typeof"
+		p.advanceString(6)
+	} else if p.matchKeyword("void") {
+		op = "void"
+		p.advanceString(4)
+	} else if p.matchKeyword("delete") {
+		op = "delete"
+		p.advanceString(6)
+	} else if p.peekString(2) == "++" {
 		op = "++"
 		p.advanceString(2)
 	} else if p.peekString(2) == "--" {
@@ -876,6 +1017,9 @@ func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 			if p.match("=") && p.peek(1) == ">" {
 				isArrowFunc = true
 			}
+		} else if p.match("{") {
+			// Destructuring param ({...}) => ...
+			isArrowFunc = true
 		} else if p.matchIdentifier() {
 			// Could be (x) => ... or (x, y) => ...
 			// Save position and try to parse params
@@ -1021,12 +1165,10 @@ func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 		return p.parseArrayLiteral()
 	}
 
-	// Object literal - DISABLED to prevent infinite loops
-	// The issue is that parseExpression -> parseProperty -> parseExpression creates recursion
-	// TODO: Fix the recursion issue properly
-	// if p.match("{") {
-	// 	return p.parseObjectLiteral()
-	// }
+	// Object literal
+	if p.match("{") {
+		return p.parseObjectLiteral()
+	}
 
 	if p.matchIdentifier() {
 		return p.parseIdentifier()
@@ -1055,6 +1197,7 @@ func (p *parser) parseParameterList() ([]*ast.Parameter, error) {
 	var params []*ast.Parameter
 
 	for !p.match(")") && !p.isAtEnd() {
+		p.skipWhitespaceAndComments()
 		id, err := p.parseIdentifier()
 		if err != nil {
 			return nil, err
@@ -1628,28 +1771,35 @@ func (p *parser) skipWhitespaceAndComments() {
 
 		if char == ' ' || char == '\t' || char == '\r' || char == '\n' {
 			p.advance()
-		} else if char == '/' && p.peek(1) == "/" {
-			// Single-line comment
+			continue
+		}
+
+		// Single-line comment
+		if char == '/' && p.pos+1 < len(p.source) && p.source[p.pos+1] == '/' {
 			p.advance()
 			p.advance()
 			for !p.isAtEnd() && p.source[p.pos] != '\n' {
 				p.advance()
 			}
-		} else if char == '/' && p.peek(1) == "*" {
-			// Multi-line comment
+			continue
+		}
+
+		// Multi-line comment (including JSDoc)
+		if char == '/' && p.pos+1 < len(p.source) && p.source[p.pos+1] == '*' {
 			p.advance()
 			p.advance()
 			for !p.isAtEnd() {
-				if p.source[p.pos] == '*' && p.peek(1) == "/" {
+				if p.source[p.pos] == '*' && p.pos+1 < len(p.source) && p.source[p.pos+1] == '/' {
 					p.advance()
 					p.advance()
-					break
+					break // Exit the inner for loop
 				}
 				p.advance()
 			}
-		} else {
-			break
+			continue
 		}
+
+		break // No whitespace or comment found
 	}
 }
 
@@ -1750,22 +1900,72 @@ func (p *parser) parseArrayLiteral() (*ast.ArrayExpression, error) {
 	}, nil
 }
 
-// parseObjectLiteral parses an object literal { key: value }
 func (p *parser) parseObjectLiteral() (*ast.ObjectExpression, error) {
 	startPos := p.currentPos()
 
 	p.expect("{")
 	p.skipWhitespaceAndComments()
 
-	var properties []ast.Property
+	var properties []ast.ObjectPropertyNode
 
 	for !p.match("}") && !p.isAtEnd() {
-		prop, err := p.parseProperty()
-		if err != nil {
-			return nil, err
-		}
+		propStartPos := p.currentPos()
 
-		properties = append(properties, prop)
+		// Check for spread property: ...identifier
+		if p.match("...") {
+			p.advanceString(3)
+			p.skipWhitespaceAndComments()
+
+			argument, err := p.parseAssignmentExpression()
+			if err != nil {
+				return nil, err
+			}
+
+			spread := &ast.SpreadElement{
+				Argument: argument,
+				Position: propStartPos,
+				EndPos:   p.currentPos(),
+			}
+			properties = append(properties, spread)
+		} else {
+			// Regular property
+			var key ast.Expression
+			var err error
+
+			if p.matchString() {
+				str := p.advanceStringLiteral()
+				key = &ast.Literal{
+					Value:    str[1 : len(str)-1],
+					Raw:      str,
+					Position: propStartPos,
+					EndPos:   p.currentPos(),
+				}
+			} else if p.matchIdentifier() {
+				key, err = p.parseIdentifier()
+				if err != nil {
+					return nil, err
+				}
+			} else {
+				return nil, fmt.Errorf("expected property key or '...' at %s", p.currentPos())
+			}
+
+			p.skipWhitespaceAndComments()
+			p.expect(":")
+			p.skipWhitespaceAndComments()
+
+			value, err := p.parseAssignmentExpression()
+			if err != nil {
+				return nil, err
+			}
+
+			prop := &ast.Property{
+				Key:      key,
+				Value:    value,
+				Position: propStartPos,
+				EndPos:   p.currentPos(),
+			}
+			properties = append(properties, prop)
+		}
 
 		p.skipWhitespaceAndComments()
 		if p.match(",") {
@@ -1776,12 +1976,12 @@ func (p *parser) parseObjectLiteral() (*ast.ObjectExpression, error) {
 				break
 			}
 		} else if !p.match("}") {
-			return nil, fmt.Errorf("expected ',' or '}' in object literal")
+			return nil, fmt.Errorf("expected ',' or '}' in object literal at %s", p.currentPos())
 		}
 	}
 
 	if !p.match("}") {
-		return nil, fmt.Errorf("expected '}' to close object literal")
+		return nil, fmt.Errorf("expected '}' to close object literal at %s", p.currentPos())
 	}
 	p.advance()
 
@@ -1838,6 +2038,35 @@ func (p *parser) parseArrowFunction() (*ast.ArrowFunctionExpression, error) {
 
 		// Parse parameter list
 		for !p.match(")") && !p.isAtEnd() {
+			p.skipWhitespaceAndComments()
+			// HACK: Handle object destructuring as a placeholder
+			if p.match("{") {
+				startPos := p.currentPos()
+				p.advance()
+				depth := 1
+				for depth > 0 && !p.isAtEnd() {
+					if p.match("{") {
+						depth++
+					} else if p.match("}") {
+						depth--
+					}
+					p.advance()
+				}
+				param := &ast.Parameter{
+					ID: &ast.Identifier{Name: "destructured_param", Position: startPos, EndPos: p.currentPos()},
+					Position: startPos,
+					EndPos: p.currentPos(),
+				}
+				params = append(params, param)
+				p.skipWhitespaceAndComments()
+				if p.match(",") {
+					p.advance()
+					p.skipWhitespaceAndComments()
+				}
+				continue
+			}
+
+
 			id, err := p.parseIdentifier()
 			if err != nil {
 				return nil, err
@@ -1851,7 +2080,7 @@ func (p *parser) parseArrowFunction() (*ast.ArrowFunctionExpression, error) {
 				p.skipWhitespaceAndComments()
 
 				// Parse type annotation using the full parser
-				paramType, err = p.parseTypeAnnotation()
+				paramType, err = p.parseTypeAnnotationFull()
 				if err != nil {
 					return nil, err
 				}
@@ -1900,7 +2129,7 @@ func (p *parser) parseArrowFunction() (*ast.ArrowFunctionExpression, error) {
 		p.advance()
 		p.skipWhitespaceAndComments()
 		// Parse and skip the return type annotation for now
-		_, err := p.parseTypeAnnotation()
+		_, err := p.parseTypeAnnotationFull()
 		if err != nil {
 			return nil, err
 		}
@@ -1942,55 +2171,6 @@ func (p *parser) parseArrowFunction() (*ast.ArrowFunctionExpression, error) {
 	}, nil
 }
 
-// parseProperty parses an object property
-func (p *parser) parseProperty() (ast.Property, error) {
-	startPos := p.currentPos()
-
-	// Parse key (identifier or string)
-	var key ast.Expression
-	var err error
-
-	if p.matchString() {
-		str := p.advanceStringLiteral()
-		key = &ast.Literal{
-			Value:    str[1 : len(str)-1],
-			Raw:      str,
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		}
-	} else if p.matchIdentifier() {
-		key, err = p.parseIdentifier()
-		if err != nil {
-			return ast.Property{}, err
-		}
-	} else {
-		return ast.Property{}, fmt.Errorf("expected property key")
-	}
-
-	p.skipWhitespaceAndComments()
-
-	// Expect colon
-	if !p.match(":") {
-		return ast.Property{}, fmt.Errorf("expected ':' after property key")
-	}
-	p.advance()
-	p.skipWhitespaceAndComments()
-
-	// Parse value
-	value, err := p.parseExpression()
-	if err != nil {
-		return ast.Property{}, err
-	}
-
-	return ast.Property{
-		Key:      key,
-		Value:    value,
-		Position: startPos,
-		EndPos:   p.currentPos(),
-	}, nil
-}
-
-
 // parseTypeAnnotation parses a TypeScript type annotation
 func (p *parser) parseTypeAnnotation() (ast.TypeNode, error) {
 	startPos := p.currentPos()
@@ -2030,12 +2210,32 @@ func (p *parser) parseTypeAnnotation() (ast.TypeNode, error) {
 			p.advance()
 		}
 
-		return &ast.TypeReference{
+		typeRef := &ast.TypeReference{
 			Name:         typeName,
 			TypeArguments: typeArguments,
 			Position:     startPos,
 			EndPos:       p.currentPos(),
-		}, nil
+		}
+
+		// Check for array type suffix []
+		p.skipWhitespaceAndComments()
+		if p.match("[") {
+			p.advance()
+			p.skipWhitespaceAndComments()
+			if !p.match("]") {
+				return nil, fmt.Errorf("expected ']' after '[' in array type")
+			}
+			p.advance()
+
+			// Return array type reference (e.g., "string[]")
+			return &ast.TypeReference{
+				Name:     typeName + "[]",
+				Position: startPos,
+				EndPos:   p.currentPos(),
+			}, nil
+		}
+
+		return typeRef, nil
 	}
 
 	// Parse union type (e.g., string | number)

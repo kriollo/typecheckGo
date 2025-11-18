@@ -412,7 +412,12 @@ func (tc *TypeChecker) checkExpression(expr ast.Expression, filename string) {
 	case *ast.ObjectExpression:
 		// Check all property values
 		for _, prop := range e.Properties {
-			tc.checkExpression(prop.Value, filename)
+			switch p := prop.(type) {
+			case *ast.Property:
+				tc.checkExpression(p.Value, filename)
+			case *ast.SpreadElement:
+				tc.checkExpression(p.Argument, filename)
+			}
 		}
 	case *ast.ArrowFunctionExpression:
 		tc.checkArrowFunction(e, filename)
