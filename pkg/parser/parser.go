@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io/ioutil"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"tstypechecker/pkg/ast"
 )
@@ -34,6 +36,12 @@ func parseTypeScript(source, filename string) (*ast.File, error) {
 	return p.parseFile()
 }
 
+const (
+	// Límites de seguridad para prevenir loops infinitos
+	maxParserIterations = 100000
+	maxNestedDepth      = 1000
+)
+
 type parser struct {
 	source   string
 	filename string
@@ -49,7 +57,21 @@ func (p *parser) parseFile() (*ast.File, error) {
 
 	p.skipWhitespaceAndComments()
 
+	lastPos := p.pos
+	stuckCount := 0
+
 	for !p.isAtEnd() {
+		// DEBUGGING: Detect infinite loops
+		if p.pos == lastPos {
+			stuckCount++
+			if stuckCount > 3 {
+				return nil, fmt.Errorf("parser stuck at line %d, col %d, char: '%c' (pos %d)", p.line, p.column, p.source[p.pos], p.pos)
+			}
+		} else {
+			stuckCount = 0
+		}
+		lastPos = p.pos
+
 		stmt, err := p.parseStatement()
 		if err != nil {
 			return nil, err
@@ -107,6 +129,78 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 
 	if p.matchKeyword("switch") {
 		return p.parseSwitchStatement()
+	}
+
+	// HACK: Skip try-catch-finally blocks for now
+	if p.matchKeyword("try") {
+		p.advanceWord() // consume 'try'
+		p.skipWhitespaceAndComments()
+		// Skip try block
+		if p.match("{") {
+			p.advance()
+			depth := 1
+			for depth > 0 && !p.isAtEnd() {
+				if p.match("{") {
+					depth++
+				} else if p.match("}") {
+					depth--
+				}
+				p.advance()
+			}
+		}
+		p.skipWhitespaceAndComments()
+		// Skip catch block if present
+		if p.matchKeyword("catch") {
+			p.advanceWord()
+			p.skipWhitespaceAndComments()
+			// Skip catch parameter
+			if p.match("(") {
+				p.advance()
+				depth := 1
+				for depth > 0 && !p.isAtEnd() {
+					if p.match("(") {
+						depth++
+					} else if p.match(")") {
+						depth--
+					}
+					p.advance()
+				}
+			}
+			p.skipWhitespaceAndComments()
+			// Skip catch block
+			if p.match("{") {
+				p.advance()
+				depth := 1
+				for depth > 0 && !p.isAtEnd() {
+					if p.match("{") {
+						depth++
+					} else if p.match("}") {
+						depth--
+					}
+					p.advance()
+				}
+			}
+		}
+		p.skipWhitespaceAndComments()
+		// Skip finally block if present
+		if p.matchKeyword("finally") {
+			p.advanceWord()
+			p.skipWhitespaceAndComments()
+			if p.match("{") {
+				p.advance()
+				depth := 1
+				for depth > 0 && !p.isAtEnd() {
+					if p.match("{") {
+						depth++
+					} else if p.match("}") {
+						depth--
+					}
+					p.advance()
+				}
+			}
+		}
+		// Return empty statement (we skipped the whole thing)
+		return nil, nil
 	}
 
 	if p.matchKeyword("import") {
@@ -224,6 +318,87 @@ func (p *parser) parseVariableDeclaration() (*ast.VariableDeclaration, error) {
 	var declarators []*ast.VariableDeclarator
 
 	for {
+		// Check for destructuring pattern
+		if p.match("{") || p.match("[") {
+			// TEMPORAL FIX: Skip destructuring patterns to prevent infinite loops
+			// TODO: Implement full destructuring support
+			patternStart := p.currentPos()
+			openChar := p.source[p.pos]
+			closeChar := byte('}')
+			if openChar == '[' {
+				closeChar = ']'
+			}
+
+			p.advance() // consume opening { or [
+			depth := 1
+			maxIterations := 10000 // Safety limit
+			iterations := 0
+
+			for depth > 0 && !p.isAtEnd() && iterations < maxIterations {
+				iterations++
+				if p.source[p.pos] == openChar {
+					depth++
+				} else if p.source[p.pos] == closeChar {
+					depth--
+				}
+				p.advance()
+			}
+
+			if iterations >= maxIterations {
+				return nil, fmt.Errorf("infinite loop detected while parsing destructuring pattern at %s", patternStart)
+			}
+
+			// Create placeholder identifier
+			id := &ast.Identifier{
+				Name:     "destructured_binding",
+				Position: patternStart,
+				EndPos:   p.currentPos(),
+			}
+
+			var typeAnnotation ast.TypeNode
+			var init ast.Expression
+			p.skipWhitespaceAndComments()
+
+			// Parse type annotation if present (: Type)
+			if p.match(":") {
+				p.advance()
+				p.skipWhitespaceAndComments()
+				var err error
+				typeAnnotation, err = p.parseTypeAnnotation()
+				if err != nil {
+					return nil, err
+				}
+				p.skipWhitespaceAndComments()
+			}
+
+			if p.match("=") {
+				p.advance()
+				p.skipWhitespaceAndComments()
+				var err error
+				init, err = p.parseExpression()
+				if err != nil {
+					return nil, err
+				}
+			}
+
+			declarators = append(declarators, &ast.VariableDeclarator{
+				ID:             id,
+				TypeAnnotation: typeAnnotation,
+				Init:           init,
+				Position:       id.Pos(),
+				EndPos:         p.currentPos(),
+			})
+
+			p.skipWhitespaceAndComments()
+			if !p.match(",") {
+				break
+			}
+			p.advance()
+			p.skipWhitespaceAndComments()
+			continue
+		}
+
+		// Regular identifier pattern
 		id, err := p.parseIdentifier()
 		if err != nil {
 			return nil, err
@@ -376,6 +551,83 @@ func (p *parser) parseForStatement() (*ast.ForStatement, error) {
 	p.expect("(")
 	p.skipWhitespaceAndComments()
 
+	// Simple approach: Skip the entire for header for for-in/for-of loops
+	// Look ahead to see if we have a for-in or for-of loop
+	headerStart := p.pos
+
+	// Skip until we find ) to check if there's 'in' or 'of'
+	hasInOrOf := false
+	depth := 0
+	iterations := 0
+	for !p.isAtEnd() && (depth > 0 || !p.match(")")) && iterations < maxParserIterations {
+		iterations++
+		if p.match("(") {
+			depth++
+		} else if p.match(")") && depth > 0 {
+			depth--
+		}
+
+		// Check for 'in' or 'of' keywords (not inside nested parens)
+		if depth == 0 && (p.matchKeyword("in") || p.matchKeyword("of")) {
+			hasInOrOf = true
+		}
+
+		p.advance()
+
+		if depth == 0 && p.match(")") {
+			break
+		}
+	}
+
+	// Restore position
+	p.pos = headerStart
+
+	if hasInOrOf {
+		// Skip the entire for-in/for-of header
+		depth = 0
+		maxIterations := 1000
+		iterations := 0
+		for !p.isAtEnd() && (depth > 0 || !p.match(")")) && iterations < maxIterations {
+			iterations++
+			if p.match("(") {
+				depth++
+			} else if p.match(")") && depth > 0 {
+				depth--
+			}
+			p.advance()
+			if depth == 0 && p.match(")") {
+				break
+			}
+		}
+
+		if iterations >= maxIterations {
+			return nil, fmt.Errorf("infinite loop detected in for-in/for-of header")
+		}
+
+		if !p.match(")") {
+			return nil, fmt.Errorf("expected ')' in for-in/for-of loop")
+		}
+		p.advance()
+		p.skipWhitespaceAndComments()
+
+		// Parse body
+		body, err := p.parseStatement()
+		if err != nil {
+			return nil, err
+		}
+
+		// Return placeholder
+		return &ast.ForStatement{
+			Init:     nil,
+			Test:     nil,
+			Update:   nil,
+			Body:     body,
+			Position: startPos,
+			EndPos:   p.currentPos(),
+		}, nil
+	}
+
+	// Regular for loop
 	// Parse init (can be variable declaration or expression)
 	var init ast.Node
 	if p.matchKeyword("var", "let", "const") {
@@ -573,7 +825,9 @@ func (p *parser) parseBlockStatement() (*ast.BlockStatement, error) {
 
 	var statements []ast.Statement
 
-	for !p.match("}") && !p.isAtEnd() {
+	iterations := 0
+	for !p.match("}") && !p.isAtEnd() && iterations < maxParserIterations {
+		iterations++
 		stmt, err := p.parseStatement()
 		if err != nil {
 			return nil, err
@@ -653,7 +907,8 @@ func (p *parser) parseConditionalExpression() (ast.Expression, error) {
 
 	p.skipWhitespaceAndComments()
 
-	if p.match("?") {
+	// Check for ternary operator (but not optional chaining ?.)
+	if p.match("?") && p.peek(1) != "." {
 		p.advance()
 		p.skipWhitespaceAndComments()
 
@@ -696,7 +951,9 @@ func (p *parser) parseBinaryExpression() (ast.Expression, error) {
 	p.skipWhitespaceAndComments()
 
 	// Handle binary operators (simple left-to-right parsing for now)
-	for !p.isAtEnd() {
+	iterations := 0
+	for !p.isAtEnd() && iterations < maxParserIterations {
+		iterations++
 		var op string
 		// Check multi-character operators first
 		if p.match("===") {
@@ -717,6 +974,8 @@ func (p *parser) parseBinaryExpression() (ast.Expression, error) {
 			op = "||"
 		} else if p.matchKeyword("in") {
 			op = "in"
+		} else if p.matchKeyword("instanceof") {
+			op = "instanceof"
 		} else if p.match("+") && p.peek(1) != "+" && p.peek(1) != "=" {
 			op = "+"
 		} else if p.match("-") && p.peek(1) != "-" && p.peek(1) != "=" {
@@ -773,36 +1032,121 @@ func (p *parser) parseCallExpression() (ast.Expression, error) {
 		return nil, err
 	}
 
-	p.skipWhitespaceAndComments()
+	// Loop para manejar chains como: obj.method().prop.method2()
+	iterations := 0
+	for iterations < maxParserIterations {
+		iterations++
+		p.skipWhitespaceAndComments()
 
-	if p.match("(") {
-		startPos := left.Pos()
-		p.advance()
+		if p.match("(") {
+			// Call expression
+			startPos := left.Pos()
+			p.advance()
 
-		var args []ast.Expression
+			var args []ast.Expression
 
-		for !p.match(")") && !p.isAtEnd() {
-			arg, err := p.parseExpression()
+			argIterations := 0
+			for !p.match(")") && !p.isAtEnd() && argIterations < maxParserIterations {
+				argIterations++
+				p.skipWhitespaceAndComments()
+				arg, err := p.parseExpression()
+				if err != nil {
+					return nil, err
+				}
+				args = append(args, arg)
+
+				p.skipWhitespaceAndComments()
+				if p.match(",") {
+					p.advance()
+					p.skipWhitespaceAndComments()
+				}
+			}
+
+			p.expect(")")
+
+			left = &ast.CallExpression{
+				Callee:    left,
+				Arguments: args,
+				Position:  startPos,
+				EndPos:    p.currentPos(),
+			}
+			// Continuar el loop para parsear .prop o () siguiente
+			continue
+		}
+
+		// Check for optional chaining ?. or regular .
+		if p.match("?.") {
+			startPos := left.Pos()
+			p.advanceString(2) // consume ?.
+			p.skipWhitespaceAndComments()
+
+			prop, err := p.parseIdentifier()
 			if err != nil {
 				return nil, err
 			}
-			args = append(args, arg)
 
-			p.skipWhitespaceAndComments()
-			if p.match(",") {
-				p.advance()
-				p.skipWhitespaceAndComments()
+			left = &ast.MemberExpression{
+				Object:   left,
+				Property: prop,
+				Computed: false,
+				Optional: true,
+				Position: startPos,
+				EndPos:   p.currentPos(),
 			}
+			continue
 		}
 
-		p.expect(")")
+		if p.match(".") {
+			startPos := left.Pos()
+			p.advance()
+			p.skipWhitespaceAndComments()
 
-		return &ast.CallExpression{
-			Callee:    left,
-			Arguments: args,
-			Position:  startPos,
-			EndPos:    p.currentPos(),
-		}, nil
+			prop, err := p.parseIdentifier()
+			if err != nil {
+				return nil, err
+			}
+
+			left = &ast.MemberExpression{
+				Object:   left,
+				Property: prop,
+				Computed: false,
+				Optional: false,
+				Position: startPos,
+				EndPos:   p.currentPos(),
+			}
+			continue
+		}
+
+		if p.match("[") {
+			// Computed member expression
+			startPos := left.Pos()
+			p.advance()
+			p.skipWhitespaceAndComments()
+
+			prop, err := p.parseExpression()
+			if err != nil {
+				return nil, err
+			}
+
+			p.skipWhitespaceAndComments()
+			if !p.match("]") {
+				return nil, fmt.Errorf("expected ']' in computed member expression")
+			}
+			p.advance()
+
+			left = &ast.MemberExpression{
+				Object:   left,
+				Property: prop,
+				Computed: true,
+				Optional: false,
+				Position: startPos,
+				EndPos:   p.currentPos(),
+			}
+			continue
+		}
+
+		// No más member/call expressions
+		break
 	}
 
 	return left, nil
@@ -819,10 +1163,33 @@ func (p *parser) parseMemberExpression() (ast.Expression, error) {
 	}
 
 	// Handle chained member expressions (e.g., document.head.append)
-	for {
+	iterations := 0
+	for iterations < maxParserIterations {
+		iterations++
 		p.skipWhitespaceAndComments()
 
-		if p.match(".") {
+		// Check for optional chaining ?. or regular .
+		isOptional := false
+		if p.match("?.") {
+			isOptional = true
+			startPos := left.Pos()
+			p.advanceString(2) // consume ?.
+			p.skipWhitespaceAndComments()
+
+			prop, err := p.parseIdentifier()
+			if err != nil {
+				return nil, err
+			}
+
+			left = &ast.MemberExpression{
+				Object:   left,
+				Property: prop,
+				Computed: false,
+				Optional: isOptional,
+				Position: startPos,
+				EndPos:   p.currentPos(),
+			}
+		} else if p.match(".") {
 			startPos := left.Pos()
 			p.advance()
 			p.skipWhitespaceAndComments()
@@ -836,6 +1203,7 @@ func (p *parser) parseMemberExpression() (ast.Expression, error) {
 				Object:   left,
 				Property: prop,
 				Computed: false,
+				Optional: false,
 				Position: startPos,
 				EndPos:   p.currentPos(),
 			}
@@ -879,7 +1247,10 @@ func (p *parser) parseUnaryExpression() (ast.Expression, error) {
 	startPos := p.currentPos()
 
 	// Check for keyword unary operators first
-	if p.matchKeyword("typeof") {
+	if p.matchKeyword("await") {
+		op = "await"
+		p.advanceString(5)
+	} else if p.matchKeyword("typeof") {
 		op = "typeof"
 		p.advanceString(6)
 	} else if p.matchKeyword("void") {
@@ -962,6 +1333,72 @@ func (p *parser) parsePostfixExpression() (ast.Expression, error) {
 func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 	p.skipWhitespaceAndComments()
 
+	// Check for async arrow function: async (params) => {...} or async param => {...}
+	if p.matchKeyword("async") {
+		savedPos := p.pos
+		p.advanceWord()
+		p.skipWhitespaceAndComments()
+
+		// Check if followed by ( for async (params) => or identifier for async x =>
+		if p.match("(") || p.matchIdentifier() {
+			// Look ahead to confirm it's an arrow function
+			tempPos := p.pos
+			isAsyncArrow := false
+
+			if p.match("(") {
+				// async (params) => pattern
+				p.advance()
+				// Skip to matching )
+				depth := 1
+				for depth > 0 && !p.isAtEnd() {
+					if p.match("(") {
+						depth++
+						p.advance()
+					} else if p.match(")") {
+						depth--
+						p.advance()
+						if depth == 0 {
+							break
+						}
+					} else {
+						p.advance()
+					}
+				}
+				p.skipWhitespaceAndComments()
+				// Check for : (return type annotation)
+				if p.match(":") {
+					p.advance()
+					p.skipWhitespaceAndComments()
+					p.skipTypeAnnotation()
+					p.skipWhitespaceAndComments()
+				}
+				// Check for =>
+				if p.match("=") && p.peek(1) == ">" {
+					isAsyncArrow = true
+				}
+			} else if p.matchIdentifier() {
+				// async identifier => pattern
+				p.advanceWord()
+				p.skipWhitespaceAndComments()
+				if p.match("=") && p.peek(1) == ">" {
+					isAsyncArrow = true
+				}
+			}
+
+			if isAsyncArrow {
+				// Reset and parse as arrow function
+				p.pos = savedPos
+				return p.parseArrowFunction()
+			}
+
+			// Not an arrow function, restore position
+			p.pos = tempPos
+		}
+
+		// Not an async arrow function, restore
+		p.pos = savedPos
+	}
+
 	// Check for generic arrow function: <T>(x: T) => T or <T = unknown>(x: T) => T
 	if p.match("<") {
 		savedPos := p.pos
@@ -1040,9 +1477,16 @@ func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 		// Check if this looks like arrow function params
 		isArrowFunc := false
 		if p.match(")") {
-			// Empty params () => ...
+			// Empty params () => ... or (): Type => ...
 			p.advance()
 			p.skipWhitespaceAndComments()
+			// Check for return type annotation
+			if p.match(":") {
+				p.advance()
+				p.skipWhitespaceAndComments()
+				p.skipTypeAnnotation()
+				p.skipWhitespaceAndComments()
+			}
 			if p.match("=") && p.peek(1) == ">" {
 				isArrowFunc = true
 			}
@@ -1053,7 +1497,9 @@ func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 			// Could be (x) => ... or (x, y) => ...
 			// Save position and try to parse params
 			tempPos := p.pos
-			for !p.match(")") && !p.isAtEnd() {
+			paramIter := 0
+			for !p.match(")") && !p.isAtEnd() && paramIter < maxParserIterations {
+				paramIter++
 				if p.matchIdentifier() {
 					p.advanceWord()
 					p.skipWhitespaceAndComments()
@@ -1108,7 +1554,7 @@ func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 
 		p.skipWhitespaceAndComments()
 		if !p.match(")") {
-			return nil, fmt.Errorf("expected ')' after expression")
+			return nil, fmt.Errorf("expected ')' after expression at %s", p.currentPos())
 		}
 		p.advance()
 
@@ -1173,6 +1619,41 @@ func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 		return &ast.Literal{
 			Value:    num,
 			Raw:      num,
+			Position: startPos,
+			EndPos:   p.currentPos(),
+		}, nil
+	}
+
+	// Regex literal - simple heuristic: / followed by non-whitespace
+	// This is a HACK and doesn't handle all edge cases, but works for common patterns
+	if p.match("/") && p.pos+1 < len(p.source) && !unicode.IsSpace(rune(p.source[p.pos+1])) {
+		startPos := p.currentPos()
+		p.advance() // consume /
+
+		// Find closing / (skip escaped characters)
+		for !p.isAtEnd() {
+			if p.source[p.pos] == '\\' {
+				// Skip escaped character
+				p.advance()
+				if !p.isAtEnd() {
+					p.advance()
+				}
+			} else if p.source[p.pos] == '/' {
+				p.advance() // consume closing /
+				// Parse flags (i, g, m, etc.)
+				for !p.isAtEnd() && (unicode.IsLetter(rune(p.source[p.pos])) || unicode.IsDigit(rune(p.source[p.pos]))) {
+					p.advance()
+				}
+				break
+			} else {
+				p.advance()
+			}
+		}
+
+		raw := string(p.source[startPos.Column-1 : p.pos])
+		return &ast.Literal{
+			Value:    raw,
+			Raw:      raw,
 			Position: startPos,
 			EndPos:   p.currentPos(),
 		}, nil
@@ -1267,7 +1748,9 @@ func (p *parser) parseIdentifierWithGenerics() (ast.Expression, error) {
 func (p *parser) parseParameterList() ([]*ast.Parameter, error) {
 	var params []*ast.Parameter
 
-	for !p.match(")") && !p.isAtEnd() {
+	iterations := 0
+	for !p.match(")") && !p.isAtEnd() && iterations < maxParserIterations {
+		iterations++
 		p.skipWhitespaceAndComments()
 		id, err := p.parseIdentifier()
 		if err != nil {
@@ -1379,7 +1862,9 @@ func (p *parser) parseImportDeclaration() (*ast.ImportDeclaration, error) {
 		p.advance() // consume '{'
 		p.skipWhitespaceAndComments()
 
-		for !p.match("}") && !p.isAtEnd() {
+		iterations := 0
+		for !p.match("}") && !p.isAtEnd() && iterations < maxParserIterations {
+			iterations++
 			imported, err := p.parseIdentifier()
 			if err != nil {
 				return nil, err
@@ -1532,7 +2017,9 @@ func (p *parser) parseExportDeclaration() (*ast.ExportDeclaration, error) {
 
 		var specifiers []ast.ExportSpecifier
 
-		for !p.match("}") && !p.isAtEnd() {
+		iterations := 0
+		for !p.match("}") && !p.isAtEnd() && iterations < maxParserIterations {
+			iterations++
 			local, err := p.parseIdentifier()
 			if err != nil {
 				return nil, err
@@ -1706,7 +2193,17 @@ func (p *parser) matchIdentifier() bool {
 	}
 
 	char := p.source[p.pos]
-	return isLetter(char) || char == '_'
+	// Identificadores pueden empezar con letras (incluyendo Unicode), $ o _
+	if isLetter(char) || char == '_' || char == '$' {
+		return true
+	}
+	// Si es un byte alto (>= 0x80), podría ser inicio de carácter Unicode
+	if char >= 0x80 {
+		// Intentar decodificar como UTF-8
+		r, _ := utf8.DecodeRuneInString(p.source[p.pos:])
+		return r != utf8.RuneError && (unicode.IsLetter(r) || r == '_' || r == '$')
+	}
+	return false
 }
 
 func (p *parser) matchNumber() bool {
@@ -1729,8 +2226,22 @@ func (p *parser) matchString() bool {
 
 func (p *parser) peekWord() string {
 	start := p.pos
-	for !p.isAtEnd() && (isLetter(p.source[p.pos]) || isDigit(p.source[p.pos]) || p.source[p.pos] == '_') {
-		p.pos++
+	for !p.isAtEnd() {
+		char := p.source[p.pos]
+		// Caracteres ASCII válidos
+		if isLetter(char) || isDigit(char) || char == '_' || char == '$' {
+			p.pos++
+			continue
+		}
+		// Caracteres Unicode
+		if char >= 0x80 {
+			r, size := utf8.DecodeRuneInString(p.source[p.pos:])
+			if r != utf8.RuneError && (unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_') {
+				p.pos += size
+				continue
+			}
+		}
+		break
 	}
 
 	word := p.source[start:p.pos]
@@ -1762,9 +2273,27 @@ func (p *parser) expect(expected string) {
 
 func (p *parser) advanceWord() string {
 	var word strings.Builder
-	for !p.isAtEnd() && (isLetter(p.source[p.pos]) || isDigit(p.source[p.pos]) || p.source[p.pos] == '_') {
-		word.WriteByte(p.source[p.pos])
-		p.advance()
+	for !p.isAtEnd() {
+		char := p.source[p.pos]
+		// Caracteres ASCII válidos en identificadores
+		if isLetter(char) || isDigit(char) || char == '_' || char == '$' {
+			word.WriteByte(char)
+			p.advance()
+			continue
+		}
+		// Caracteres Unicode (multibyte)
+		if char >= 0x80 {
+			r, size := utf8.DecodeRuneInString(p.source[p.pos:])
+			if r != utf8.RuneError && (unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_') {
+				word.WriteRune(r)
+				// Avanzar size bytes
+				for i := 0; i < size; i++ {
+					p.advance()
+				}
+				continue
+			}
+		}
+		break
 	}
 	return word.String()
 }
@@ -1837,7 +2366,9 @@ func (p *parser) advanceStringLiteral() string {
 }
 
 func (p *parser) skipWhitespaceAndComments() {
-	for !p.isAtEnd() {
+	iterations := 0
+	for !p.isAtEnd() && iterations < maxParserIterations {
+		iterations++
 		char := p.source[p.pos]
 
 		if char == ' ' || char == '\t' || char == '\r' || char == '\n' {
@@ -1859,7 +2390,9 @@ func (p *parser) skipWhitespaceAndComments() {
 		if char == '/' && p.pos+1 < len(p.source) && p.source[p.pos+1] == '*' {
 			p.advance()
 			p.advance()
-			for !p.isAtEnd() {
+			commentIter := 0
+			for !p.isAtEnd() && commentIter < maxParserIterations {
+				commentIter++
 				if p.source[p.pos] == '*' && p.pos+1 < len(p.source) && p.source[p.pos+1] == '/' {
 					p.advance()
 					p.advance()
@@ -1875,7 +2408,15 @@ func (p *parser) skipWhitespaceAndComments() {
 }
 
 func isLetter(char byte) bool {
-	return (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || char == '$'
+	// Soporte básico ASCII más $
+	if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || char == '$' || char == '_' {
+		return true
+	}
+	// Para Unicode, necesitamos convertir a rune
+	if char >= 0x80 { // Caracteres multibyte UTF-8
+		return true
+	}
+	return false
 }
 
 func isDigit(char byte) bool {
@@ -1936,7 +2477,9 @@ func (p *parser) parseArrayLiteral() (*ast.ArrayExpression, error) {
 
 	var elements []ast.Expression
 
-	for !p.match("]") && !p.isAtEnd() {
+	iterations := 0
+	for !p.match("]") && !p.isAtEnd() && iterations < maxParserIterations {
+		iterations++
 		elem, err := p.parseExpression()
 		if err != nil {
 			return nil, err
@@ -1979,7 +2522,9 @@ func (p *parser) parseObjectLiteral() (*ast.ObjectExpression, error) {
 
 	var properties []ast.ObjectPropertyNode
 
-	for !p.match("}") && !p.isAtEnd() {
+	iterations := 0
+	for !p.match("}") && !p.isAtEnd() && iterations < maxParserIterations {
+		iterations++
 		propStartPos := p.currentPos()
 
 		// Check for spread property: ...identifier
@@ -2021,12 +2566,26 @@ func (p *parser) parseObjectLiteral() (*ast.ObjectExpression, error) {
 			}
 
 			p.skipWhitespaceAndComments()
-			p.expect(":")
-			p.skipWhitespaceAndComments()
 
-			value, err := p.parseAssignmentExpression()
-			if err != nil {
-				return nil, err
+			// Check for shorthand property (ES6: {url} instead of {url: url})
+			var value ast.Expression
+			if p.match(":") {
+				// Regular property: key: value
+				p.advance() // consume ":"
+				p.skipWhitespaceAndComments()
+
+				value, err = p.parseAssignmentExpression()
+				if err != nil {
+					return nil, err
+				}
+			} else {
+				// Shorthand property: {key} means {key: key}
+				// The key must be an identifier for this to work
+				if ident, ok := key.(*ast.Identifier); ok {
+					value = ident
+				} else {
+					return nil, fmt.Errorf("shorthand property must be an identifier at %s", p.currentPos())
+				}
 			}
 
 			prop := &ast.Property{
@@ -2068,6 +2627,14 @@ func (p *parser) parseArrowFunction() (*ast.ArrowFunctionExpression, error) {
 	startPos := p.currentPos()
 
 	var params []*ast.Parameter
+	isAsync := false
+
+	// Check for async keyword
+	if p.matchKeyword("async") {
+		isAsync = true
+		p.advanceWord()
+		p.skipWhitespaceAndComments()
+	}
 
 	// Check for generic type parameters <T, U>
 	if p.match("<") {
@@ -2108,7 +2675,9 @@ func (p *parser) parseArrowFunction() (*ast.ArrowFunctionExpression, error) {
 		p.skipWhitespaceAndComments()
 
 		// Parse parameter list
-		for !p.match(")") && !p.isAtEnd() {
+		iterations := 0
+		for !p.match(")") && !p.isAtEnd() && iterations < maxParserIterations {
+			iterations++
 			p.skipWhitespaceAndComments()
 			// HACK: Handle object destructuring as a placeholder
 			if p.match("{") {
@@ -2236,6 +2805,7 @@ func (p *parser) parseArrowFunction() (*ast.ArrowFunctionExpression, error) {
 	return &ast.ArrowFunctionExpression{
 		Params:   params,
 		Body:     body,
+		Async:    isAsync,
 		Position: startPos,
 		EndPos:   p.currentPos(),
 	}, nil
@@ -2331,7 +2901,9 @@ func (p *parser) skipTypeAnnotation() {
 		if p.match("<") {
 			p.advance()
 			depth := 1
-			for depth > 0 && !p.isAtEnd() {
+			iterations := 0
+			for depth > 0 && !p.isAtEnd() && iterations < maxParserIterations {
+				iterations++
 				if p.match("<") {
 					depth++
 					p.advance()
@@ -2347,7 +2919,9 @@ func (p *parser) skipTypeAnnotation() {
 	}
 
 	// Handle union types (|) and intersection types (&)
-	for (p.match("|") || p.match("&")) && !p.isAtEnd() {
+	iterations := 0
+	for (p.match("|") || p.match("&")) && !p.isAtEnd() && iterations < maxParserIterations {
+		iterations++
 		p.advance()
 		p.skipWhitespaceAndComments()
 		if p.matchIdentifier() {
@@ -2452,7 +3026,9 @@ func (p *parser) parseInterfaceDeclaration() (*ast.InterfaceDeclaration, error) 
 		p.advance()
 		p.skipWhitespaceAndComments()
 
-		for !p.match(">") && !p.isAtEnd() {
+		iterations := 0
+		for !p.match(">") && !p.isAtEnd() && iterations < maxParserIterations {
+			iterations++
 			typeParam, err := p.parseIdentifier()
 			if err != nil {
 				return nil, err
@@ -2508,7 +3084,9 @@ func (p *parser) parseInterfaceDeclaration() (*ast.InterfaceDeclaration, error) 
 	p.skipWhitespaceAndComments()
 
 	var body []ast.InterfaceProperty
-	for !p.match("}") && !p.isAtEnd() {
+	iterations := 0
+	for !p.match("}") && !p.isAtEnd() && iterations < maxParserIterations {
+		iterations++
 		// Parse property
 		key, err := p.parseIdentifier()
 		if err != nil {
@@ -2893,7 +3471,9 @@ func (p *parser) parseTemplateLiteralType() (ast.TypeNode, error) {
 	var types []ast.TypeNode
 	currentPart := ""
 
-	for !p.match("`") && !p.isAtEnd() {
+	iterations := 0
+	for !p.match("`") && !p.isAtEnd() && iterations < maxParserIterations {
+		iterations++
 		if p.match("$") && p.peek(1) == "{" {
 			// Save current part
 			parts = append(parts, currentPart)
@@ -3002,7 +3582,9 @@ func (p *parser) parseClassDeclaration() (*ast.ClassDeclaration, error) {
 
 	var members []ast.ClassMember
 
-	for !p.match("}") && !p.isAtEnd() {
+	iterations := 0
+	for !p.match("}") && !p.isAtEnd() && iterations < maxParserIterations {
+		iterations++
 		member, err := p.parseClassMember()
 		if err != nil {
 			return nil, err

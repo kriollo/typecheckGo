@@ -8,6 +8,7 @@ import (
 type TypeInferencer struct {
 	globalEnv *GlobalEnvironment
 	typeCache map[ast.Node]*Type
+	depth     int // Para evitar recursión infinita
 }
 
 // NewTypeInferencer crea un nuevo inferenciador de tipos
@@ -28,6 +29,14 @@ func (ti *TypeInferencer) InferType(expr ast.Expression) *Type {
 	if expr == nil {
 		return Unknown
 	}
+
+	// Evitar recursión infinita
+	if ti.depth > 10 {
+		return Unknown
+	}
+	ti.depth++
+
+	defer func() { ti.depth-- }()
 
 	switch e := expr.(type) {
 	case *ast.Literal:
