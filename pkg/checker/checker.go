@@ -5,8 +5,8 @@ import (
 	"strings"
 
 	"tstypechecker/pkg/ast"
-	"tstypechecker/pkg/symbols"
 	"tstypechecker/pkg/modules"
+	"tstypechecker/pkg/symbols"
 	"tstypechecker/pkg/types"
 )
 
@@ -26,20 +26,20 @@ type TypeChecker struct {
 
 // CompilerConfig holds the compiler options for type checking
 type CompilerConfig struct {
-	NoImplicitAny              bool
-	StrictNullChecks           bool
-	StrictFunctionTypes        bool
-	NoUnusedLocals             bool
-	NoUnusedParameters         bool
-	NoImplicitReturns          bool
-	NoImplicitThis             bool
-	StrictBindCallApply        bool
+	NoImplicitAny                bool
+	StrictNullChecks             bool
+	StrictFunctionTypes          bool
+	NoUnusedLocals               bool
+	NoUnusedParameters           bool
+	NoImplicitReturns            bool
+	NoImplicitThis               bool
+	StrictBindCallApply          bool
 	StrictPropertyInitialization bool
-	AlwaysStrict               bool
-	AllowUnreachableCode       bool
-	AllowUnusedLabels          bool
-	NoFallthroughCasesInSwitch bool
-	NoUncheckedIndexedAccess   bool
+	AlwaysStrict                 bool
+	AllowUnreachableCode         bool
+	AllowUnusedLabels            bool
+	NoFallthroughCasesInSwitch   bool
+	NoUncheckedIndexedAccess     bool
 }
 
 // TypeError represents a type checking error
@@ -77,20 +77,20 @@ func New() *TypeChecker {
 // getDefaultConfig returns default compiler configuration
 func getDefaultConfig() *CompilerConfig {
 	return &CompilerConfig{
-		NoImplicitAny:              false,
-		StrictNullChecks:           false,
-		StrictFunctionTypes:        false,
-		NoUnusedLocals:             false,
-		NoUnusedParameters:         false,
-		NoImplicitReturns:          false,
-		NoImplicitThis:             false,
-		StrictBindCallApply:        false,
+		NoImplicitAny:                false,
+		StrictNullChecks:             false,
+		StrictFunctionTypes:          false,
+		NoUnusedLocals:               false,
+		NoUnusedParameters:           false,
+		NoImplicitReturns:            false,
+		NoImplicitThis:               false,
+		StrictBindCallApply:          false,
 		StrictPropertyInitialization: false,
-		AlwaysStrict:               false,
-		AllowUnreachableCode:       true,
-		AllowUnusedLabels:          true,
-		NoFallthroughCasesInSwitch: false,
-		NoUncheckedIndexedAccess:   false,
+		AlwaysStrict:                 false,
+		AllowUnreachableCode:         true,
+		AllowUnusedLabels:            true,
+		NoFallthroughCasesInSwitch:   false,
+		NoUncheckedIndexedAccess:     false,
 	}
 }
 
@@ -612,10 +612,11 @@ func (tc *TypeChecker) checkMemberExpression(member *ast.MemberExpression, filen
 	if !member.Computed {
 		// Property is an identifier
 		if id, ok := member.Property.(*ast.Identifier); ok {
-			// For now, we just check if the identifier is valid
-			// In a full implementation, we would check if the property exists
-			// on the object's type
-			if !isValidIdentifier(id.Name) {
+			// In JavaScript/TypeScript, property names can be any identifier,
+			// including reserved keywords (e.g., obj.get(), obj.set(), obj.class)
+			// So we don't validate against reserved keywords here.
+			// We only check basic identifier syntax (alphanumeric + _ + $)
+			if !isValidPropertyName(id.Name) {
 				tc.addError(filename, id.Pos().Line, id.Pos().Column,
 					fmt.Sprintf("Invalid property name: '%s'", id.Name), "TS1003", "error")
 			}
@@ -693,9 +694,9 @@ func levenshteinDistance(s1, s2 string) int {
 			}
 
 			matrix[i][j] = min(
-				matrix[i-1][j]+1,      // deletion
+				matrix[i-1][j]+1, // deletion
 				min(
-					matrix[i][j-1]+1,  // insertion
+					matrix[i][j-1]+1,      // insertion
 					matrix[i-1][j-1]+cost, // substitution
 				),
 			)
@@ -778,8 +779,8 @@ func isValidIdentifier(name string) bool {
 	// Check if it starts with a letter, underscore, or dollar sign
 	firstChar := name[0]
 	if !((firstChar >= 'a' && firstChar <= 'z') ||
-		 (firstChar >= 'A' && firstChar <= 'Z') ||
-		 firstChar == '_' || firstChar == '$') {
+		(firstChar >= 'A' && firstChar <= 'Z') ||
+		firstChar == '_' || firstChar == '$') {
 		return false
 	}
 
@@ -787,15 +788,45 @@ func isValidIdentifier(name string) bool {
 	for i := 1; i < len(name); i++ {
 		char := name[i]
 		if !((char >= 'a' && char <= 'z') ||
-			 (char >= 'A' && char <= 'Z') ||
-			 (char >= '0' && char <= '9') ||
-			 char == '_' || char == '$') {
+			(char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') ||
+			char == '_' || char == '$') {
 			return false
 		}
 	}
 
 	// Check if it's a reserved keyword
 	return !isReservedKeyword(name)
+}
+
+func isValidPropertyName(name string) bool {
+	if name == "" {
+		return false
+	}
+
+	// Property names can be any valid identifier, including reserved keywords
+	// (e.g., obj.get(), obj.set(), obj.class, obj.if are all valid)
+	// We only check basic syntax
+	firstChar := name[0]
+	if !((firstChar >= 'a' && firstChar <= 'z') ||
+		(firstChar >= 'A' && firstChar <= 'Z') ||
+		firstChar == '_' || firstChar == '$') {
+		return false
+	}
+
+	// Check remaining characters
+	for i := 1; i < len(name); i++ {
+		char := name[i]
+		if !((char >= 'a' && char <= 'z') ||
+			(char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') ||
+			char == '_' || char == '$') {
+			return false
+		}
+	}
+
+	// Don't check against reserved keywords for property names
+	return true
 }
 
 // isReservedKeyword checks if a string is a JavaScript/TypeScript reserved keyword
@@ -1074,7 +1105,7 @@ func (tc *TypeChecker) isAssignableTo(sourceType, targetType *types.Type) bool {
 
 	// Undefined and null are assignable to each other (in non-strict mode)
 	if (sourceType.Kind == types.UndefinedType && targetType.Kind == types.NullType) ||
-	   (sourceType.Kind == types.NullType && targetType.Kind == types.UndefinedType) {
+		(sourceType.Kind == types.NullType && targetType.Kind == types.UndefinedType) {
 		return true
 	}
 
@@ -1129,7 +1160,6 @@ func (tc *TypeChecker) checkExportDeclaration(exportDecl *ast.ExportDeclaration,
 			"TS2305", "error")
 	}
 }
-
 
 func (tc *TypeChecker) checkTypeAliasDeclaration(decl *ast.TypeAliasDeclaration, filename string) {
 	// Type aliases are just declarations, no runtime checking needed

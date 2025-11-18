@@ -1006,7 +1006,7 @@ func (p *parser) parseBinaryExpression() (ast.Expression, error) {
 			}
 
 			if right == nil {
-				return nil, fmt.Errorf("expected right operand for operator %s", op)
+				return nil, fmt.Errorf("expected right operand for operator %s at %d:%d", op, p.line, p.column)
 			}
 
 			left = &ast.BinaryExpression{
@@ -1306,6 +1306,16 @@ func (p *parser) parsePostfixExpression() (ast.Expression, error) {
 
 	p.skipWhitespaceAndComments()
 
+	// Check for type assertion: expr as Type
+	if p.matchKeyword("as") {
+		p.advanceWord()
+		p.skipWhitespaceAndComments()
+		// Skip the type annotation (can be union type: Type1 | Type2)
+		p.skipTypeAnnotation()
+		// Return original expression (type assertion is compile-time only)
+		return expr, nil
+	}
+
 	// Check for postfix ++ or --
 	if p.match("++") {
 		p.advanceString(2)
@@ -1509,6 +1519,29 @@ func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 						p.skipWhitespaceAndComments()
 						// Skip type (including generics like Record<K, V>)
 						p.skipTypeAnnotation()
+						p.skipWhitespaceAndComments()
+					}
+					// Check for default value
+					if p.match("=") {
+						p.advance()
+						p.skipWhitespaceAndComments()
+						// Skip default value expression
+						// Find the end (comma or closing paren)
+						depth := 0
+						for !p.isAtEnd() && paramIter < maxParserIterations {
+							if p.match("(") || p.match("[") || p.match("{") {
+								depth++
+							} else if p.match(")") || p.match("]") || p.match("}") {
+								if depth == 0 && p.match(")") {
+									break // End of params
+								}
+								depth--
+							} else if p.match(",") && depth == 0 {
+								break // Next param
+							}
+							p.advance()
+						}
+						p.skipWhitespaceAndComments()
 					}
 					if p.match(",") {
 						p.advance()
@@ -1630,7 +1663,8 @@ func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 		startPos := p.currentPos()
 		p.advance() // consume /
 
-		// Find closing / (skip escaped characters)
+		// Find closing / (skip escaped characters and character classes)
+		inCharClass := false
 		for !p.isAtEnd() {
 			if p.source[p.pos] == '\\' {
 				// Skip escaped character
@@ -1638,7 +1672,16 @@ func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 				if !p.isAtEnd() {
 					p.advance()
 				}
-			} else if p.source[p.pos] == '/' {
+			} else if p.source[p.pos] == '[' && !inCharClass {
+				// Entering character class
+				inCharClass = true
+				p.advance()
+			} else if p.source[p.pos] == ']' && inCharClass {
+				// Exiting character class
+				inCharClass = false
+				p.advance()
+			} else if p.source[p.pos] == '/' && !inCharClass {
+				// Found closing / (only if not in character class)
 				p.advance() // consume closing /
 				// Parse flags (i, g, m, etc.)
 				for !p.isAtEnd() && (unicode.IsLetter(rune(p.source[p.pos])) || unicode.IsDigit(rune(p.source[p.pos]))) {
@@ -2725,6 +2768,19 @@ func (p *parser) parseArrowFunction() (*ast.ArrowFunctionExpression, error) {
 				}
 			}
 
+			p.skipWhitespaceAndComments()
+
+			// Handle default value
+			if p.match("=") {
+				p.advance()
+				p.skipWhitespaceAndComments()
+				// Parse but don't store default value for now
+				_, err = p.parseAssignmentExpression()
+				if err != nil {
+					return nil, err
+				}
+			}
+
 			param := &ast.Parameter{
 				ID:        id,
 				ParamType: paramType,
@@ -2887,12 +2943,97 @@ func (p *parser) parseTypeAnnotation() (ast.TypeNode, error) {
 	// For now, just parse the first type
 	// TODO: Implement full union type support
 
-	return nil, fmt.Errorf("expected type annotation")
+	return nil, fmt.Errorf("expected type annotation at %s", p.currentPos())
 }
 
 // skipTypeAnnotation skips over a type annotation without parsing it
 func (p *parser) skipTypeAnnotation() {
-	// Skip identifier
+	p.skipTypePrimary()
+
+	// Handle union types (|) and intersection types (&)
+	iterations := 0
+	for (p.match("|") || p.match("&")) && !p.isAtEnd() && iterations < maxParserIterations {
+		iterations++
+		p.advance()
+		p.skipWhitespaceAndComments()
+		p.skipTypePrimary()
+	}
+
+	// Handle array types: Type[] or Type[][]
+	for p.match("[") && p.peek(1) == "]" && iterations < maxParserIterations {
+		iterations++
+		p.advance() // [
+		p.advance() // ]
+		p.skipWhitespaceAndComments()
+	}
+}
+
+func (p *parser) skipTypePrimary() {
+	iterations := 0
+
+	// Object type: { prop: Type; prop2: Type }
+	if p.match("{") {
+		p.advance()
+		depth := 1
+		for depth > 0 && !p.isAtEnd() && iterations < maxParserIterations {
+			iterations++
+			if p.match("{") {
+				depth++
+			} else if p.match("}") {
+				depth--
+			}
+			p.advance()
+		}
+		p.skipWhitespaceAndComments()
+		return
+	}
+
+	// Tuple or array type: [Type, Type] or Type[]
+	if p.match("[") {
+		p.advance()
+		depth := 1
+		for depth > 0 && !p.isAtEnd() && iterations < maxParserIterations {
+			iterations++
+			if p.match("[") {
+				depth++
+			} else if p.match("]") {
+				depth--
+			}
+			p.advance()
+		}
+		p.skipWhitespaceAndComments()
+		return
+	}
+
+	// Function type: (arg: Type) => ReturnType
+	if p.match("(") {
+		// Look for => pattern
+		tempPos := p.pos
+		p.advance() // (
+		depth := 1
+		for depth > 0 && !p.isAtEnd() && iterations < maxParserIterations {
+			iterations++
+			if p.match("(") {
+				depth++
+			} else if p.match(")") {
+				depth--
+			}
+			p.advance()
+		}
+		p.skipWhitespaceAndComments()
+		if p.match("=") && p.peek(1) == ">" {
+			// It's a function type
+			p.advance() // =
+			p.advance() // >
+			p.skipWhitespaceAndComments()
+			p.skipTypeAnnotation() // Recurse for return type
+			return
+		}
+		// Not a function type, restore
+		p.pos = tempPos
+	}
+
+	// Identifier (possibly with generics)
 	if p.matchIdentifier() {
 		p.advanceWord()
 		p.skipWhitespaceAndComments()
@@ -2901,7 +3042,6 @@ func (p *parser) skipTypeAnnotation() {
 		if p.match("<") {
 			p.advance()
 			depth := 1
-			iterations := 0
 			for depth > 0 && !p.isAtEnd() && iterations < maxParserIterations {
 				iterations++
 				if p.match("<") {
@@ -2914,18 +3054,6 @@ func (p *parser) skipTypeAnnotation() {
 					p.advance()
 				}
 			}
-			p.skipWhitespaceAndComments()
-		}
-	}
-
-	// Handle union types (|) and intersection types (&)
-	iterations := 0
-	for (p.match("|") || p.match("&")) && !p.isAtEnd() && iterations < maxParserIterations {
-		iterations++
-		p.advance()
-		p.skipWhitespaceAndComments()
-		if p.matchIdentifier() {
-			p.advanceWord()
 			p.skipWhitespaceAndComments()
 		}
 	}
@@ -3436,11 +3564,65 @@ func (p *parser) parseTypeAnnotationPrimary() (ast.TypeNode, error) {
 		return p.parseTypeAnnotation()
 	}
 
-	// Parenthesized type
+	// Function type or parenthesized type
 	if p.match("(") {
+		savedPos := p.pos
 		p.advance()
 		p.skipWhitespaceAndComments()
 
+		// Check if it's a function type () => Type or (param: Type) => Type
+		// vs parenthesized type (Type)
+		isFunctionType := false
+
+		// Empty params () => ...
+		if p.match(")") {
+			p.advance()
+			p.skipWhitespaceAndComments()
+			if p.match("=") && p.peek(1) == ">" {
+				isFunctionType = true
+				p.pos = savedPos // Reset to start
+			}
+		} else {
+			// Check for parameter with type annotation
+			if p.matchIdentifier() {
+				p.advanceWord()
+				p.skipWhitespaceAndComments()
+				if p.match(":") || p.match("?") || p.match(",") {
+					// Looks like function parameters
+					isFunctionType = true
+				}
+			}
+			p.pos = savedPos // Reset to start
+		}
+
+		if isFunctionType {
+			// Parse as function type - for now just skip to =>
+			p.advance() // consume (
+			depth := 1
+			for depth > 0 && !p.isAtEnd() {
+				if p.match("(") {
+					depth++
+				} else if p.match(")") {
+					depth--
+				}
+				p.advance()
+			}
+			p.skipWhitespaceAndComments()
+			// Skip => and return type
+			if p.match("=") && p.peek(1) == ">" {
+				p.advanceString(2)
+				p.skipWhitespaceAndComments()
+				p.skipTypeAnnotation()
+			}
+			// Return placeholder type
+			return &ast.TypeReference{
+				Name:     "Function",
+				Position: startPos,
+				EndPos:   p.currentPos(),
+			}, nil
+		}
+
+		// Parenthesized type (Type)
 		innerType, err := p.parseTypeAnnotationFull()
 		if err != nil {
 			return nil, err
@@ -3455,7 +3637,7 @@ func (p *parser) parseTypeAnnotationPrimary() (ast.TypeNode, error) {
 		return innerType, nil
 	}
 
-	return nil, fmt.Errorf("expected type annotation")
+	return nil, fmt.Errorf("expected type annotation at %s", p.currentPos())
 }
 
 // parseTemplateLiteralType parses a template literal type `prefix${T}suffix`
@@ -3829,6 +4011,19 @@ func (p *parser) parseParameter() (*ast.Parameter, error) {
 		p.advance()
 		p.skipWhitespaceAndComments()
 		paramType, err = p.parseTypeAnnotation()
+		if err != nil {
+			return nil, err
+		}
+		p.skipWhitespaceAndComments()
+	}
+
+	// Parse default value if present
+	if p.match("=") {
+		p.advance()
+		p.skipWhitespaceAndComments()
+		// Skip the default value expression for now
+		// TODO: Parse and store default value in AST
+		_, err = p.parseAssignmentExpression()
 		if err != nil {
 			return nil, err
 		}
