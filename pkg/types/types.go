@@ -89,25 +89,26 @@ func (tk TypeKind) String() string {
 
 // Type representa un tipo en el sistema de tipos
 type Type struct {
-	Kind       TypeKind
-	Name       string
-	Properties map[string]*Type
-	ElementType *Type // Para arrays
-	Parameters []*Type // Para funciones y type parameters
-	ReturnType *Type // Para funciones
-	Types      []*Type // Para unions/intersections
-	Value      interface{} // Para literal types
+	Kind        TypeKind
+	Name        string
+	Properties  map[string]*Type
+	ElementType *Type       // Para arrays
+	Parameters  []*Type     // Para funciones y type parameters
+	ReturnType  *Type       // Para funciones
+	Types       []*Type     // Para unions/intersections
+	Value       interface{} // Para literal types
 
 	// Para mapped types: { [K in keyof T]: U }
 	TypeParameter *Type // K
 	Constraint    *Type // keyof T
 	MappedType    *Type // U
 
-	// Para conditional types: T extends U ? X : Y
-	CheckType *Type // T
-	ExtendsType *Type // U
-	TrueType  *Type // X
-	FalseType *Type // Y
+	// Para conditional types: T extends U ? X : Y or T extends infer U ? X : Y
+	CheckType    *Type // T
+	ExtendsType  *Type // U
+	InferredType *Type // For infer keyword: the inferred type parameter
+	TrueType     *Type // X
+	FalseType    *Type // Y
 
 	// Para template literal types
 	TemplateParts []string // Las partes literales
@@ -181,7 +182,7 @@ func NewMappedType(typeParam *Type, constraint *Type, mappedType *Type) *Type {
 	}
 }
 
-// NewConditionalType crea un conditional type T extends U ? X : Y
+// NewConditionalType crea un conditional type T extends U ? X : Y or T extends infer U ? X : Y
 func NewConditionalType(checkType *Type, extendsType *Type, trueType *Type, falseType *Type) *Type {
 	return &Type{
 		Kind:        ConditionalType,
@@ -189,6 +190,18 @@ func NewConditionalType(checkType *Type, extendsType *Type, trueType *Type, fals
 		ExtendsType: extendsType,
 		TrueType:    trueType,
 		FalseType:   falseType,
+	}
+}
+
+// NewConditionalTypeWithInfer crea un conditional type con infer: T extends infer U ? X : Y
+func NewConditionalTypeWithInfer(checkType *Type, inferredType *Type, trueType *Type, falseType *Type) *Type {
+	return &Type{
+		Kind:         ConditionalType,
+		CheckType:    checkType,
+		ExtendsType:  nil, // No hay extends type cuando hay infer
+		InferredType: inferredType,
+		TrueType:     trueType,
+		FalseType:    falseType,
 	}
 }
 
@@ -271,6 +284,13 @@ func (t *Type) String() string {
 			t.MappedType.String())
 
 	case ConditionalType:
+		if t.InferredType != nil {
+			return fmt.Sprintf("%s extends infer %s ? %s : %s",
+				t.CheckType.String(),
+				t.InferredType.String(),
+				t.TrueType.String(),
+				t.FalseType.String())
+		}
 		return fmt.Sprintf("%s extends %s ? %s : %s",
 			t.CheckType.String(),
 			t.ExtendsType.String(),

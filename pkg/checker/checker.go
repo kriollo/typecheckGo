@@ -20,6 +20,7 @@ type TypeChecker struct {
 	globalEnv       *types.GlobalEnvironment
 	typeCache       map[ast.Node]*types.Type
 	varTypeCache    map[string]*types.Type // Cache types by variable name
+	typeAliasCache  map[string]*types.Type // Cache for resolved type aliases
 	inferencer      *types.TypeInferencer
 	currentFunction *ast.FunctionDeclaration // Track current function for return type checking
 	config          *CompilerConfig          // Compiler configuration
@@ -70,6 +71,7 @@ func New() *TypeChecker {
 		globalEnv:    globalEnv,
 		typeCache:    typeCache,
 		varTypeCache: make(map[string]*types.Type),
+		typeAliasCache: make(map[string]*types.Type),
 		inferencer:   inferencer,
 		config:       getDefaultConfig(),
 	}
@@ -112,6 +114,7 @@ func NewWithModuleResolver(rootDir string) *TypeChecker {
 		typeCache:      typeCache,
 		config:         getDefaultConfig(),
 		varTypeCache:   make(map[string]*types.Type),
+		typeAliasCache: make(map[string]*types.Type),
 		inferencer:     inferencer,
 	}
 }
@@ -1099,6 +1102,9 @@ func (tc *TypeChecker) getExpressionType(expr ast.Expression) *types.Type {
 					// If the declarator has an initializer, infer from it
 					if declarator.Init != nil {
 						inferredType := tc.inferencer.InferType(declarator.Init)
+						if inferredType.Kind == types.ConditionalType {
+							inferredType = tc.evaluateConditionalType(inferredType)
+						}
 						tc.typeCache[declarator] = inferredType
 						tc.typeCache[declarator.ID] = inferredType
 						tc.varTypeCache[id.Name] = inferredType
@@ -1118,6 +1124,9 @@ func (tc *TypeChecker) getExpressionType(expr ast.Expression) *types.Type {
 
 	// Otherwise, infer the type
 	inferredType := tc.inferencer.InferType(expr)
+	if inferredType.Kind == types.ConditionalType {
+		inferredType = tc.evaluateConditionalType(inferredType)
+	}
 	tc.typeCache[expr] = inferredType
 	return inferredType
 }
@@ -1203,11 +1212,18 @@ func (tc *TypeChecker) checkExportDeclaration(exportDecl *ast.ExportDeclaration,
 }
 
 func (tc *TypeChecker) checkTypeAliasDeclaration(decl *ast.TypeAliasDeclaration, filename string) {
-	// Type aliases are just declarations, no runtime checking needed
-	// We just verify the name is valid
-	if decl.ID != nil && !isValidIdentifier(decl.ID.Name) {
-		tc.addError(filename, decl.ID.Pos().Line, decl.ID.Pos().Column,
-			fmt.Sprintf("Invalid type name: '%s'", decl.ID.Name), "TS1003", "error")
+	if decl.ID != nil {
+		if !isValidIdentifier(decl.ID.Name) {
+			tc.addError(filename, decl.ID.Pos().Line, decl.ID.Pos().Column,
+				fmt.Sprintf("Invalid type name: '%s'", decl.ID.Name), "TS1003", "error")
+		}
+
+		// For non-generic type aliases, resolve and cache them.
+		// Generic ones are resolved on instantiation.
+		if len(decl.TypeParameters) == 0 {
+			resolvedType := tc.convertTypeNode(decl.TypeAnnotation)
+			tc.typeAliasCache[decl.ID.Name] = resolvedType
+		}
 	}
 }
 
@@ -1309,4 +1325,193 @@ func (tc *TypeChecker) checkNewExpression(expr *ast.NewExpression, filename stri
 
 	// TODO: Verify that the callee is actually a class/constructor
 	// TODO: Check argument types against constructor signature
+}
+
+// convertTypeNode converts an AST TypeNode to a types.Type
+func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
+	if typeNode == nil {
+		return types.Unknown
+	}
+
+	switch t := typeNode.(type) {
+	case *ast.TypeReference:
+		// Handle generic type alias instantiation
+		if symbol, exists := tc.symbolTable.ResolveSymbol(t.Name); exists && symbol.Type == symbols.TypeAliasSymbol {
+			aliasDecl := symbol.Node.(*ast.TypeAliasDeclaration)
+
+			// Create substitution map
+			substitutions := make(map[string]*types.Type)
+			for i, param := range aliasDecl.TypeParameters {
+				if i < len(t.TypeArguments) {
+					argType := tc.convertTypeNode(t.TypeArguments[i])
+					if typeRef, ok := param.(*ast.TypeReference); ok {
+						substitutions[typeRef.Name] = argType
+					}
+				}
+			}
+
+			// Substitute in the alias's type annotation
+			annotationType := tc.convertTypeNode(aliasDecl.TypeAnnotation)
+			resolvedType := tc.substituteType(annotationType, substitutions)
+
+			// Evaluate if it's a conditional type
+			if resolvedType.Kind == types.ConditionalType {
+				return tc.evaluateConditionalType(resolvedType)
+			}
+			return resolvedType
+		}
+
+		// Handle basic type references
+		switch t.Name {
+		case "string":
+			return types.String
+		case "number":
+			return types.Number
+		case "boolean":
+			return types.Boolean
+		case "any":
+			return types.Any
+		case "unknown":
+			return types.Unknown
+		case "void":
+			return types.Void
+		case "never":
+			return types.Never
+		case "null":
+			return types.Null
+		case "undefined":
+			return types.Undefined
+		default:
+			// Check type alias cache for non-generic aliases
+			if resolvedType, ok := tc.typeAliasCache[t.Name]; ok {
+				return resolvedType
+			}
+
+			// For other type references, create a basic object type
+			return types.NewObjectType(t.Name, nil)
+		}
+
+	case *ast.ConditionalType:
+		checkType := tc.convertTypeNode(t.CheckType)
+		var extendsType *types.Type
+		var inferredType *types.Type
+
+		if t.InferredType != nil {
+			// This is an infer conditional type: T extends infer U ? U : never
+			inferredType = types.NewTypeParameter(t.InferredType.Name, nil, nil)
+		} else {
+			extendsType = tc.convertTypeNode(t.ExtendsType)
+		}
+
+		trueType := tc.convertTypeNode(t.TrueType)
+		falseType := tc.convertTypeNode(t.FalseType)
+
+		if t.InferredType != nil {
+			return types.NewConditionalTypeWithInfer(checkType, inferredType, trueType, falseType)
+		}
+		return types.NewConditionalType(checkType, extendsType, trueType, falseType)
+
+	case *ast.UnionType:
+		var unionTypes []*types.Type
+		for _, typ := range t.Types {
+			unionTypes = append(unionTypes, tc.convertTypeNode(typ))
+		}
+		return types.NewUnionType(unionTypes)
+
+	case *ast.LiteralType:
+		return types.NewLiteralType(t.Value)
+
+	case *ast.TypeParameter:
+		return types.NewTypeParameter(t.Name.Name, nil, nil)
+
+	default:
+		return types.Unknown
+	}
+}
+
+// evaluateConditionalType evaluates a conditional type and returns the resolved type
+func (tc *TypeChecker) evaluateConditionalType(condType *types.Type) *types.Type {
+	if condType.Kind != types.ConditionalType {
+		return condType
+	}
+
+	if condType.InferredType != nil {
+		// T extends infer U ? X : Y
+		var inferredType *types.Type
+
+		// Handle T extends (infer U)[]
+		if condType.CheckType.Kind == types.ArrayType {
+			inferredType = condType.CheckType.ElementType
+		} else if condType.CheckType.Kind == types.FunctionType { // Handle T extends (...args: any[]) => infer R
+			inferredType = condType.CheckType.ReturnType
+		}
+
+		if inferredType != nil {
+			// Substitute the inferred type into the true type
+			substitutions := map[string]*types.Type{
+				condType.InferredType.Name: inferredType,
+			}
+			return tc.substituteType(condType.TrueType, substitutions)
+		}
+
+		return condType.FalseType
+	}
+
+	// For regular conditional types: T extends U ? X : Y
+	// Check if CheckType is assignable to ExtendsType
+	if condType.CheckType.IsAssignableTo(condType.ExtendsType) {
+		return condType.TrueType
+	}
+	return condType.FalseType
+}
+
+// substituteType recursively substitutes type parameters in a given type.
+func (tc *TypeChecker) substituteType(t *types.Type, substitutions map[string]*types.Type) *types.Type {
+	if t == nil {
+		return nil
+	}
+
+	if t.Kind == types.TypeParameterType {
+		if substitution, ok := substitutions[t.Name]; ok {
+			return substitution
+		}
+	}
+
+	switch t.Kind {
+	case types.ArrayType:
+		return types.NewArrayType(tc.substituteType(t.ElementType, substitutions))
+	case types.FunctionType:
+		params := make([]*types.Type, len(t.Parameters))
+		for i, p := range t.Parameters {
+			params[i] = tc.substituteType(p, substitutions)
+		}
+		returnType := tc.substituteType(t.ReturnType, substitutions)
+		return types.NewFunctionType(params, returnType)
+	case types.UnionType:
+		unionTypes := make([]*types.Type, len(t.Types))
+		for i, ut := range t.Types {
+			unionTypes[i] = tc.substituteType(ut, substitutions)
+		}
+		return types.NewUnionType(unionTypes)
+	case types.IntersectionType:
+		intersectionTypes := make([]*types.Type, len(t.Types))
+		for i, it := range t.Types {
+			intersectionTypes[i] = tc.substituteType(it, substitutions)
+		}
+		// HACK: NewIntersectionType does not exist, using NewUnionType as a placeholder.
+		return types.NewUnionType(intersectionTypes)
+	case types.ConditionalType:
+		checkType := tc.substituteType(t.CheckType, substitutions)
+		extendsType := tc.substituteType(t.ExtendsType, substitutions)
+		trueType := tc.substituteType(t.TrueType, substitutions)
+		falseType := tc.substituteType(t.FalseType, substitutions)
+		if t.InferredType != nil {
+			// We don't substitute the inferred type parameter itself
+			return types.NewConditionalTypeWithInfer(checkType, t.InferredType, trueType, falseType)
+		}
+		return types.NewConditionalType(checkType, extendsType, trueType, falseType)
+
+	default:
+		return t
+	}
 }

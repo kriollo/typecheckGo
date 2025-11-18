@@ -7,31 +7,46 @@ import (
 	"strings"
 	"time"
 
-	"github.com/spf13/cobra"
 	"tstypechecker/pkg/checker"
 	"tstypechecker/pkg/config"
 	"tstypechecker/pkg/parser"
+
+	"github.com/spf13/cobra"
 )
 
 var (
 	outputFormat string
 	showAST      bool
+	codeInput    string
+	filename     string
 )
 
 var checkCmd = &cobra.Command{
 	Use:   "check [path]",
 	Short: "Check TypeScript files for type errors",
 	Long:  `Analyze TypeScript files and report type errors, undefined variables, and function arity mismatches.`,
-	Args:  cobra.ExactArgs(1),
+	Args:  cobra.MaximumNArgs(1),
 	RunE:  runCheck,
 }
 
 func init() {
 	checkCmd.Flags().StringVarP(&outputFormat, "format", "f", "text", "Output format: text, json, toon")
 	checkCmd.Flags().BoolVarP(&showAST, "ast", "a", false, "Show AST output")
+	checkCmd.Flags().StringVarP(&codeInput, "code", "c", "", "TypeScript code as text input (alternative to file path)")
+	checkCmd.Flags().StringVarP(&filename, "filename", "n", "stdin.ts", "Filename to use when checking code from text input")
 }
 
 func runCheck(cmd *cobra.Command, args []string) error {
+	// Check if code input is provided
+	if codeInput != "" {
+		return checkCodeInput(codeInput, filename)
+	}
+
+	// Otherwise, check file/directory path
+	if len(args) == 0 {
+		return fmt.Errorf("path argument is required when --code flag is not used")
+	}
+
 	path := args[0]
 
 	// Resolve path
@@ -84,20 +99,20 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	// Configure type checker with tsconfig options
 	// Note: When strict is true, individual flags can still be explicitly disabled
 	checkerConfig := &checker.CompilerConfig{
-		NoImplicitAny:              tsConfig.CompilerOptions.NoImplicitAny,
-		StrictNullChecks:           tsConfig.CompilerOptions.StrictNullChecks,
-		StrictFunctionTypes:        tsConfig.CompilerOptions.StrictFunctionTypes,
-		NoUnusedLocals:             tsConfig.CompilerOptions.NoUnusedLocals,
-		NoUnusedParameters:         tsConfig.CompilerOptions.NoUnusedParameters,
-		NoImplicitReturns:          tsConfig.CompilerOptions.NoImplicitReturns,
-		NoImplicitThis:             tsConfig.CompilerOptions.NoImplicitThis,
-		StrictBindCallApply:        tsConfig.CompilerOptions.StrictBindCallApply,
+		NoImplicitAny:                tsConfig.CompilerOptions.NoImplicitAny,
+		StrictNullChecks:             tsConfig.CompilerOptions.StrictNullChecks,
+		StrictFunctionTypes:          tsConfig.CompilerOptions.StrictFunctionTypes,
+		NoUnusedLocals:               tsConfig.CompilerOptions.NoUnusedLocals,
+		NoUnusedParameters:           tsConfig.CompilerOptions.NoUnusedParameters,
+		NoImplicitReturns:            tsConfig.CompilerOptions.NoImplicitReturns,
+		NoImplicitThis:               tsConfig.CompilerOptions.NoImplicitThis,
+		StrictBindCallApply:          tsConfig.CompilerOptions.StrictBindCallApply,
 		StrictPropertyInitialization: tsConfig.CompilerOptions.StrictPropertyInitialization,
-		AlwaysStrict:               tsConfig.CompilerOptions.AlwaysStrict,
-		AllowUnreachableCode:       tsConfig.CompilerOptions.AllowUnreachableCode,
-		AllowUnusedLabels:          tsConfig.CompilerOptions.AllowUnusedLabels,
-		NoFallthroughCasesInSwitch: tsConfig.CompilerOptions.NoFallthroughCasesInSwitch,
-		NoUncheckedIndexedAccess:   tsConfig.CompilerOptions.NoUncheckedIndexedAccess,
+		AlwaysStrict:                 tsConfig.CompilerOptions.AlwaysStrict,
+		AllowUnreachableCode:         tsConfig.CompilerOptions.AllowUnreachableCode,
+		AllowUnusedLabels:            tsConfig.CompilerOptions.AllowUnusedLabels,
+		NoFallthroughCasesInSwitch:   tsConfig.CompilerOptions.NoFallthroughCasesInSwitch,
+		NoUncheckedIndexedAccess:     tsConfig.CompilerOptions.NoUncheckedIndexedAccess,
 	}
 	typeChecker.SetConfig(checkerConfig)
 
@@ -225,6 +240,144 @@ func checkFile(tc *checker.TypeChecker, filename string) error {
 	return nil
 }
 
+func checkCodeInput(code string, name string) error {
+	startTime := time.Now()
+
+	// Get current working directory for root resolution
+	rootDir, err := os.Getwd()
+	if err != nil {
+		rootDir = "."
+	}
+
+	// Load tsconfig.json if it exists
+	tsConfig, err := config.LoadTSConfig(rootDir)
+	if err != nil {
+		// Silently use default configuration
+		tsConfig = config.GetDefaultConfig()
+	}
+
+	// Create type checker with module resolution
+	typeChecker := checker.NewWithModuleResolver(rootDir)
+
+	// Configure type checker with tsconfig options
+	checkerConfig := &checker.CompilerConfig{
+		NoImplicitAny:                tsConfig.CompilerOptions.NoImplicitAny,
+		StrictNullChecks:             tsConfig.CompilerOptions.StrictNullChecks,
+		StrictFunctionTypes:          tsConfig.CompilerOptions.StrictFunctionTypes,
+		NoUnusedLocals:               tsConfig.CompilerOptions.NoUnusedLocals,
+		NoUnusedParameters:           tsConfig.CompilerOptions.NoUnusedParameters,
+		NoImplicitReturns:            tsConfig.CompilerOptions.NoImplicitReturns,
+		NoImplicitThis:               tsConfig.CompilerOptions.NoImplicitThis,
+		StrictBindCallApply:          tsConfig.CompilerOptions.StrictBindCallApply,
+		StrictPropertyInitialization: tsConfig.CompilerOptions.StrictPropertyInitialization,
+		AlwaysStrict:                 tsConfig.CompilerOptions.AlwaysStrict,
+		AllowUnreachableCode:         tsConfig.CompilerOptions.AllowUnreachableCode,
+		AllowUnusedLabels:            tsConfig.CompilerOptions.AllowUnusedLabels,
+		NoFallthroughCasesInSwitch:   tsConfig.CompilerOptions.NoFallthroughCasesInSwitch,
+		NoUncheckedIndexedAccess:     tsConfig.CompilerOptions.NoUncheckedIndexedAccess,
+	}
+	typeChecker.SetConfig(checkerConfig)
+
+	// Parse code from string
+	ast, err := parser.ParseCode(code, name)
+	if err != nil {
+		return fmt.Errorf("parse error in %s: %w", name, err)
+	}
+
+	// Show AST if requested
+	if showAST {
+		astJSON, err := parser.ASTToJSON(ast)
+		if err != nil {
+			return fmt.Errorf("failed to serialize AST: %w", err)
+		}
+		fmt.Printf("AST for %s:\n%s\n", name, astJSON)
+	}
+
+	// Type check
+	errors := typeChecker.CheckFile(name, ast)
+
+	elapsed := time.Since(startTime)
+	elapsedMs := elapsed.Milliseconds()
+
+	// Report errors
+	if len(errors) > 0 {
+		switch outputFormat {
+		case "json":
+			reportErrorsJSON(errors)
+		case "toon":
+			reportErrorsTOON(errors)
+		default:
+			reportErrorsWithContextFromCode(name, code, errors)
+			fmt.Printf("\n%sFinished in %dms.%s\n", colorGray, elapsedMs, colorReset)
+		}
+		return fmt.Errorf("type checking failed")
+	}
+
+	// Success message
+	fmt.Printf("%s✓%s %s %s(%dms)%s\n", colorGreen, colorReset, name, colorGray, elapsedMs, colorReset)
+	return nil
+}
+
+func reportErrorsWithContextFromCode(filename string, code string, errors []checker.TypeError) {
+	if len(errors) == 0 {
+		return
+	}
+
+	lines := splitLines(code)
+
+	fmt.Printf("\n")
+
+	for i, e := range errors {
+		// Show error header with color
+		fmt.Printf("  %s×%s %s%s%s\n", colorRed, colorReset, colorBold, e.Message, colorReset)
+
+		// Show file location with color
+		fmt.Printf("   %s╭─[%s%s:%d:%d%s]\n", colorGray, colorCyan, filename, e.Line, e.Column, colorGray)
+
+		// Show code context (only 3 lines: previous, error, next)
+		startLine := max(1, e.Line-1)
+		endLine := min(len(lines), e.Line+1)
+
+		for lineNum := startLine; lineNum <= endLine; lineNum++ {
+			if lineNum-1 < len(lines) {
+				lineContent := lines[lineNum-1]
+
+				if lineNum == e.Line {
+					// Error line
+					fmt.Printf(" %s%3d%s %s│%s %s\n", colorGray, lineNum, colorReset, colorGray, colorReset, lineContent)
+
+					// Add error marker on the next line with arrow pointing up
+					spaces := e.Column - 1
+					if spaces < 0 {
+						spaces = 0
+					}
+					// Calculate padding to align with the code (after line number and │)
+					padding := 5 // "   3 │ " = 5 characters for line number display
+					fmt.Printf("%s%s%s^%s %s[%s]%s\n",
+						repeatString(" ", padding+spaces),
+						colorRed,
+						"",
+						colorReset,
+						colorGray,
+						e.Code,
+						colorReset)
+				} else {
+					// Context line
+					fmt.Printf(" %s%3d%s %s│%s %s\n", colorGray, lineNum, colorReset, colorGray, colorReset, lineContent)
+				}
+			}
+		}
+
+		fmt.Printf("   %s╰────%s\n", colorGray, colorReset)
+
+		if i < len(errors)-1 {
+			fmt.Printf("\n")
+		}
+	}
+
+	fmt.Printf("\n%sFound %d error(s).%s\n", colorRed, len(errors), colorReset)
+}
+
 // ANSI color codes
 const (
 	colorReset  = "\033[0m"
@@ -294,59 +447,59 @@ func reportErrorsWithContext(filename string, errors []checker.TypeError) {
 		lines := splitLines(string(content))
 
 		for i, e := range fileErrors {
-		// Show error header with color
-		fmt.Printf("  %s×%s %s%s%s\n", colorRed, colorReset, colorBold, e.Message, colorReset)
+			// Show error header with color
+			fmt.Printf("  %s×%s %s%s%s\n", colorRed, colorReset, colorBold, e.Message, colorReset)
 
-		// Show file location with color
-		// Get current working directory
-		cwd, err := os.Getwd()
-		var displayPath string
-		if err == nil {
-			// Try to get relative path from cwd
-			relPath, err := filepath.Rel(cwd, e.File)
-			if err == nil && !filepath.IsAbs(relPath) && len(relPath) < len(e.File) {
-				displayPath = relPath
+			// Show file location with color
+			// Get current working directory
+			cwd, err := os.Getwd()
+			var displayPath string
+			if err == nil {
+				// Try to get relative path from cwd
+				relPath, err := filepath.Rel(cwd, e.File)
+				if err == nil && !filepath.IsAbs(relPath) && len(relPath) < len(e.File) {
+					displayPath = relPath
+				} else {
+					displayPath = e.File
+				}
 			} else {
 				displayPath = e.File
 			}
-		} else {
-			displayPath = e.File
-		}
-		fmt.Printf("   %s╭─[%s%s:%d:%d%s]\n", colorGray, colorCyan, displayPath, e.Line, e.Column, colorGray)
+			fmt.Printf("   %s╭─[%s%s:%d:%d%s]\n", colorGray, colorCyan, displayPath, e.Line, e.Column, colorGray)
 
-		// Show code context (only 3 lines: previous, error, next)
-		startLine := max(1, e.Line-1)
-		endLine := min(len(lines), e.Line+1)
+			// Show code context (only 3 lines: previous, error, next)
+			startLine := max(1, e.Line-1)
+			endLine := min(len(lines), e.Line+1)
 
-		for lineNum := startLine; lineNum <= endLine; lineNum++ {
-			if lineNum-1 < len(lines) {
-				lineContent := lines[lineNum-1]
+			for lineNum := startLine; lineNum <= endLine; lineNum++ {
+				if lineNum-1 < len(lines) {
+					lineContent := lines[lineNum-1]
 
-				if lineNum == e.Line {
-					// Error line
-					fmt.Printf(" %s%3d%s %s│%s %s\n", colorGray, lineNum, colorReset, colorGray, colorReset, lineContent)
+					if lineNum == e.Line {
+						// Error line
+						fmt.Printf(" %s%3d%s %s│%s %s\n", colorGray, lineNum, colorReset, colorGray, colorReset, lineContent)
 
-					// Add error marker on the next line with arrow pointing up
-					spaces := e.Column - 1
-					if spaces < 0 {
-						spaces = 0
+						// Add error marker on the next line with arrow pointing up
+						spaces := e.Column - 1
+						if spaces < 0 {
+							spaces = 0
+						}
+						// Calculate padding to align with the code (after line number and │)
+						padding := 5 // "   3 │ " = 5 characters for line number display
+						fmt.Printf("%s%s%s^%s %s[%s]%s\n",
+							repeatString(" ", padding+spaces),
+							colorRed,
+							"",
+							colorReset,
+							colorGray,
+							e.Code,
+							colorReset)
+					} else {
+						// Context line
+						fmt.Printf(" %s%3d%s %s│%s %s\n", colorGray, lineNum, colorReset, colorGray, colorReset, lineContent)
 					}
-					// Calculate padding to align with the code (after line number and │)
-					padding := 5 // "   3 │ " = 5 characters for line number display
-					fmt.Printf("%s%s%s^%s %s[%s]%s\n",
-						repeatString(" ", padding+spaces),
-						colorRed,
-						"",
-						colorReset,
-						colorGray,
-						e.Code,
-						colorReset)
-				} else {
-					// Context line
-					fmt.Printf(" %s%3d%s %s│%s %s\n", colorGray, lineNum, colorReset, colorGray, colorReset, lineContent)
 				}
 			}
-		}
 
 			fmt.Printf("   %s╰────%s\n", colorGray, colorReset)
 

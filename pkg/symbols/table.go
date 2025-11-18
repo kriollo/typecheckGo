@@ -28,7 +28,8 @@ const (
 	FunctionSymbol
 	ParameterSymbol
 	ModuleSymbol
-	TypeSymbol
+	InterfaceSymbol
+	TypeAliasSymbol
 )
 
 func (st SymbolType) String() string {
@@ -41,8 +42,10 @@ func (st SymbolType) String() string {
 		return "parameter"
 	case ModuleSymbol:
 		return "module"
-	case TypeSymbol:
-		return "type"
+	case InterfaceSymbol:
+		return "interface"
+	case TypeAliasSymbol:
+		return "type alias"
 	default:
 		return "unknown"
 	}

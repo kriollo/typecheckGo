@@ -14,6 +14,12 @@ go build -o tscheck
 # Check a directory
 ./tscheck check ./src
 
+# Check code from text input (useful for integrating with other tools)
+./tscheck check --code "const x: number = 5;" --filename "example.ts"
+
+# Check code from stdin
+echo "let x: string = 123;" | ./tscheck check --code "$(cat)" --filename "stdin.ts"
+
 # View AST
 ./tscheck ast myfile.ts
 
@@ -41,6 +47,85 @@ The checker automatically discovers and respects your `tsconfig.json` configurat
 - ✅ `strictNullChecks` - null/undefined checking
 - ✅ Module resolution with `paths` and `baseUrl`
 - ✅ `include`/`exclude` patterns
+
+## 🔌 API Usage (Code as Text Input)
+
+You can pass TypeScript code directly as text instead of reading from files. This is useful for integrating with compilers, IDEs, or other tools:
+
+```bash
+# Check code from command line
+./tscheck check --code "const x: number = 5; const y: string = x;" --filename "example.ts"
+
+# With custom filename (default is "stdin.ts")
+./tscheck check -c "type X = string | number;" -n "mycode.ts"
+
+# View AST from code input
+./tscheck check --code "interface User { name: string; }" --ast
+
+# Different output formats
+./tscheck check --code "let x = unknownVar;" -f json
+./tscheck check --code "let x = unknownVar;" -f toon
+```
+
+### Flags for Code Input
+
+- `--code` or `-c`: TypeScript code as text input (alternative to file path)
+- `--filename` or `-n`: Filename to use when reporting errors (default: "stdin.ts")
+- `--format` or `-f`: Output format: text, json, toon (default: "text")
+- `--ast` or `-a`: Show AST output
+
+### Example: Integration with Your Compiler
+
+```go
+package main
+
+import (
+    "fmt"
+    "os/exec"
+)
+
+func checkTypeScript(code string) error {
+    cmd := exec.Command("tscheck", "check", "--code", code, "--filename", "generated.ts")
+    output, err := cmd.CombinedOutput()
+    if err != nil {
+        return fmt.Errorf("type check failed: %s", output)
+    }
+    return nil
+}
+
+func main() {
+    code := `
+        const x: number = 5;
+        const y: string = x; // This will error
+    `
+    
+    if err := checkTypeScript(code); err != nil {
+        fmt.Println("Type error:", err)
+    }
+}
+```
+
+### Example: Using from Shell Script
+
+```bash
+#!/bin/bash
+
+# Read TypeScript code from variable
+TS_CODE='
+type User = {
+    name: string;
+    age: number;
+};
+
+const user: User = {
+    name: "John",
+    age: "30" // Error: should be number
+};
+'
+
+# Check the code
+./tscheck check --code "$TS_CODE" --filename "user.ts"
+```
 
 ## 📸 Example Output
 

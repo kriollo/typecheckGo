@@ -432,14 +432,14 @@ func (b *Binder) GetSymbolTable() *SymbolTable {
 func (b *Binder) bindTypeAliasDeclaration(decl *ast.TypeAliasDeclaration) {
 	// Register the type alias in the symbol table
 	if decl.ID != nil {
-		b.table.DefineSymbol(decl.ID.Name, TypeSymbol, decl, false)
+		b.table.DefineSymbol(decl.ID.Name, TypeAliasSymbol, decl, false)
 	}
 }
 
 func (b *Binder) bindInterfaceDeclaration(decl *ast.InterfaceDeclaration) {
 	// Register the interface in the symbol table
 	if decl.ID != nil {
-		b.table.DefineSymbol(decl.ID.Name, TypeSymbol, decl, false)
+		b.table.DefineSymbol(decl.ID.Name, InterfaceSymbol, decl, false)
 	}
 }
 
@@ -447,7 +447,7 @@ func (b *Binder) bindClassDeclaration(decl *ast.ClassDeclaration) {
 	// Add class to symbol table
 	symbol := &Symbol{
 		Name:       decl.ID.Name,
-		Type:       TypeSymbol, // Classes are types
+		Type:       InterfaceSymbol, // Classes are types
 		Node:       decl,
 		DeclSpan:   decl.Pos(),
 		IsFunction: false,

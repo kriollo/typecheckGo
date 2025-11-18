@@ -23,6 +23,12 @@ func ParseFile(filename string) (*ast.File, error) {
 	return parseTypeScript(string(content), filename)
 }
 
+// ParseCode parses TypeScript code from a string and returns our AST representation
+func ParseCode(code, filename string) (*ast.File, error) {
+	// Parse the code directly without reading from file
+	return parseTypeScript(code, filename)
+}
+
 // Simple TypeScript parser implementation
 func parseTypeScript(source, filename string) (*ast.File, error) {
 	p := &parser{
@@ -2936,6 +2942,20 @@ func (p *parser) parseTypePrimaryNode() (ast.TypeNode, error) {
 	if p.matchIdentifier() {
 		typeName := p.advanceWord()
 
+		// Special handling for 'infer' keyword
+		if typeName == "infer" {
+			p.skipWhitespaceAndComments()
+			if p.matchIdentifier() {
+				inferredName := p.advanceWord()
+				return &ast.TypeReference{
+					Name:     "infer " + inferredName,
+					Position: startPos,
+					EndPos:   p.currentPos(),
+				}, nil
+			}
+			// If no identifier follows, treat as regular type reference
+		}
+
 		// Check for generic type arguments (e.g., Record<string, string>)
 		var typeArguments []ast.TypeNode
 		p.skipWhitespaceAndComments()
@@ -3092,8 +3112,17 @@ func (p *parser) skipTypePrimary() {
 
 	// Identifier (possibly with generics)
 	if p.matchIdentifier() {
-		p.advanceWord()
+		word := p.advanceWord()
 		p.skipWhitespaceAndComments()
+
+		// Special handling for 'infer' keyword - skip the inferred type name
+		if word == "infer" {
+			if p.matchIdentifier() {
+				p.advanceWord()
+				p.skipWhitespaceAndComments()
+			}
+			return
+		}
 
 		// Handle generic type arguments <T, U>
 		if p.match("<") {
@@ -3345,17 +3374,34 @@ func (p *parser) parseTypeAnnotationFull() (ast.TypeNode, error) {
 
 	p.skipWhitespaceAndComments()
 
-	// Check for conditional type: T extends U ? X : Y
-	// Only parse as conditional if we see "extends" followed by "?"
+	// Check for conditional type: T extends U ? X : Y or T extends infer U ? X : Y
+	// Only parse as conditional if we see "extends" followed by "?" or "infer"
 	if p.match("extends") {
 		savedPos := p.pos
 		p.advanceString(7)
 		p.skipWhitespaceAndComments()
 
-		extendsType, err := p.parseTypeAnnotationPrimary()
-		if err != nil {
-			p.pos = savedPos
-			return firstType, nil
+		var extendsType ast.TypeNode
+		var inferredType *ast.Identifier
+		var err error
+
+		// Check for infer keyword
+		if p.matchKeyword("infer") {
+			p.advanceWord()
+			p.skipWhitespaceAndComments()
+
+			inferredType, err = p.parseIdentifier()
+			if err != nil {
+				p.pos = savedPos
+				return firstType, nil
+			}
+			// When infer is present, there is no extends type
+		} else {
+			extendsType, err = p.parseTypeAnnotationPrimary()
+			if err != nil {
+				p.pos = savedPos
+				return firstType, nil
+			}
 		}
 
 		p.skipWhitespaceAndComments()
@@ -3383,12 +3429,13 @@ func (p *parser) parseTypeAnnotationFull() (ast.TypeNode, error) {
 			}
 
 			return &ast.ConditionalType{
-				CheckType:   firstType,
-				ExtendsType: extendsType,
-				TrueType:    trueType,
-				FalseType:   falseType,
-				Position:    startPos,
-				EndPos:      p.currentPos(),
+				CheckType:    firstType,
+				ExtendsType:  extendsType,
+				InferredType: inferredType,
+				TrueType:     trueType,
+				FalseType:    falseType,
+				Position:     startPos,
+				EndPos:       p.currentPos(),
 			}, nil
 		} else {
 			// Not a conditional type, restore position
@@ -3396,28 +3443,43 @@ func (p *parser) parseTypeAnnotationFull() (ast.TypeNode, error) {
 		}
 	}
 
-	// Check for indexed access type: T[K]
+	// Check for array type suffix [] or indexed access type: T[K]
 	if p.match("[") {
 		p.advance()
 		p.skipWhitespaceAndComments()
 
-		indexType, err := p.parseTypeAnnotationFull()
-		if err != nil {
-			return nil, err
-		}
+		// Check if this is an array type (empty brackets) or indexed access type
+		if p.match("]") {
+			// Array type like (infer U)[] or string[]
+			p.advance()
 
-		p.skipWhitespaceAndComments()
-		if !p.match("]") {
-			return nil, fmt.Errorf("expected ']' in indexed access type")
-		}
-		p.advance()
+			// Convert firstType to array type by wrapping it
+			return &ast.TypeReference{
+				Name:          "(array)",
+				TypeArguments: []ast.TypeNode{firstType},
+				Position:      startPos,
+				EndPos:        p.currentPos(),
+			}, nil
+		} else {
+			// Indexed access type T[K]
+			indexType, err := p.parseTypeAnnotationFull()
+			if err != nil {
+				return nil, err
+			}
 
-		return &ast.IndexedAccessType{
-			ObjectType: firstType,
-			IndexType:  indexType,
-			Position:   startPos,
-			EndPos:     p.currentPos(),
-		}, nil
+			p.skipWhitespaceAndComments()
+			if !p.match("]") {
+				return nil, fmt.Errorf("expected ']' in indexed access type")
+			}
+			p.advance()
+
+			return &ast.IndexedAccessType{
+				ObjectType: firstType,
+				IndexType:  indexType,
+				Position:   startPos,
+				EndPos:     p.currentPos(),
+			}, nil
+		}
 	}
 
 	// Check for union (|) or intersection (&)
@@ -3618,7 +3680,7 @@ func (p *parser) parseTypeAnnotationPrimary() (ast.TypeNode, error) {
 
 	// Identifier or generic type
 	if p.matchIdentifier() {
-		return p.parseTypeAnnotation()
+		return p.parseTypePrimaryNode()
 	}
 
 	// Function type or parenthesized type
@@ -3640,16 +3702,22 @@ func (p *parser) parseTypeAnnotationPrimary() (ast.TypeNode, error) {
 				p.pos = savedPos // Reset to start
 			}
 		} else {
-			// Check for parameter with type annotation
-			if p.matchIdentifier() {
+			// Check for rest parameters (...args)
+			if p.match(".") && p.peek(1) == "." && p.peek(2) == "." {
+				isFunctionType = true
+				p.pos = savedPos // Reset to start
+			} else if p.matchIdentifier() {
+				// Check for parameter with type annotation
 				p.advanceWord()
 				p.skipWhitespaceAndComments()
 				if p.match(":") || p.match("?") || p.match(",") {
 					// Looks like function parameters
 					isFunctionType = true
 				}
+				p.pos = savedPos // Reset to start
+			} else {
+				p.pos = savedPos // Reset to start
 			}
-			p.pos = savedPos // Reset to start
 		}
 
 		if isFunctionType {
@@ -3679,8 +3747,12 @@ func (p *parser) parseTypeAnnotationPrimary() (ast.TypeNode, error) {
 			}, nil
 		}
 
-		// Parenthesized type (Type)
-		innerType, err := p.parseTypeAnnotationFull()
+		// Parenthesized type (Type) - parse as primary to avoid recursion
+		// Advance past the '(' before parsing the inner type
+		p.advance()
+		p.skipWhitespaceAndComments()
+
+		innerType, err := p.parseTypeAnnotationPrimary()
 		if err != nil {
 			return nil, err
 		}

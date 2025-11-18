@@ -546,14 +546,15 @@ func (m *MappedType) Pos() Position { return m.Position }
 func (m *MappedType) End() Position { return m.EndPos }
 func (m *MappedType) typeNode()     {}
 
-// ConditionalType represents T extends U ? X : Y
+// ConditionalType represents T extends U ? X : Y or T extends infer U ? X : Y
 type ConditionalType struct {
-	CheckType   TypeNode
-	ExtendsType TypeNode
-	TrueType    TypeNode
-	FalseType   TypeNode
-	Position    Position
-	EndPos      Position
+	CheckType    TypeNode
+	ExtendsType  TypeNode
+	InferredType *Identifier // For infer keyword: T extends infer U ? U : never
+	TrueType     TypeNode
+	FalseType    TypeNode
+	Position     Position
+	EndPos       Position
 }
 
 func (c *ConditionalType) Type() string  { return "ConditionalType" }
