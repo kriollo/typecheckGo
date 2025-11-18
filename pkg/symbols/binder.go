@@ -51,6 +51,8 @@ func (b *Binder) bindStatement(stmt ast.Statement) {
 		b.bindTypeAliasDeclaration(s)
 	case *ast.InterfaceDeclaration:
 		b.bindInterfaceDeclaration(s)
+	case *ast.ClassDeclaration:
+		b.bindClassDeclaration(s)
 	default:
 		// Unknown statement type
 		fmt.Printf("Warning: Unknown statement type: %T\n", stmt)
@@ -182,6 +184,17 @@ func (b *Binder) bindExpression(expr ast.Expression) {
 		b.bindExpression(e.Right)
 	case *ast.UnaryExpression:
 		b.bindExpression(e.Argument)
+	case *ast.NewExpression:
+		b.bindExpression(e.Callee)
+		for _, arg := range e.Arguments {
+			b.bindExpression(arg)
+		}
+	case *ast.ThisExpression:
+		// 'this' doesn't need binding
+		return
+	case *ast.SuperExpression:
+		// 'super' doesn't need binding
+		return
 	default:
 		// Unknown expression type
 		fmt.Printf("Warning: Unknown expression type: %T\n", expr)
@@ -383,4 +396,57 @@ func (b *Binder) bindInterfaceDeclaration(decl *ast.InterfaceDeclaration) {
 	if decl.ID != nil {
 		b.table.DefineSymbol(decl.ID.Name, TypeSymbol, decl, false)
 	}
+}
+
+func (b *Binder) bindClassDeclaration(decl *ast.ClassDeclaration) {
+	// Add class to symbol table
+	symbol := &Symbol{
+		Name: decl.ID.Name,
+		Kind: "class",
+		Decl: decl,
+	}
+	b.table.Define(symbol)
+
+	// Create a new scope for the class
+	classScope := NewScope(b.table.Current)
+	b.table.Current = classScope
+
+	// Bind class members
+	for _, member := range decl.Body {
+		switch m := member.(type) {
+		case *ast.MethodDefinition:
+			// Add method to class scope
+			methodSymbol := &Symbol{
+				Name: m.Key.Name,
+				Kind: "method",
+				Decl: m,
+			}
+			b.table.Define(methodSymbol)
+
+			// Bind method body
+			if m.Value != nil && m.Value.Body != nil {
+				methodScope := NewScope(b.table.Current)
+				b.table.Current = methodScope
+				b.bindBlockStatement(m.Value.Body)
+				b.table.Current = methodScope.Parent
+			}
+
+		case *ast.PropertyDefinition:
+			// Add property to class scope
+			propSymbol := &Symbol{
+				Name: m.Key.Name,
+				Kind: "property",
+				Decl: m,
+			}
+			b.table.Define(propSymbol)
+
+			// Bind property initializer if present
+			if m.Value != nil {
+				b.bindExpression(m.Value)
+			}
+		}
+	}
+
+	// Restore parent scope
+	b.table.Current = classScope.Parent
 }

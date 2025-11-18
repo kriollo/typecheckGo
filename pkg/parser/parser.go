@@ -122,6 +122,11 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 		return p.parseInterfaceDeclaration()
 	}
 
+	// Class declaration
+	if p.matchKeyword("class") {
+		return p.parseClassDeclaration()
+	}
+
 	// Handle block statements
 	if p.match("{") {
 		return p.parseBlockStatement()
@@ -951,6 +956,31 @@ func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 
 		// Not an arrow function, restore and parse as identifier
 		p.pos = savedPos
+	}
+
+	// new expression
+	if p.matchKeyword("new") {
+		return p.parseNewExpression()
+	}
+
+	// this expression
+	if p.matchKeyword("this") {
+		startPos := p.currentPos()
+		p.advanceWord()
+		return &ast.ThisExpression{
+			Position: startPos,
+			EndPos:   p.currentPos(),
+		}, nil
+	}
+
+	// super expression
+	if p.matchKeyword("super") {
+		startPos := p.currentPos()
+		p.advanceWord()
+		return &ast.SuperExpression{
+			Position: startPos,
+			EndPos:   p.currentPos(),
+		}, nil
 	}
 
 	if p.matchKeyword("true", "false") {
@@ -2632,5 +2662,379 @@ func (p *parser) parseTemplateLiteralType() (ast.TypeNode, error) {
 		Types:    types,
 		Position: startPos,
 		EndPos:   p.currentPos(),
+	}, nil
+}
+
+// parseClassDeclaration parses a class declaration
+func (p *parser) parseClassDeclaration() (*ast.ClassDeclaration, error) {
+	startPos := p.currentPos()
+
+	// Consume 'class'
+	p.advanceWord()
+	p.skipWhitespaceAndComments()
+
+	// Parse class name
+	if !p.matchIdentifier() {
+		return nil, fmt.Errorf("expected class name")
+	}
+	className, err := p.parseIdentifier()
+	if err != nil {
+		return nil, err
+	}
+
+	p.skipWhitespaceAndComments()
+
+	// Parse type parameters if present
+	var typeParameters []ast.TypeNode
+	if p.match("<") {
+		// Skip type parameters for now - just consume them
+		depth := 1
+		p.advance()
+		for depth > 0 && !p.isAtEnd() {
+			if p.match("<") {
+				depth++
+				p.advance()
+			} else if p.match(">") {
+				depth--
+				p.advance()
+			} else {
+				p.advance()
+			}
+		}
+		p.skipWhitespaceAndComments()
+	}
+
+	// Parse extends clause if present
+	var superClass *ast.Identifier
+	if p.matchKeyword("extends") {
+		p.advanceWord()
+		p.skipWhitespaceAndComments()
+
+		if !p.matchIdentifier() {
+			return nil, fmt.Errorf("expected superclass name after 'extends'")
+		}
+		superClass, err = p.parseIdentifier()
+		if err != nil {
+			return nil, err
+		}
+		p.skipWhitespaceAndComments()
+	}
+
+	// Parse class body
+	if !p.match("{") {
+		return nil, fmt.Errorf("expected '{' after class name")
+	}
+	p.advance()
+	p.skipWhitespaceAndComments()
+
+	var members []ast.ClassMember
+
+	for !p.match("}") && !p.isAtEnd() {
+		member, err := p.parseClassMember()
+		if err != nil {
+			return nil, err
+		}
+		if member != nil {
+			members = append(members, member)
+		}
+		p.skipWhitespaceAndComments()
+	}
+
+	if !p.match("}") {
+		return nil, fmt.Errorf("expected '}' at end of class body")
+	}
+	p.advance()
+
+	return &ast.ClassDeclaration{
+		ID:             className,
+		SuperClass:     superClass,
+		Body:           members,
+		TypeParameters: typeParameters,
+		Position:       startPos,
+		EndPos:         p.currentPos(),
+	}, nil
+}
+
+// parseClassMember parses a class member (method or property)
+func (p *parser) parseClassMember() (ast.ClassMember, error) {
+	startPos := p.currentPos()
+	p.skipWhitespaceAndComments()
+
+	// Parse access modifier
+	accessModifier := ""
+	if p.matchKeyword("public", "private", "protected") {
+		accessModifier = p.advanceWord()
+		p.skipWhitespaceAndComments()
+	}
+
+	// Parse static keyword
+	isStatic := false
+	if p.matchKeyword("static") {
+		isStatic = true
+		p.advanceWord()
+		p.skipWhitespaceAndComments()
+	}
+
+	// Parse readonly keyword
+	isReadonly := false
+	if p.matchKeyword("readonly") {
+		isReadonly = true
+		p.advanceWord()
+		p.skipWhitespaceAndComments()
+	}
+
+	// Parse async keyword
+	isAsync := false
+	if p.matchKeyword("async") {
+		isAsync = true
+		p.advanceWord()
+		p.skipWhitespaceAndComments()
+	}
+
+	// Parse member name
+	if !p.matchIdentifier() {
+		// Could be a semicolon or other token, skip it
+		if p.match(";") {
+			p.advance()
+		}
+		return nil, nil
+	}
+
+	memberName, err := p.parseIdentifier()
+	if err != nil {
+		return nil, err
+	}
+
+	p.skipWhitespaceAndComments()
+
+	// Check if it's a method (has parentheses) or property
+	if p.match("(") {
+		// It's a method
+		return p.parseMethodDefinition(memberName, accessModifier, isStatic, isAsync, startPos)
+	} else {
+		// It's a property
+		return p.parsePropertyDefinition(memberName, accessModifier, isStatic, isReadonly, startPos)
+	}
+}
+
+// parseMethodDefinition parses a method definition
+func (p *parser) parseMethodDefinition(name *ast.Identifier, accessModifier string, isStatic bool, isAsync bool, startPos ast.Position) (*ast.MethodDefinition, error) {
+	// Parse parameters
+	p.advance() // consume '('
+	p.skipWhitespaceAndComments()
+
+	var params []*ast.Parameter
+	for !p.match(")") && !p.isAtEnd() {
+		param, err := p.parseParameter()
+		if err != nil {
+			return nil, err
+		}
+		params = append(params, param)
+
+		p.skipWhitespaceAndComments()
+		if p.match(",") {
+			p.advance()
+			p.skipWhitespaceAndComments()
+		}
+	}
+
+	if !p.match(")") {
+		return nil, fmt.Errorf("expected ')' after parameters")
+	}
+	p.advance()
+	p.skipWhitespaceAndComments()
+
+	// Parse return type annotation if present
+	if p.match(":") {
+		p.advance()
+		p.skipWhitespaceAndComments()
+		// Skip return type for now
+		p.skipTypeAnnotation()
+		p.skipWhitespaceAndComments()
+	}
+
+	// Parse method body
+	if !p.match("{") {
+		return nil, fmt.Errorf("expected '{' for method body")
+	}
+
+	body, err := p.parseBlockStatement()
+	if err != nil {
+		return nil, err
+	}
+
+	// Determine method kind
+	kind := "method"
+	if name.Name == "constructor" {
+		kind = "constructor"
+	}
+
+	funcExpr := &ast.FunctionExpression{
+		ID:       name,
+		Params:   params,
+		Body:     body,
+		Async:    isAsync,
+		Position: startPos,
+		EndPos:   p.currentPos(),
+	}
+
+	return &ast.MethodDefinition{
+		Key:            name,
+		Value:          funcExpr,
+		Kind:           kind,
+		Static:         isStatic,
+		Async:          isAsync,
+		AccessModifier: accessModifier,
+		Position:       startPos,
+		EndPos:         p.currentPos(),
+	}, nil
+}
+
+// parsePropertyDefinition parses a property definition
+func (p *parser) parsePropertyDefinition(name *ast.Identifier, accessModifier string, isStatic bool, isReadonly bool, startPos ast.Position) (*ast.PropertyDefinition, error) {
+	// Parse optional marker
+	isOptional := false
+	if p.match("?") {
+		isOptional = true
+		p.advance()
+		p.skipWhitespaceAndComments()
+	}
+
+	// Parse type annotation if present
+	var typeAnnotation ast.TypeNode
+	if p.match(":") {
+		p.advance()
+		p.skipWhitespaceAndComments()
+		var err error
+		typeAnnotation, err = p.parseTypeAnnotation()
+		if err != nil {
+			return nil, err
+		}
+		p.skipWhitespaceAndComments()
+	}
+
+	// Parse initializer if present
+	var initializer ast.Expression
+	if p.match("=") {
+		p.advance()
+		p.skipWhitespaceAndComments()
+		var err error
+		initializer, err = p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+		p.skipWhitespaceAndComments()
+	}
+
+	// Optional semicolon
+	if p.match(";") {
+		p.advance()
+	}
+
+	return &ast.PropertyDefinition{
+		Key:            name,
+		Value:          initializer,
+		TypeAnnotation: typeAnnotation,
+		Static:         isStatic,
+		Readonly:       isReadonly,
+		Optional:       isOptional,
+		AccessModifier: accessModifier,
+		Position:       startPos,
+		EndPos:         p.currentPos(),
+	}, nil
+}
+
+// parseParameter parses a function parameter
+func (p *parser) parseParameter() (*ast.Parameter, error) {
+	startPos := p.currentPos()
+
+	// Parse parameter name
+	if !p.matchIdentifier() {
+		return nil, fmt.Errorf("expected parameter name")
+	}
+
+	paramName, err := p.parseIdentifier()
+	if err != nil {
+		return nil, err
+	}
+
+	p.skipWhitespaceAndComments()
+
+	// Parse optional marker
+	isOptional := false
+	if p.match("?") {
+		isOptional = true
+		p.advance()
+		p.skipWhitespaceAndComments()
+	}
+
+	// Parse type annotation if present
+	var paramType ast.TypeNode
+	if p.match(":") {
+		p.advance()
+		p.skipWhitespaceAndComments()
+		paramType, err = p.parseTypeAnnotation()
+		if err != nil {
+			return nil, err
+		}
+		p.skipWhitespaceAndComments()
+	}
+
+	return &ast.Parameter{
+		ID:       paramName,
+		ParamType:     paramType,
+		Optional: isOptional,
+		Position: startPos,
+		EndPos:   p.currentPos(),
+	}, nil
+}
+
+// parseNewExpression parses a new expression (new Class())
+func (p *parser) parseNewExpression() (*ast.NewExpression, error) {
+	startPos := p.currentPos()
+
+	// Consume 'new'
+	p.advanceWord()
+	p.skipWhitespaceAndComments()
+
+	// Parse the constructor (callee)
+	callee, err := p.parsePrimaryExpression()
+	if err != nil {
+		return nil, err
+	}
+
+	p.skipWhitespaceAndComments()
+
+	// Parse arguments if present
+	var arguments []ast.Expression
+	if p.match("(") {
+		p.advance()
+		p.skipWhitespaceAndComments()
+
+		for !p.match(")") && !p.isAtEnd() {
+			arg, err := p.parseExpression()
+			if err != nil {
+				return nil, err
+			}
+			arguments = append(arguments, arg)
+
+			p.skipWhitespaceAndComments()
+			if p.match(",") {
+				p.advance()
+				p.skipWhitespaceAndComments()
+			}
+		}
+
+		if !p.match(")") {
+			return nil, fmt.Errorf("expected ')' after arguments")
+		}
+		p.advance()
+	}
+
+	return &ast.NewExpression{
+		Callee:    callee,
+		Arguments: arguments,
+		Position:  startPos,
+		EndPos:    p.currentPos(),
 	}, nil
 }

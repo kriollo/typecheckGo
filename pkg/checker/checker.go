@@ -174,6 +174,8 @@ func (tc *TypeChecker) checkStatement(stmt ast.Statement, filename string) {
 		tc.checkTypeAliasDeclaration(s, filename)
 	case *ast.InterfaceDeclaration:
 		tc.checkInterfaceDeclaration(s, filename)
+	case *ast.ClassDeclaration:
+		tc.checkClassDeclaration(s, filename)
 	default:
 		// Unknown statement type
 		tc.addError(filename, stmt.Pos().Line, stmt.Pos().Column,
@@ -418,6 +420,14 @@ func (tc *TypeChecker) checkExpression(expr ast.Expression, filename string) {
 		tc.checkAssignmentExpression(e, filename)
 	case *ast.UnaryExpression:
 		tc.checkUnaryExpression(e, filename)
+	case *ast.NewExpression:
+		tc.checkNewExpression(e, filename)
+	case *ast.ThisExpression:
+		// 'this' is valid in class/function context
+		return
+	case *ast.SuperExpression:
+		// 'super' is valid in derived class context
+		return
 	default:
 		// Unknown expression type
 		tc.addError(filename, expr.Pos().Line, expr.Pos().Column,
@@ -1153,4 +1163,48 @@ func (tc *TypeChecker) GetConfig() *CompilerConfig {
 		tc.config = getDefaultConfig()
 	}
 	return tc.config
+}
+
+func (tc *TypeChecker) checkClassDeclaration(decl *ast.ClassDeclaration, filename string) {
+	// Check class name
+	if !isValidIdentifier(decl.ID.Name) {
+		tc.addError(filename, decl.ID.Pos().Line, decl.ID.Pos().Column,
+			fmt.Sprintf("Invalid class name: '%s'", decl.ID.Name), "TS1003", "error")
+	}
+
+	// Check members
+	for _, member := range decl.Body {
+		switch m := member.(type) {
+		case *ast.MethodDefinition:
+			// Check method
+			if m.Value != nil && m.Value.Body != nil {
+				// Set current function for return type checking
+				previousFunction := tc.currentFunction
+				tc.currentFunction = nil // Methods are not FunctionDeclaration
+
+				tc.checkBlockStatement(m.Value.Body, filename)
+
+				tc.currentFunction = previousFunction
+			}
+
+		case *ast.PropertyDefinition:
+			// Check property initializer
+			if m.Value != nil {
+				tc.checkExpression(m.Value, filename)
+			}
+		}
+	}
+}
+
+func (tc *TypeChecker) checkNewExpression(expr *ast.NewExpression, filename string) {
+	// Check the constructor (callee)
+	tc.checkExpression(expr.Callee, filename)
+
+	// Check all arguments
+	for _, arg := range expr.Arguments {
+		tc.checkExpression(arg, filename)
+	}
+
+	// TODO: Verify that the callee is actually a class/constructor
+	// TODO: Check argument types against constructor signature
 }

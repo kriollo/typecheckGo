@@ -540,3 +540,111 @@ func (t *TypeParameter) Type() string { return "TypeParameter" }
 func (t *TypeParameter) Pos() Position { return t.Position }
 func (t *TypeParameter) End() Position { return t.EndPos }
 func (t *TypeParameter) typeNode()     {}
+
+// ClassDeclaration represents a class declaration
+type ClassDeclaration struct {
+	ID             *Identifier
+	SuperClass     *Identifier      // extends clause
+	Body           []ClassMember
+	TypeParameters []TypeNode       // Generic type parameters
+	Position       Position
+	EndPos         Position
+}
+
+func (c *ClassDeclaration) Type() string { return "ClassDeclaration" }
+func (c *ClassDeclaration) Pos() Position { return c.Position }
+func (c *ClassDeclaration) End() Position { return c.EndPos }
+func (c *ClassDeclaration) stmtNode()     {}
+func (c *ClassDeclaration) declNode()     {}
+
+// ClassMember represents a member of a class
+type ClassMember interface {
+	Node
+	classMemberNode()
+}
+
+// MethodDefinition represents a method in a class
+type MethodDefinition struct {
+	Key        *Identifier
+	Value      *FunctionExpression
+	Kind       string // "method", "constructor", "get", "set"
+	Static     bool
+	Async      bool
+	Position   Position
+	EndPos     Position
+	AccessModifier string // "public", "private", "protected", ""
+}
+
+func (m *MethodDefinition) Type() string { return "MethodDefinition" }
+func (m *MethodDefinition) Pos() Position { return m.Position }
+func (m *MethodDefinition) End() Position { return m.EndPos }
+func (m *MethodDefinition) classMemberNode() {}
+
+// PropertyDefinition represents a property in a class
+type PropertyDefinition struct {
+	Key            *Identifier
+	Value          Expression // initializer
+	TypeAnnotation TypeNode
+	Static         bool
+	Readonly       bool
+	Optional       bool
+	Position       Position
+	EndPos         Position
+	AccessModifier string // "public", "private", "protected", ""
+}
+
+func (p *PropertyDefinition) Type() string { return "PropertyDefinition" }
+func (p *PropertyDefinition) Pos() Position { return p.Position }
+func (p *PropertyDefinition) End() Position { return p.EndPos }
+func (p *PropertyDefinition) classMemberNode() {}
+
+// FunctionExpression represents a function expression
+type FunctionExpression struct {
+	ID       *Identifier // can be nil for anonymous functions
+	Params   []*Parameter
+	Body     *BlockStatement
+	Async    bool
+	Generator bool
+	Position Position
+	EndPos   Position
+}
+
+func (f *FunctionExpression) Type() string { return "FunctionExpression" }
+func (f *FunctionExpression) Pos() Position { return f.Position }
+func (f *FunctionExpression) End() Position { return f.EndPos }
+func (f *FunctionExpression) exprNode()     {}
+
+// NewExpression represents a new expression (new Class())
+type NewExpression struct {
+	Callee    Expression
+	Arguments []Expression
+	Position  Position
+	EndPos    Position
+}
+
+func (n *NewExpression) Type() string { return "NewExpression" }
+func (n *NewExpression) Pos() Position { return n.Position }
+func (n *NewExpression) End() Position { return n.EndPos }
+func (n *NewExpression) exprNode()     {}
+
+// ThisExpression represents 'this' keyword
+type ThisExpression struct {
+	Position Position
+	EndPos   Position
+}
+
+func (t *ThisExpression) Type() string { return "ThisExpression" }
+func (t *ThisExpression) Pos() Position { return t.Position }
+func (t *ThisExpression) End() Position { return t.EndPos }
+func (t *ThisExpression) exprNode()     {}
+
+// SuperExpression represents 'super' keyword
+type SuperExpression struct {
+	Position Position
+	EndPos   Position
+}
+
+func (s *SuperExpression) Type() string { return "SuperExpression" }
+func (s *SuperExpression) Pos() Position { return s.Position }
+func (s *SuperExpression) End() Position { return s.EndPos }
+func (s *SuperExpression) exprNode()     {}
