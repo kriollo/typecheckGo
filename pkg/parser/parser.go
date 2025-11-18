@@ -205,13 +205,13 @@ func (p *parser) parseFunctionDeclaration() (*ast.FunctionDeclaration, error) {
 	}
 
 	return &ast.FunctionDeclaration{
-		ID:       name,
-		Params:   params,
-		Body:     body,
-		Async:    false,
+		ID:        name,
+		Params:    params,
+		Body:      body,
+		Async:     false,
 		Generator: false,
-		Position: startPos,
-		EndPos:   p.currentPos(),
+		Position:  startPos,
+		EndPos:    p.currentPos(),
 	}, nil
 }
 
@@ -689,7 +689,6 @@ func (p *parser) parseBinaryExpression() (ast.Expression, error) {
 		return nil, err
 	}
 
-
 	if left == nil {
 		return nil, nil
 	}
@@ -822,17 +821,17 @@ func (p *parser) parseMemberExpression() (ast.Expression, error) {
 	// Handle chained member expressions (e.g., document.head.append)
 	for {
 		p.skipWhitespaceAndComments()
-		
+
 		if p.match(".") {
 			startPos := left.Pos()
 			p.advance()
 			p.skipWhitespaceAndComments()
-			
+
 			prop, err := p.parseIdentifier()
 			if err != nil {
 				return nil, err
 			}
-			
+
 			left = &ast.MemberExpression{
 				Object:   left,
 				Property: prop,
@@ -845,18 +844,18 @@ func (p *parser) parseMemberExpression() (ast.Expression, error) {
 			startPos := left.Pos()
 			p.advance()
 			p.skipWhitespaceAndComments()
-			
+
 			prop, err := p.parseExpression()
 			if err != nil {
 				return nil, err
 			}
-			
+
 			p.skipWhitespaceAndComments()
 			if !p.match("]") {
 				return nil, fmt.Errorf("expected ']' in computed member expression")
 			}
 			p.advance()
-			
+
 			left = &ast.MemberExpression{
 				Object:   left,
 				Property: prop,
@@ -1223,6 +1222,48 @@ func (p *parser) parseIdentifier() (*ast.Identifier, error) {
 	}, nil
 }
 
+// parseIdentifierWithGenerics parses an identifier that may have generic type arguments
+// This is used for expressions like new Map<K, V>() where Map is followed by <K, V>
+func (p *parser) parseIdentifierWithGenerics() (ast.Expression, error) {
+	startPos := p.currentPos()
+
+	if !p.matchIdentifier() {
+		return nil, fmt.Errorf("expected identifier at %s", startPos)
+	}
+
+	name := p.advanceWord()
+
+	// Ultra-simple approach: just check if next character is '<' and skip until '>'
+	p.skipWhitespaceAndComments()
+	if p.match("<") {
+		p.advance() // consume '<'
+		depth := 1
+		for !p.isAtEnd() && depth > 0 {
+			if p.match("<") {
+				depth++
+				p.advance()
+			} else if p.match(">") {
+				depth--
+				p.advance()
+				if depth == 0 {
+					break
+				}
+			} else {
+				p.advance()
+			}
+		}
+		if depth != 0 {
+			return nil, fmt.Errorf("unmatched '<' in generic type")
+		}
+	}
+
+	return &ast.Identifier{
+		Name:     name,
+		Position: startPos,
+		EndPos:   p.currentPos(),
+	}, nil
+}
+
 func (p *parser) parseParameterList() ([]*ast.Parameter, error) {
 	var params []*ast.Parameter
 
@@ -1254,10 +1295,10 @@ func (p *parser) parseParameterList() ([]*ast.Parameter, error) {
 		}
 
 		param := &ast.Parameter{
-			ID:       id,
+			ID:        id,
 			ParamType: paramType,
-			Position: id.Pos(),
-			EndPos:   p.currentPos(),
+			Position:  id.Pos(),
+			EndPos:    p.currentPos(),
 		}
 
 		params = append(params, param)
@@ -2083,9 +2124,9 @@ func (p *parser) parseArrowFunction() (*ast.ArrowFunctionExpression, error) {
 					p.advance()
 				}
 				param := &ast.Parameter{
-					ID: &ast.Identifier{Name: "destructured_param", Position: startPos, EndPos: p.currentPos()},
+					ID:       &ast.Identifier{Name: "destructured_param", Position: startPos, EndPos: p.currentPos()},
 					Position: startPos,
-					EndPos: p.currentPos(),
+					EndPos:   p.currentPos(),
 				}
 				params = append(params, param)
 				p.skipWhitespaceAndComments()
@@ -2095,7 +2136,6 @@ func (p *parser) parseArrowFunction() (*ast.ArrowFunctionExpression, error) {
 				}
 				continue
 			}
-
 
 			id, err := p.parseIdentifier()
 			if err != nil {
@@ -2241,28 +2281,33 @@ func (p *parser) parseTypeAnnotation() (ast.TypeNode, error) {
 		}
 
 		typeRef := &ast.TypeReference{
-			Name:         typeName,
+			Name:          typeName,
 			TypeArguments: typeArguments,
-			Position:     startPos,
-			EndPos:       p.currentPos(),
+			Position:      startPos,
+			EndPos:        p.currentPos(),
 		}
 
-		// Check for array type suffix []
+		// Check for array type suffix [] or indexed access type T[K]
 		p.skipWhitespaceAndComments()
 		if p.match("[") {
+			// Save position for potential backtracking
+			bracketStartPos := p.pos
 			p.advance()
 			p.skipWhitespaceAndComments()
-			if !p.match("]") {
-				return nil, fmt.Errorf("expected ']' after '[' in array type")
-			}
-			p.advance()
 
-			// Return array type reference (e.g., "string[]")
-			return &ast.TypeReference{
-				Name:     typeName + "[]",
-				Position: startPos,
-				EndPos:   p.currentPos(),
-			}, nil
+			// Check if this is an array type (empty brackets) or indexed access type (has content)
+			if p.match("]") {
+				// Array type like string[]
+				p.advance()
+				return &ast.TypeReference{
+					Name:     typeName + "[]",
+					Position: startPos,
+					EndPos:   p.currentPos(),
+				}, nil
+			} else {
+				// Indexed access type like Person['name'] - backtrack and let parseTypeAnnotationFull handle it
+				p.pos = bracketStartPos // Reset to before the '['
+			}
 		}
 
 		return typeRef, nil
@@ -2274,7 +2319,6 @@ func (p *parser) parseTypeAnnotation() (ast.TypeNode, error) {
 
 	return nil, fmt.Errorf("expected type annotation")
 }
-
 
 // skipTypeAnnotation skips over a type annotation without parsing it
 func (p *parser) skipTypeAnnotation() {
@@ -2312,7 +2356,6 @@ func (p *parser) skipTypeAnnotation() {
 		}
 	}
 }
-
 
 // parseTypeAliasDeclaration parses a type alias declaration (type Name = Type)
 func (p *parser) parseTypeAliasDeclaration() (*ast.TypeAliasDeclaration, error) {
@@ -3211,11 +3254,11 @@ func (p *parser) parseParameter() (*ast.Parameter, error) {
 	}
 
 	return &ast.Parameter{
-		ID:       paramName,
-		ParamType:     paramType,
-		Optional: isOptional,
-		Position: startPos,
-		EndPos:   p.currentPos(),
+		ID:        paramName,
+		ParamType: paramType,
+		Optional:  isOptional,
+		Position:  startPos,
+		EndPos:    p.currentPos(),
 	}, nil
 }
 
@@ -3228,7 +3271,14 @@ func (p *parser) parseNewExpression() (*ast.NewExpression, error) {
 	p.skipWhitespaceAndComments()
 
 	// Parse the constructor (callee)
-	callee, err := p.parsePrimaryExpression()
+	// For new expressions, handle identifiers that may have generics like Map<number, string>
+	var callee ast.Expression
+	var err error
+	if p.matchIdentifier() {
+		callee, err = p.parseIdentifierWithGenerics()
+	} else {
+		callee, err = p.parsePrimaryExpression()
+	}
 	if err != nil {
 		return nil, err
 	}
