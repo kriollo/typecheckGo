@@ -227,6 +227,8 @@ func (b *Binder) bindExpression(expr ast.Expression) {
 		}
 	case *ast.ArrowFunctionExpression:
 		b.bindArrowFunction(e)
+	case *ast.FunctionExpression:
+		b.bindFunctionExpression(e)
 	case *ast.AssignmentExpression:
 		b.bindExpression(e.Left)
 		b.bindExpression(e.Right)
@@ -510,6 +512,13 @@ func (b *Binder) bindConditionalExpression(expr *ast.ConditionalExpression) {
 func (b *Binder) bindFunctionExpression(fnExpr *ast.FunctionExpression) {
 	// Create a new scope for the function expression
 	b.table.EnterScope(fnExpr)
+
+	// If the function has a name, define it in the function's own scope
+	// This allows the function to call itself recursively
+	if fnExpr.ID != nil {
+		symbol := b.table.DefineSymbol(fnExpr.ID.Name, FunctionSymbol, fnExpr, false)
+		symbol.IsFunction = true
+	}
 
 	// Define parameters in the function scope
 	for _, param := range fnExpr.Params {

@@ -545,6 +545,8 @@ func (tc *TypeChecker) checkExpression(expr ast.Expression, filename string) {
 		}
 	case *ast.ArrowFunctionExpression:
 		tc.checkArrowFunction(e, filename)
+	case *ast.FunctionExpression:
+		tc.checkFunctionExpression(e, filename)
 	case *ast.AssignmentExpression:
 		tc.checkAssignmentExpression(e, filename)
 	case *ast.UnaryExpression:
@@ -787,6 +789,34 @@ func (tc *TypeChecker) checkArrowFunction(arrow *ast.ArrowFunctionExpression, fi
 		case ast.Expression:
 			tc.checkExpression(body, filename)
 		}
+	}
+}
+
+func (tc *TypeChecker) checkFunctionExpression(fn *ast.FunctionExpression, filename string) {
+	// Check if async function is used without Promise support
+	if fn.Async {
+		if !tc.globalEnv.HasGlobal("Promise") {
+			tc.addError(filename, fn.Pos().Line, fn.Pos().Column,
+				"An async function or method in ES5 requires the 'Promise' constructor.  Make sure you have a declaration for the 'Promise' constructor or include 'ES2015' in your '--lib' option.",
+				"TS2705", "error")
+		}
+	}
+
+	// Find the scope for the function expression that was created by the binder
+	fnScope := tc.findScopeForNode(fn)
+	if fnScope != nil {
+		// Use existing scope - temporarily set it as current
+		originalScope := tc.symbolTable.Current
+		tc.symbolTable.Current = fnScope
+
+		// Check the body
+		tc.checkBlockStatement(fn.Body, filename)
+
+		// Restore original scope
+		tc.symbolTable.Current = originalScope
+	} else {
+		// No scope found - just check the body with current scope
+		tc.checkBlockStatement(fn.Body, filename)
 	}
 }
 

@@ -332,6 +332,7 @@ type Parameter struct {
 	ID        *Identifier
 	ParamType TypeNode
 	Optional  bool
+	Rest      bool // true if this is a rest parameter (...args)
 	Position  Position
 	EndPos    Position
 }

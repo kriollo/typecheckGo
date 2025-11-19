@@ -109,6 +109,25 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 	// Prevent infinite loops by tracking position
 	currentPos := p.pos
 
+	// Handle async function declarations
+	if p.matchKeyword("async") {
+		savedPos := p.pos
+		p.advanceWord()
+		p.skipWhitespaceAndComments()
+
+		if p.matchKeyword("function") {
+			funcDecl, err := p.parseFunctionDeclarationInternal()
+			if err != nil {
+				return nil, err
+			}
+			funcDecl.Async = true
+			return funcDecl, nil
+		}
+
+		// Not an async function, restore position
+		p.pos = savedPos
+	}
+
 	if p.matchKeyword("function") {
 		return p.parseFunctionDeclaration()
 	}
@@ -214,6 +233,10 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 }
 
 func (p *parser) parseFunctionDeclaration() (*ast.FunctionDeclaration, error) {
+	return p.parseFunctionDeclarationInternal()
+}
+
+func (p *parser) parseFunctionDeclarationInternal() (*ast.FunctionDeclaration, error) {
 	startPos := p.currentPos()
 
 	p.consumeKeyword("function")
@@ -258,6 +281,120 @@ func (p *parser) parseFunctionDeclaration() (*ast.FunctionDeclaration, error) {
 		Params:    params,
 		Body:      body,
 		Async:     false,
+		Generator: false,
+		Position:  startPos,
+		EndPos:    p.currentPos(),
+	}, nil
+}
+
+// parseFunctionExpression parses a function expression: function() {} or function name() {}
+func (p *parser) parseFunctionExpression() (*ast.FunctionExpression, error) {
+	startPos := p.currentPos()
+
+	p.consumeKeyword("function")
+	p.skipWhitespaceAndComments()
+
+	// Name is optional for function expressions
+	var name *ast.Identifier
+	if p.matchIdentifier() {
+		var err error
+		name, err = p.parseIdentifier()
+		if err != nil {
+			return nil, err
+		}
+		p.skipWhitespaceAndComments()
+	}
+
+	p.expect("(")
+
+	params, err := p.parseParameterList()
+	if err != nil {
+		return nil, err
+	}
+
+	p.expect(")")
+	p.skipWhitespaceAndComments()
+
+	// Handle return type annotation (: Type)
+	if p.match(":") {
+		p.advance() // consume ':'
+		p.skipWhitespaceAndComments()
+
+		// Parse return type (simplified - just skip until we find '{')
+		// In a full implementation, we would parse the type properly
+		for !p.isAtEnd() && !p.match("{") {
+			p.advance()
+		}
+		p.skipWhitespaceAndComments()
+	}
+
+	body, err := p.parseBlockStatement()
+	if err != nil {
+		return nil, err
+	}
+
+	return &ast.FunctionExpression{
+		ID:        name,
+		Params:    params,
+		Body:      body,
+		Async:     false,
+		Generator: false,
+		Position:  startPos,
+		EndPos:    p.currentPos(),
+	}, nil
+}
+
+// parseAsyncFunctionExpression parses an async function expression: async function() {} or async function name() {}
+func (p *parser) parseAsyncFunctionExpression() (*ast.FunctionExpression, error) {
+	startPos := p.currentPos()
+
+	p.consumeKeyword("function")
+	p.skipWhitespaceAndComments()
+
+	// Name is optional for function expressions
+	var name *ast.Identifier
+	if p.matchIdentifier() {
+		var err error
+		name, err = p.parseIdentifier()
+		if err != nil {
+			return nil, err
+		}
+		p.skipWhitespaceAndComments()
+	}
+
+	p.expect("(")
+
+	params, err := p.parseParameterList()
+	if err != nil {
+		return nil, err
+	}
+
+	p.expect(")")
+	p.skipWhitespaceAndComments()
+
+	// Handle return type annotation (: Type)
+	if p.match(":") {
+		p.advance() // consume ':'
+		p.skipWhitespaceAndComments()
+
+		// Parse return type (simplified - just skip until we find '{')
+		// In a full implementation, we would parse the type properly
+		for !p.isAtEnd() && !p.match("{") {
+			p.advance()
+		}
+		p.skipWhitespaceAndComments()
+	}
+
+	body, err := p.parseBlockStatement()
+	if err != nil {
+		return nil, err
+	}
+
+	return &ast.FunctionExpression{
+		ID:        name,
+		Params:    params,
+		Body:      body,
+		Async:     true, // This is an async function
 		Generator: false,
 		Position:  startPos,
 		EndPos:    p.currentPos(),
@@ -588,7 +725,38 @@ func (p *parser) parseForStatement() (*ast.ForStatement, error) {
 	p.pos = headerStart
 
 	if hasInOrOf {
-		// Skip the entire for-in/for-of header
+		// Parse for-in/for-of loop properly
+		// Example: for (const item of items) { ... }
+		// We need to parse the variable declaration
+
+		var init ast.Node
+
+		// Check for variable declaration (const, let, var)
+		if p.matchKeyword("const", "let", "var") {
+			varDecl, err := p.parseVariableDeclaration()
+			if err != nil {
+				return nil, err
+			}
+			init = varDecl
+		} else {
+			// Parse identifier or pattern (for cases like: for (item of items))
+			expr, err := p.parseExpression()
+			if err != nil {
+				return nil, err
+			}
+			init = &ast.ExpressionStatement{Expression: expr}
+		}
+
+		p.skipWhitespaceAndComments()
+
+		// Skip 'in' or 'of' keyword
+		if p.matchKeyword("in") || p.matchKeyword("of") {
+			p.advanceWord()
+		}
+
+		p.skipWhitespaceAndComments()
+
+		// Skip the iterable expression until )
 		depth = 0
 		maxIterations := 1000
 		iterations := 0
@@ -621,9 +789,9 @@ func (p *parser) parseForStatement() (*ast.ForStatement, error) {
 			return nil, err
 		}
 
-		// Return placeholder
+		// Return with init so the binder can register the variable
 		return &ast.ForStatement{
-			Init:     nil,
+			Init:     init,
 			Test:     nil,
 			Update:   nil,
 			Body:     body,
@@ -1388,11 +1556,17 @@ func (p *parser) parsePostfixExpression() (ast.Expression, error) {
 func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 	p.skipWhitespaceAndComments()
 
-	// Check for async arrow function: async (params) => {...} or async param => {...}
+	// Check for async arrow function or async function expression
 	if p.matchKeyword("async") {
 		savedPos := p.pos
 		p.advanceWord()
 		p.skipWhitespaceAndComments()
+
+		// Check if followed by 'function' keyword for async function expression
+		if p.matchKeyword("function") {
+			// async function () {} or async function name() {}
+			return p.parseAsyncFunctionExpression()
+		}
 
 		// Check if followed by ( for async (params) => or identifier for async x =>
 		if p.match("(") || p.matchIdentifier() {
@@ -1450,7 +1624,7 @@ func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 			p.pos = tempPos
 		}
 
-		// Not an async arrow function, restore
+		// Not an async arrow function or async function expression, restore
 		p.pos = savedPos
 	}
 
@@ -1768,6 +1942,11 @@ func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 		return p.parseObjectLiteral()
 	}
 
+	// Function expression: function() {} or function name() {}
+	if p.matchKeyword("function") {
+		return p.parseFunctionExpression()
+	}
+
 	if p.matchIdentifier() {
 		return p.parseIdentifier()
 	}
@@ -1842,7 +2021,9 @@ func (p *parser) parseParameterList() ([]*ast.Parameter, error) {
 		p.skipWhitespaceAndComments()
 
 		// Check for rest parameter: ...identifier
+		isRest := false
 		if p.match("...") {
+			isRest = true
 			p.advanceString(3)
 			p.skipWhitespaceAndComments()
 		}
@@ -2127,6 +2308,7 @@ func (p *parser) parseImportDeclaration() (*ast.ImportDeclaration, error) {
 		p.skipWhitespaceAndComments()
 	} else {
 		// import name from "module" (default import)
+		// or import name, { named } from "module" (default + named imports)
 		local, err := p.parseIdentifier()
 		if err != nil {
 			return nil, err
@@ -2139,6 +2321,76 @@ func (p *parser) parseImportDeclaration() (*ast.ImportDeclaration, error) {
 		})
 
 		p.skipWhitespaceAndComments()
+
+		// Check for comma followed by named imports
+		// Example: import React, { useState } from 'react';
+		if p.match(",") {
+			p.advance() // consume ','
+			p.skipWhitespaceAndComments()
+
+			// Check for "type" keyword before opening brace
+			if p.matchKeyword("type") {
+				p.consumeKeyword("type")
+				p.skipWhitespaceAndComments()
+			}
+
+			// Now expect { for named imports
+			if !p.match("{") {
+				return nil, fmt.Errorf("expected '{' after ',' in import declaration")
+			}
+			p.advance() // consume '{'
+			p.skipWhitespaceAndComments()
+
+			// Parse named imports
+			iterations := 0
+			for !p.match("}") && !p.isAtEnd() && iterations < maxParserIterations {
+				iterations++
+
+				// Check for "type" keyword before individual import
+				if p.matchKeyword("type") {
+					p.consumeKeyword("type")
+					p.skipWhitespaceAndComments()
+				}
+
+				imported, err := p.parseIdentifier()
+				if err != nil {
+					return nil, err
+				}
+
+				localNamed := imported // by default, local name is the same as imported
+
+				p.skipWhitespaceAndComments()
+				if p.matchKeyword("as") {
+					p.advance() // consume 'as'
+					p.skipWhitespaceAndComments()
+
+					localNamed, err = p.parseIdentifier()
+					if err != nil {
+						return nil, err
+					}
+
+					p.skipWhitespaceAndComments()
+				}
+
+				specifiers = append(specifiers, ast.ImportSpecifier{
+					Imported: imported,
+					Local:    localNamed,
+					Position: imported.Pos(),
+					EndPos:   p.currentPos(),
+				})
+
+				if p.match(",") {
+					p.advance()
+					p.skipWhitespaceAndComments()
+				}
+			}
+
+			if !p.match("}") {
+				return nil, fmt.Errorf("expected '}' after import specifiers")
+			}
+			p.advance() // consume '}'
+			p.skipWhitespaceAndComments()
+		}
 	}
 
 	// Handle 'from' clause - consume 'from' keyword
