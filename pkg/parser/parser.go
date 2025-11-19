@@ -1036,6 +1036,30 @@ func (p *parser) parseCallExpression() (ast.Expression, error) {
 			continue
 		}
 
+		// Check for tagged template literal: identifier`...`
+		if p.match("`") {
+			// Tagged template literal
+			startPos := left.Pos()
+			templateStr := p.advanceStringLiteral()
+
+			// Create a template literal as the argument
+			templateArg := &ast.Literal{
+				Value:    templateStr[1 : len(templateStr)-1], // Remove backticks
+				Raw:      templateStr,
+				Position: p.currentPos(),
+				EndPos:   p.currentPos(),
+			}
+
+			left = &ast.CallExpression{
+				Callee:    left,
+				Arguments: []ast.Expression{templateArg},
+				Position:  startPos,
+				EndPos:    p.currentPos(),
+			}
+			// Continuar el loop
+			continue
+		}
+
 		// Check for optional chaining ?. or regular .
 		if p.match("?.") {
 			if left == nil {
@@ -1766,9 +1790,73 @@ func (p *parser) parseParameterList() ([]*ast.Parameter, error) {
 	for !p.match(")") && !p.isAtEnd() && iterations < maxParserIterations {
 		iterations++
 		p.skipWhitespaceAndComments()
-		id, err := p.parseIdentifier()
-		if err != nil {
-			return nil, err
+
+		// Check for rest parameter: ...identifier
+		if p.match("...") {
+			p.advanceString(3)
+			p.skipWhitespaceAndComments()
+		}
+
+		// Check for destructuring patterns
+		var id *ast.Identifier
+		var err error
+
+		if p.match("{") || p.match("[") {
+			// Handle destructuring pattern by skipping it
+			startPos := p.currentPos()
+			openChar := p.source[p.pos]
+			closeChar := byte('}')
+			if openChar == '[' {
+				closeChar = ']'
+			}
+
+			p.advance() // consume opening { or [
+			depth := 1
+			maxIter := 10000
+			iter := 0
+
+			for depth > 0 && !p.isAtEnd() && iter < maxIter {
+				iter++
+
+				// Skip strings to avoid confusion
+				if p.source[p.pos] == '"' || p.source[p.pos] == '\'' || p.source[p.pos] == '`' {
+					quote := p.source[p.pos]
+					p.advance()
+					for !p.isAtEnd() && p.source[p.pos] != quote {
+						if p.source[p.pos] == '\\' {
+							p.advance() // skip escape
+							if !p.isAtEnd() {
+								p.advance() // skip escaped char
+							}
+						} else {
+							p.advance()
+						}
+					}
+					if !p.isAtEnd() {
+						p.advance() // consume closing quote
+					}
+					continue
+				}
+
+				if p.source[p.pos] == openChar {
+					depth++
+				} else if p.source[p.pos] == closeChar {
+					depth--
+				}
+				p.advance()
+			}
+
+			// Create placeholder identifier
+			id = &ast.Identifier{
+				Name:     "destructured_param",
+				Position: startPos,
+				EndPos:   p.currentPos(),
+			}
+		} else {
+			id, err = p.parseIdentifier()
+			if err != nil {
+				return nil, err
+			}
 		}
 
 		// Handle optional type annotation
@@ -2745,7 +2833,23 @@ func (p *parser) parseObjectLiteral() (*ast.ObjectExpression, error) {
 			var key ast.Expression
 			var err error
 
-			if p.matchString() {
+			// Check for computed property: [expression]
+			if p.match("[") {
+				p.advance() // consume '['
+				p.skipWhitespaceAndComments()
+
+				// Parse the computed key expression
+				key, err = p.parseExpression()
+				if err != nil {
+					return nil, err
+				}
+
+				p.skipWhitespaceAndComments()
+				if !p.match("]") {
+					return nil, fmt.Errorf("expected ']' after computed property key at %s", p.currentPos())
+				}
+				p.advance() // consume ']'
+			} else if p.matchString() {
 				str := p.advanceStringLiteral()
 				key = &ast.Literal{
 					Value:    str[1 : len(str)-1],
@@ -4790,14 +4894,76 @@ func (p *parser) parsePropertyDefinition(name *ast.Identifier, accessModifier st
 func (p *parser) parseParameter() (*ast.Parameter, error) {
 	startPos := p.currentPos()
 
-	// Parse parameter name
-	if !p.matchIdentifier() {
-		return nil, fmt.Errorf("expected parameter name")
+	// Check for rest parameter: ...identifier
+	if p.match("...") {
+		p.advanceString(3)
+		p.skipWhitespaceAndComments()
 	}
 
-	paramName, err := p.parseIdentifier()
-	if err != nil {
-		return nil, err
+	var paramName *ast.Identifier
+	var err error
+
+	// Check for destructuring patterns
+	if p.match("{") || p.match("[") {
+		// Handle destructuring pattern by skipping it
+		openChar := p.source[p.pos]
+		closeChar := byte('}')
+		if openChar == '[' {
+			closeChar = ']'
+		}
+
+		p.advance() // consume opening { or [
+		depth := 1
+		maxIter := 10000
+		iter := 0
+
+		for depth > 0 && !p.isAtEnd() && iter < maxIter {
+			iter++
+
+			// Skip strings to avoid confusion
+			if p.source[p.pos] == '"' || p.source[p.pos] == '\'' || p.source[p.pos] == '`' {
+				quote := p.source[p.pos]
+				p.advance()
+				for !p.isAtEnd() && p.source[p.pos] != quote {
+					if p.source[p.pos] == '\\' {
+						p.advance() // skip escape
+						if !p.isAtEnd() {
+							p.advance() // skip escaped char
+						}
+					} else {
+						p.advance()
+					}
+				}
+				if !p.isAtEnd() {
+					p.advance() // consume closing quote
+				}
+				continue
+			}
+
+			if p.source[p.pos] == openChar {
+				depth++
+			} else if p.source[p.pos] == closeChar {
+				depth--
+			}
+			p.advance()
+		}
+
+		// Create placeholder identifier
+		paramName = &ast.Identifier{
+			Name:     "destructured_param",
+			Position: startPos,
+			EndPos:   p.currentPos(),
+		}
+	} else {
+		// Parse parameter name
+		if !p.matchIdentifier() {
+			return nil, fmt.Errorf("expected parameter name")
+		}
+
+		paramName, err = p.parseIdentifier()
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	p.skipWhitespaceAndComments()
