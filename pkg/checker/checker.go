@@ -626,6 +626,16 @@ func (tc *TypeChecker) checkConditionalExpression(cond *ast.ConditionalExpressio
 }
 
 func (tc *TypeChecker) checkIdentifier(id *ast.Identifier, filename string) {
+	// Debug logging
+	if os.Getenv("TSCHECK_DEBUG_SCOPE") == "1" && id.Name == "emit" {
+		debugFile, err := os.OpenFile("debug_scope.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err == nil {
+			fmt.Fprintf(debugFile, "DEBUG: Checking identifier 'emit' at line %d, Current scope level: %d\n",
+				id.Pos().Line, tc.symbolTable.Current.Level)
+			debugFile.Close()
+		}
+	}
+
 	// Skip TypeScript keywords that are type-related and not runtime identifiers
 	// These keywords are used for type assertions, type guards, etc.
 	typeKeywords := []string{"as", "is", "keyof", "typeof", "infer", "readonly"}
@@ -636,8 +646,19 @@ func (tc *TypeChecker) checkIdentifier(id *ast.Identifier, filename string) {
 	}
 
 	// Check if the identifier is defined in the symbol table
-	if _, exists := tc.symbolTable.ResolveSymbol(id.Name); exists {
+	_, exists := tc.symbolTable.ResolveSymbol(id.Name)
+	if exists {
 		return
+	}
+
+	// Debug: log scope information for debugging
+	if os.Getenv("TSCHECK_DEBUG_SCOPE") == "1" {
+		var symbolNames []string
+		for name := range tc.symbolTable.Current.Symbols {
+			symbolNames = append(symbolNames, name)
+		}
+		fmt.Fprintf(os.Stderr, "DEBUG: Cannot find '%s', Current scope level: %d, symbols in current scope: %v\n",
+			id.Name, tc.symbolTable.Current.Level, symbolNames)
 	}
 
 	// Check if it's a global object or type
@@ -739,30 +760,10 @@ func (tc *TypeChecker) checkArrowFunction(arrow *ast.ArrowFunctionExpression, fi
 		}
 	}
 
-	// Create a new scope for the arrow function
+	// Find the scope for the arrow function that was created by the binder
 	arrowScope := tc.findScopeForNode(arrow)
-	if arrowScope == nil {
-		// If no scope exists, create one temporarily
-		tc.symbolTable.EnterScope(arrow)
-
-		// Define parameters in the function scope
-		for _, param := range arrow.Params {
-			if param.ID != nil {
-				tc.symbolTable.DefineSymbol(param.ID.Name, symbols.ParameterSymbol, param, false)
-			}
-		}
-
-		// Check the body
-		switch body := arrow.Body.(type) {
-		case *ast.BlockStatement:
-			tc.checkBlockStatement(body, filename)
-		case ast.Expression:
-			tc.checkExpression(body, filename)
-		}
-
-		tc.symbolTable.ExitScope()
-	} else {
-		// Use existing scope
+	if arrowScope != nil {
+		// Use existing scope - temporarily set it as current
 		originalScope := tc.symbolTable.Current
 		tc.symbolTable.Current = arrowScope
 
@@ -774,7 +775,18 @@ func (tc *TypeChecker) checkArrowFunction(arrow *ast.ArrowFunctionExpression, fi
 			tc.checkExpression(body, filename)
 		}
 
+		// Restore original scope
 		tc.symbolTable.Current = originalScope
+	} else {
+		// No scope found - just check the body with current scope
+		// The binder should have created a scope, but if it didn't,
+		// we can still check the body and rely on scope chain resolution
+		switch body := arrow.Body.(type) {
+		case *ast.BlockStatement:
+			tc.checkBlockStatement(body, filename)
+		case ast.Expression:
+			tc.checkExpression(body, filename)
+		}
 	}
 }
 
@@ -1006,6 +1018,30 @@ func (tc *TypeChecker) findScopeInSubtree(scope *symbols.Scope, targetNode ast.N
 	}
 
 	return nil
+}
+
+// resolveSymbolFromGlobal searches for a symbol starting from the global scope
+// and recursively through all child scopes. This is more robust than relying
+// on the Current scope pointer being correctly positioned.
+func (tc *TypeChecker) resolveSymbolFromGlobal(name string) (*symbols.Symbol, bool) {
+	return tc.resolveSymbolInScopeTree(tc.symbolTable.Global, name)
+}
+
+// resolveSymbolInScopeTree recursively searches for a symbol in a scope and its children
+func (tc *TypeChecker) resolveSymbolInScopeTree(scope *symbols.Scope, name string) (*symbols.Symbol, bool) {
+	// Check in current scope
+	if symbol, exists := scope.Symbols[name]; exists {
+		return symbol, true
+	}
+
+	// Search in child scopes
+	for _, child := range scope.Children {
+		if symbol, exists := tc.resolveSymbolInScopeTree(child, name); exists {
+			return symbol, true
+		}
+	}
+
+	return nil, false
 }
 
 // DumpSymbolTable returns a string representation of the symbol table

@@ -2,6 +2,7 @@ package symbols
 
 import (
 	"fmt"
+	"os"
 
 	"tstypechecker/pkg/ast"
 	"tstypechecker/pkg/types"
@@ -294,6 +295,10 @@ func (b *Binder) bindDefineComponentArgument(arg ast.Expression) {
 		return
 	}
 
+	if os.Getenv("TSCHECK_DEBUG_SETUP") == "1" {
+		fmt.Fprintf(os.Stderr, "DEBUG SETUP: Processing defineComponent with %d properties\n", len(objExpr.Properties))
+	}
+
 	// Look for the 'setup' property
 	for _, prop := range objExpr.Properties {
 		property, ok := prop.(*ast.Property)
@@ -307,6 +312,10 @@ func (b *Binder) bindDefineComponentArgument(arg ast.Expression) {
 			continue
 		}
 
+		if os.Getenv("TSCHECK_DEBUG_SETUP") == "1" {
+			fmt.Fprintf(os.Stderr, "DEBUG SETUP: Found property '%s', value type: %T\n", key.Name, property.Value)
+		}
+
 		if key.Name != "setup" {
 			// Bind non-setup properties normally
 			b.bindExpression(property.Value)
@@ -316,8 +325,14 @@ func (b *Binder) bindDefineComponentArgument(arg ast.Expression) {
 		// Found setup function - bind with special context
 		switch fnValue := property.Value.(type) {
 		case *ast.FunctionExpression:
+			if os.Getenv("TSCHECK_DEBUG_SETUP") == "1" {
+				fmt.Fprintf(os.Stderr, "DEBUG SETUP: Calling bindSetupFunction\n")
+			}
 			b.bindSetupFunction(fnValue)
 		case *ast.ArrowFunctionExpression:
+			if os.Getenv("TSCHECK_DEBUG_SETUP") == "1" {
+				fmt.Fprintf(os.Stderr, "DEBUG SETUP: Calling bindSetupArrowFunction\n")
+			}
 			b.bindSetupArrowFunction(fnValue)
 		default:
 			b.bindExpression(property.Value)
@@ -544,6 +559,13 @@ func (b *Binder) bindSetupFunction(fnExpr *ast.FunctionExpression) {
 					param.ID.Name,
 				)
 
+				if os.Getenv("TSCHECK_DEBUG_SETUP") == "1" {
+					fmt.Fprintf(os.Stderr, "DEBUG SETUP: param=%s, paramIdx=%d, inferredType=%+v\n", param.ID.Name, paramIdx, inferredType)
+					if inferredType != nil {
+						fmt.Fprintf(os.Stderr, "  IsFunction=%v\n", inferredType.IsFunction)
+					}
+				}
+
 				if inferredType != nil && inferredType.IsFunction {
 					symbol.IsFunction = true
 				}
@@ -578,6 +600,13 @@ func (b *Binder) bindSetupArrowFunction(arrow *ast.ArrowFunctionExpression) {
 					param.ID.Name,
 				)
 
+				if os.Getenv("TSCHECK_DEBUG_SETUP") == "1" {
+					fmt.Fprintf(os.Stderr, "DEBUG SETUP ARROW: param=%s, paramIdx=%d, inferredType=%+v\n", param.ID.Name, paramIdx, inferredType)
+					if inferredType != nil {
+						fmt.Fprintf(os.Stderr, "  IsFunction=%v\n", inferredType.IsFunction)
+					}
+				}
+
 				if inferredType != nil && inferredType.IsFunction {
 					symbol.IsFunction = true
 				}
@@ -600,6 +629,21 @@ func (b *Binder) bindSetupArrowFunction(arrow *ast.ArrowFunctionExpression) {
 func (b *Binder) bindArrowFunction(arrow *ast.ArrowFunctionExpression) {
 	// Create a new scope for the arrow function
 	b.table.EnterScope(arrow)
+
+	// Debug logging
+	if os.Getenv("TSCHECK_DEBUG_SCOPE") == "1" {
+		debugFile, err := os.OpenFile("debug_scope.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err == nil {
+			fmt.Fprintf(debugFile, "BINDER: Entered arrow function scope, level: %d, parent symbols: ", b.table.Current.Level)
+			if b.table.Current.Parent != nil {
+				for name := range b.table.Current.Parent.Symbols {
+					fmt.Fprintf(debugFile, "%s ", name)
+				}
+			}
+			fmt.Fprintf(debugFile, "\n")
+			debugFile.Close()
+		}
+	}
 
 	// Define parameters in the function scope
 	for _, param := range arrow.Params {

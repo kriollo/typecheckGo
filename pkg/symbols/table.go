@@ -2,6 +2,7 @@ package symbols
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"tstypechecker/pkg/ast"
@@ -226,6 +227,25 @@ func (st *SymbolTable) CheckSymbolUsage(name string, usagePos ast.Position, expe
 
 // CheckFunctionCall checks if a function call is valid
 func (st *SymbolTable) CheckFunctionCall(name string, usagePos ast.Position, argCount int) bool {
+	// Debug logging for emit
+	if name == "emit" {
+		debugFile, err := os.OpenFile("debug_scope.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err == nil {
+			fmt.Fprintf(debugFile, "CheckFunctionCall: Looking for '%s' at line %d, Current scope level: %d\n",
+				name, usagePos.Line, st.Current.Level)
+			scope := st.Current
+			for scope != nil {
+				fmt.Fprintf(debugFile, "  Scope level %d symbols: ", scope.Level)
+				for sname := range scope.Symbols {
+					fmt.Fprintf(debugFile, "%s ", sname)
+				}
+				fmt.Fprintf(debugFile, "\n")
+				scope = scope.Parent
+			}
+			debugFile.Close()
+		}
+	}
+
 	symbol, exists := st.ResolveSymbol(name)
 	if !exists {
 		st.addError(fmt.Sprintf("Cannot find name '%s'", name), usagePos, "TS2304", "error")

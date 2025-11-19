@@ -31,6 +31,32 @@ func (di *DestructuringInferencer) InferDestructuredParamType(
 	paramIndex int,
 	propertyName string,
 ) *types.Type {
+	// Special handling for Vue's setup function second parameter (SetupContext)
+	if functionName == "setup" && paramIndex == 1 {
+		// Known properties from Vue's SetupContext that are functions
+		vueSetupContextFunctions := map[string]bool{
+			"emit":   true,
+			"expose": true,
+			"attrs":  false,
+			"slots":  false,
+		}
+
+		if isFunc, known := vueSetupContextFunctions[propertyName]; known && isFunc {
+			// Return a function type for known Vue setup context functions
+			return &types.Type{
+				Kind:       types.FunctionType,
+				Name:       propertyName,
+				IsFunction: true,
+			}
+		}
+
+		// Try to find SetupContext in loaded types
+		setupContext := di.findTypeByName("SetupContext")
+		if setupContext != nil {
+			return di.getPropertyType(setupContext, propertyName)
+		}
+	}
+
 	// First, try to find the function definition
 	funcType := di.findFunctionDefinition(functionName)
 	if funcType == nil {
