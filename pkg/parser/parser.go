@@ -1167,6 +1167,23 @@ func (p *parser) parseBinaryExpression() (ast.Expression, error) {
 			op = "in"
 		} else if p.matchKeyword("instanceof") {
 			op = "instanceof"
+		} else if p.matchKeyword("as") {
+			startPos := left.Pos()
+			p.advanceWord() // consume 'as'
+			p.skipWhitespaceAndComments()
+
+			typeNode, err := p.parseTypeAnnotationFull()
+			if err != nil {
+				return nil, err
+			}
+
+			left = &ast.AsExpression{
+				Expression:     left,
+				TypeAnnotation: typeNode,
+				Position:       startPos,
+				EndPos:         p.currentPos(),
+			}
+			continue
 		} else if p.match("+") && p.peek(1) != "+" && p.peek(1) != "=" {
 			op = "+"
 		} else if p.match("-") && p.peek(1) != "-" && p.peek(1) != "=" {
@@ -2029,7 +2046,7 @@ func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 
 	// Regex literal - simple heuristic: / followed by non-whitespace
 	// This is a HACK and doesn't handle all edge cases, but works for common patterns
-	if p.match("/") && p.pos+1 < len(p.source) && !unicode.IsSpace(rune(p.source[p.pos+1])) {
+	if p.match("/") {
 		startPos := p.currentPos()
 		p.advance() // consume /
 
@@ -2320,16 +2337,9 @@ func (p *parser) parseParameterList() ([]*ast.Parameter, error) {
 			p.advance() // consume ':'
 			p.skipWhitespaceAndComments()
 
-			// Parse type annotation (simplified - just parse as TypeReference for now)
-			typeName, err := p.parseIdentifier()
+			paramType, err = p.parseTypeAnnotation()
 			if err != nil {
 				return nil, err
-			}
-
-			paramType = &ast.TypeReference{
-				Name:     typeName.Name,
-				Position: typeName.Pos(),
-				EndPos:   typeName.End(),
 			}
 		}
 
@@ -3468,6 +3478,14 @@ func (p *parser) parseObjectLiteral() (*ast.ObjectExpression, error) {
 					Position: propStartPos,
 					EndPos:   p.currentPos(),
 				}
+			} else if p.matchNumber() {
+				num := p.advanceNumber()
+				key = &ast.Literal{
+					Value:    num,
+					Raw:      num,
+					Position: propStartPos,
+					EndPos:   p.currentPos(),
+				}
 			} else if p.matchIdentifier() {
 				key, err = p.parseIdentifier()
 				if err != nil {
@@ -4039,31 +4057,7 @@ func (p *parser) parseArrowFunction() (*ast.ArrowFunctionExpression, error) {
 
 // parseTypeAnnotation parses a TypeScript type annotation
 func (p *parser) parseTypeAnnotation() (ast.TypeNode, error) {
-	// Parse the primary type
-	primaryType, err := p.parseTypePrimaryNode()
-	if err != nil {
-		return nil, err
-	}
-
-	// Check for union or intersection types (| or &)
-	p.skipWhitespaceAndComments()
-	if p.match("|") || p.match("&") {
-		// We have a union/intersection type - just consume it and return simplified
-		for p.match("|") || p.match("&") {
-			p.advance()
-			p.skipWhitespaceAndComments()
-			// Parse the next type
-			_, err := p.parseTypePrimaryNode()
-			if err != nil {
-				return nil, err
-			}
-			p.skipWhitespaceAndComments()
-		}
-		// Return the primary type (unions are not fully represented in AST yet)
-		return primaryType, nil
-	}
-
-	return primaryType, nil
+	return p.parseTypeAnnotationFull()
 }
 
 // parseTypePrimaryNode parses a single type (without unions/intersections)

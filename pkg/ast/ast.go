@@ -302,6 +302,18 @@ func (m *MemberExpression) Pos() Position { return m.Position }
 func (m *MemberExpression) End() Position { return m.EndPos }
 func (m *MemberExpression) exprNode()     {}
 
+type AsExpression struct {
+	Expression     Expression
+	TypeAnnotation TypeNode
+	Position       Position
+	EndPos         Position
+}
+
+func (a *AsExpression) Type() string  { return "AsExpression" }
+func (a *AsExpression) Pos() Position { return a.Position }
+func (a *AsExpression) End() Position { return a.EndPos }
+func (a *AsExpression) exprNode()     {}
+
 type ConditionalExpression struct {
 	Test       Expression
 	Consequent Expression
