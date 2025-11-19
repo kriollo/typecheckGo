@@ -157,7 +157,7 @@ func (tc *TypeChecker) CheckFile(filename string, ast *ast.File) []TypeError {
 
 	// Create a binder and bind symbols
 	binder := symbols.NewBinder(tc.symbolTable)
-	binder.SetDestructuringInferencer(tc.destructuringInfer)
+	binder.SetParameterTypeInferencer(tc.destructuringInfer)
 	binder.BindFile(ast)
 
 	// Process imports and add imported symbols to the symbol table

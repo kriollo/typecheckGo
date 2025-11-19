@@ -4,11 +4,13 @@ import (
 	"fmt"
 
 	"tstypechecker/pkg/ast"
+	"tstypechecker/pkg/types"
 )
 
 // Binder visits AST nodes and builds the symbol table
 type Binder struct {
-	table *SymbolTable
+	table               *SymbolTable
+	paramTypeInferencer types.ParameterTypeInferencer
 }
 
 // NewBinder creates a new binder
@@ -16,6 +18,11 @@ func NewBinder(table *SymbolTable) *Binder {
 	return &Binder{
 		table: table,
 	}
+}
+
+// SetParameterTypeInferencer sets the inferencer for destructured parameters
+func (b *Binder) SetParameterTypeInferencer(inferencer types.ParameterTypeInferencer) {
+	b.paramTypeInferencer = inferencer
 }
 
 // BindFile binds all symbols in a file
@@ -120,17 +127,20 @@ func (b *Binder) bindFunctionDeclaration(decl *ast.FunctionDeclaration) {
 	b.table.EnterScope(decl)
 
 	// Define parameters in the function scope
-	for _, param := range decl.Params {
+	for paramIdx, param := range decl.Params {
 		if param.ID != nil {
 			symbol := b.table.DefineSymbol(param.ID.Name, ParameterSymbol, param, false)
 
-			// Mark known Vue composition API context properties as functions
-			// These come from setup(props, { emit, expose, slots, attrs })
-			vueContextFunctions := []string{"emit", "expose"}
-			for _, fnName := range vueContextFunctions {
-				if param.ID.Name == fnName {
+			// Try to infer type for destructured parameters using loaded type definitions
+			if b.paramTypeInferencer != nil {
+				inferredType := b.paramTypeInferencer.InferDestructuredParamType(
+					decl.ID.Name,
+					paramIdx,
+					param.ID.Name,
+				)
+
+				if inferredType != nil && inferredType.IsFunction {
 					symbol.IsFunction = true
-					break
 				}
 			}
 		}
@@ -253,14 +263,65 @@ func (b *Binder) bindCallExpression(call *ast.CallExpression) {
 	// Bind the callee
 	b.bindExpression(call.Callee)
 
-	// Bind all arguments
-	for _, arg := range call.Arguments {
+	// Special handling for defineComponent with setup function
+	if id, ok := call.Callee.(*ast.Identifier); ok {
+		if id.Name == "defineComponent" && len(call.Arguments) > 0 {
+			b.bindDefineComponentArgument(call.Arguments[0])
+			// Bind remaining arguments normally
+			for i := 1; i < len(call.Arguments); i++ {
+				b.bindExpression(call.Arguments[i])
+			}
+		} else {
+			// Bind all arguments normally
+			for _, arg := range call.Arguments {
+				b.bindExpression(arg)
+			}
+			b.table.CheckFunctionCall(id.Name, call.Pos(), len(call.Arguments))
+		}
+	} else {
+		// Bind all arguments normally
+		for _, arg := range call.Arguments {
+			b.bindExpression(arg)
+		}
+	}
+}
+
+// bindDefineComponentArgument handles the object argument of defineComponent
+func (b *Binder) bindDefineComponentArgument(arg ast.Expression) {
+	objExpr, ok := arg.(*ast.ObjectExpression)
+	if !ok {
 		b.bindExpression(arg)
+		return
 	}
 
-	// Check if it's a valid function call
-	if id, ok := call.Callee.(*ast.Identifier); ok {
-		b.table.CheckFunctionCall(id.Name, call.Pos(), len(call.Arguments))
+	// Look for the 'setup' property
+	for _, prop := range objExpr.Properties {
+		property, ok := prop.(*ast.Property)
+		if !ok {
+			continue
+		}
+
+		key, ok := property.Key.(*ast.Identifier)
+		if !ok {
+			b.bindExpression(property.Value)
+			continue
+		}
+
+		if key.Name != "setup" {
+			// Bind non-setup properties normally
+			b.bindExpression(property.Value)
+			continue
+		}
+
+		// Found setup function - bind with special context
+		switch fnValue := property.Value.(type) {
+		case *ast.FunctionExpression:
+			b.bindSetupFunction(fnValue)
+		case *ast.ArrowFunctionExpression:
+			b.bindSetupArrowFunction(fnValue)
+		default:
+			b.bindExpression(property.Value)
+		}
 	}
 }
 
@@ -452,14 +513,39 @@ func (b *Binder) bindFunctionExpression(fnExpr *ast.FunctionExpression) {
 	// Define parameters in the function scope
 	for _, param := range fnExpr.Params {
 		if param.ID != nil {
+			b.table.DefineSymbol(param.ID.Name, ParameterSymbol, param, false)
+		}
+	}
+
+	// Bind the function body
+	if fnExpr.Body != nil {
+		b.bindBlockStatement(fnExpr.Body)
+	}
+
+	// Exit the function scope
+	b.table.ExitScope()
+}
+
+// bindSetupFunction handles Vue's setup function with type inference
+func (b *Binder) bindSetupFunction(fnExpr *ast.FunctionExpression) {
+	// Create a new scope for the function expression
+	b.table.EnterScope(fnExpr)
+
+	// Define parameters with type inference for destructured properties
+	for paramIdx, param := range fnExpr.Params {
+		if param.ID != nil {
 			symbol := b.table.DefineSymbol(param.ID.Name, ParameterSymbol, param, false)
 
-			// Mark known Vue composition API context properties as functions
-			vueContextFunctions := []string{"emit", "expose"}
-			for _, fnName := range vueContextFunctions {
-				if param.ID.Name == fnName {
+			// Try to infer type for destructured parameters
+			if b.paramTypeInferencer != nil {
+				inferredType := b.paramTypeInferencer.InferDestructuredParamType(
+					"setup", // Vue's setup function
+					paramIdx,
+					param.ID.Name,
+				)
+
+				if inferredType != nil && inferredType.IsFunction {
 					symbol.IsFunction = true
-					break
 				}
 			}
 		}
@@ -468,6 +554,43 @@ func (b *Binder) bindFunctionExpression(fnExpr *ast.FunctionExpression) {
 	// Bind the function body
 	if fnExpr.Body != nil {
 		b.bindBlockStatement(fnExpr.Body)
+	}
+
+	// Exit the function scope
+	b.table.ExitScope()
+}
+
+// bindSetupArrowFunction handles Vue's setup arrow function with type inference
+func (b *Binder) bindSetupArrowFunction(arrow *ast.ArrowFunctionExpression) {
+	// Create a new scope for the arrow function
+	b.table.EnterScope(arrow)
+
+	// Define parameters with type inference for destructured properties
+	for paramIdx, param := range arrow.Params {
+		if param.ID != nil {
+			symbol := b.table.DefineSymbol(param.ID.Name, ParameterSymbol, param, false)
+
+			// Try to infer type for destructured parameters
+			if b.paramTypeInferencer != nil {
+				inferredType := b.paramTypeInferencer.InferDestructuredParamType(
+					"setup", // Vue's setup function
+					paramIdx,
+					param.ID.Name,
+				)
+
+				if inferredType != nil && inferredType.IsFunction {
+					symbol.IsFunction = true
+				}
+			}
+		}
+	}
+
+	// Bind the body
+	switch body := arrow.Body.(type) {
+	case *ast.BlockStatement:
+		b.bindBlockStatement(body)
+	case ast.Expression:
+		b.bindExpression(body)
 	}
 
 	// Exit the function scope
