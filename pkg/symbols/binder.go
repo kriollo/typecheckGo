@@ -89,6 +89,13 @@ func (b *Binder) bindVariableDeclaration(decl *ast.VariableDeclaration) {
 							params = append(params, param.ID.Name)
 						}
 					}
+				case *ast.Identifier:
+					// Check if this is a destructured binding from a known global
+					// (e.g., const { ref, computed } = Vue)
+					// In this case, assume the extracted properties might be callable
+					if init.Name == "Vue" || init.Name == "Vuex" || init.Name == "Swal" {
+						isFunction = true
+					}
 				}
 			}
 

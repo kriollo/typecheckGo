@@ -275,39 +275,63 @@ func (p *parser) parseVariableDeclaration() (*ast.VariableDeclaration, error) {
 	for {
 		// Check for destructuring pattern
 		if p.match("{") || p.match("[") {
-			// TEMPORAL FIX: Skip destructuring patterns to prevent infinite loops
-			// TODO: Implement full destructuring support
+			// Parse destructuring patterns and extract variable names
 			patternStart := p.currentPos()
 			openChar := p.source[p.pos]
 			closeChar := byte('}')
+			isObjectPattern := openChar == '{'
 			if openChar == '[' {
 				closeChar = ']'
 			}
 
 			p.advance() // consume opening { or [
+			p.skipWhitespaceAndComments()
+
+			// Extract variable names from the destructuring pattern
+			var extractedNames []string
 			depth := 1
-			maxIterations := 10000 // Safety limit
-			iterations := 0
+			currentName := ""
 
-			for depth > 0 && !p.isAtEnd() && iterations < maxIterations {
-				iterations++
-				if p.source[p.pos] == openChar {
+			for depth > 0 && !p.isAtEnd() {
+				ch := p.source[p.pos]
+
+				if ch == openChar {
 					depth++
-				} else if p.source[p.pos] == closeChar {
+					p.advance()
+				} else if ch == closeChar {
 					depth--
+					if depth == 0 {
+						// Add current name if exists
+						if currentName != "" {
+							extractedNames = append(extractedNames, strings.TrimSpace(currentName))
+							currentName = ""
+						}
+					}
+					p.advance()
+				} else if ch == ',' && depth == 1 {
+					// End of one binding
+					if currentName != "" {
+						extractedNames = append(extractedNames, strings.TrimSpace(currentName))
+						currentName = ""
+					}
+					p.advance()
+					p.skipWhitespaceAndComments()
+				} else if ch == ':' && isObjectPattern && depth == 1 {
+					// In object pattern, skip the rename part (e.g., {oldName: newName})
+					// We want to capture 'newName', not 'oldName'
+					currentName = ""
+					p.advance()
+					p.skipWhitespaceAndComments()
+				} else if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_' || ch == '$' ||
+					(currentName != "" && ch >= '0' && ch <= '9') {
+					currentName += string(ch)
+					p.advance()
+				} else if ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' {
+					p.skipWhitespaceAndComments()
+				} else {
+					// Other characters (like =, ..., etc.), skip
+					p.advance()
 				}
-				p.advance()
-			}
-
-			if iterations >= maxIterations {
-				return nil, fmt.Errorf("infinite loop detected while parsing destructuring pattern at %s", patternStart)
-			}
-
-			// Create placeholder identifier
-			id := &ast.Identifier{
-				Name:     "destructured_binding",
-				Position: patternStart,
-				EndPos:   p.currentPos(),
 			}
 
 			var typeAnnotation ast.TypeNode
@@ -336,13 +360,39 @@ func (p *parser) parseVariableDeclaration() (*ast.VariableDeclaration, error) {
 				}
 			}
 
-			declarators = append(declarators, &ast.VariableDeclarator{
-				ID:             id,
-				TypeAnnotation: typeAnnotation,
-				Init:           init,
-				Position:       id.Pos(),
-				EndPos:         p.currentPos(),
-			})
+			// Create a declarator for each extracted name
+			if len(extractedNames) > 0 {
+				for _, name := range extractedNames {
+					if name != "" {
+						id := &ast.Identifier{
+							Name:     name,
+							Position: patternStart,
+							EndPos:   p.currentPos(),
+						}
+						declarators = append(declarators, &ast.VariableDeclarator{
+							ID:             id,
+							TypeAnnotation: typeAnnotation,
+							Init:           init,
+							Position:       id.Pos(),
+							EndPos:         p.currentPos(),
+						})
+					}
+				}
+			} else {
+				// Fallback: create placeholder if no names were extracted
+				id := &ast.Identifier{
+					Name:     "destructured_binding",
+					Position: patternStart,
+					EndPos:   p.currentPos(),
+				}
+				declarators = append(declarators, &ast.VariableDeclarator{
+					ID:             id,
+					TypeAnnotation: typeAnnotation,
+					Init:           init,
+					Position:       id.Pos(),
+					EndPos:         p.currentPos(),
+				})
+			}
 
 			p.skipWhitespaceAndComments()
 			if !p.match(",") {

@@ -1481,6 +1481,8 @@ func (tc *TypeChecker) SetTypeRoots(typeRoots []string) {
 	if tc.moduleResolver != nil {
 		tc.moduleResolver.SetTypeRoots(typeRoots)
 	}
+	// Load global types from the configured typeRoots
+	tc.loadGlobalTypesFromRoots(typeRoots)
 }
 
 // loadGlobalTypes loads type definitions from @types packages
@@ -1504,6 +1506,71 @@ func (tc *TypeChecker) loadGlobalTypes(rootDir string) {
 			pkgDir := filepath.Join(typesDir, entry.Name())
 			tc.loadPackageTypes(pkgDir)
 		}
+	}
+}
+
+// loadGlobalTypesFromRoots loads type definitions from configured typeRoots
+func (tc *TypeChecker) loadGlobalTypesFromRoots(typeRoots []string) {
+	if len(typeRoots) == 0 {
+		return
+	}
+
+	// Get the root directory from moduleResolver
+	var rootDir string
+	if tc.moduleResolver != nil {
+		rootDir = tc.moduleResolver.GetRootDir()
+	}
+	if rootDir == "" {
+		rootDir = "."
+	}
+
+	// Load types from each typeRoot
+	for _, typeRoot := range typeRoots {
+		// Resolve relative paths
+		var typesPath string
+		if filepath.IsAbs(typeRoot) {
+			typesPath = typeRoot
+		} else {
+			typesPath = filepath.Join(rootDir, typeRoot)
+		}
+
+		// Check if directory exists
+		if info, err := os.Stat(typesPath); err == nil && info.IsDir() {
+			// Load all .d.ts and .ts files from this directory
+			tc.loadDeclarationFiles(typesPath)
+		}
+	}
+}
+
+// loadDeclarationFiles loads all .d.ts and .ts files from a directory (including subdirectories)
+func (tc *TypeChecker) loadDeclarationFiles(dir string) {
+	var declarationFiles []string
+
+	// Collect all .d.ts and .ts files
+	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // Skip errors
+		}
+		if !info.IsDir() {
+			if strings.HasSuffix(path, ".d.ts") || strings.HasSuffix(path, ".ts") {
+				// Only load declaration files (globals.ts, *.d.ts)
+				baseName := filepath.Base(path)
+				if strings.HasSuffix(path, ".d.ts") || baseName == "globals.ts" {
+					declarationFiles = append(declarationFiles, path)
+				}
+			}
+		}
+		return nil
+	})
+
+	// Pass 1: Extract interfaces and types (they define callable signatures)
+	for _, path := range declarationFiles {
+		tc.extractInterfacesFromFile(path)
+	}
+
+	// Pass 2: Extract variables and functions (they may reference interfaces from pass 1)
+	for _, path := range declarationFiles {
+		tc.extractVariablesFromFile(path)
 	}
 }
 
@@ -1729,6 +1796,9 @@ func (tc *TypeChecker) extractGlobalDeclarationFromLine(line string, lineIdx int
 						tc.checkIfTypeIsCallable(symbol, typeStr, lineIdx, allLines)
 					}
 				}
+
+				// Also add to global environment so it can be found during type checking
+				tc.globalEnv.Objects[name] = types.Any
 			}
 		}
 	}
@@ -1746,6 +1816,9 @@ func (tc *TypeChecker) extractGlobalDeclarationFromLine(line string, lineIdx int
 				symbol := tc.symbolTable.DefineSymbol(name, symbols.FunctionSymbol, nil, false)
 				symbol.IsFunction = true
 				symbol.FromDTS = true // Mark as coming from .d.ts
+
+				// Also add to global environment
+				tc.globalEnv.Objects[name] = types.Any
 			}
 		}
 	}

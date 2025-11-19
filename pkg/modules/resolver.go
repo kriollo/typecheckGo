@@ -111,6 +111,11 @@ func (r *ModuleResolver) SetTypeRoots(typeRoots []string) {
 	}
 }
 
+// GetRootDir returns the root directory of the project
+func (r *ModuleResolver) GetRootDir() string {
+	return r.rootDir
+}
+
 // ResolveModule resuelve un especificador de módulo desde un archivo origen
 func (r *ModuleResolver) ResolveModule(specifier string, fromFile string) (*ResolvedModule, error) {
 	// Verificar cache primero
