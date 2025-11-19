@@ -248,6 +248,22 @@ func (p *parser) parseFunctionDeclarationInternal() (*ast.FunctionDeclaration, e
 	}
 
 	p.skipWhitespaceAndComments()
+
+	// Handle generic type parameters: function name<T, U>(...)
+	if p.match("<") {
+		p.advance()
+		depth := 1
+		for depth > 0 && !p.isAtEnd() {
+			if p.match("<") {
+				depth++
+			} else if p.match(">") {
+				depth--
+			}
+			p.advance()
+		}
+		p.skipWhitespaceAndComments()
+	}
+
 	p.expect("(")
 
 	params, err := p.parseParameterList()
@@ -1209,7 +1225,7 @@ func (p *parser) parseCallExpression() (ast.Expression, error) {
 
 	// Check for nil left expression
 	if left == nil {
-		return nil, fmt.Errorf("unexpected nil expression in call chain")
+		return nil, fmt.Errorf("unexpected nil expression in call chain at pos %d", p.pos)
 	}
 
 	// Loop para manejar chains como: obj.method().prop.method2()
@@ -2386,7 +2402,7 @@ func (p *parser) parseImportDeclaration() (*ast.ImportDeclaration, error) {
 
 			p.skipWhitespaceAndComments()
 			if p.matchKeyword("as") {
-				p.advance() // consume 'as'
+				p.advanceWord() // consume 'as'
 				p.skipWhitespaceAndComments()
 
 				local, err = p.parseIdentifier()
@@ -2470,7 +2486,7 @@ func (p *parser) parseImportDeclaration() (*ast.ImportDeclaration, error) {
 
 				p.skipWhitespaceAndComments()
 				if p.matchKeyword("as") {
-					p.advance() // consume 'as'
+					p.advanceWord() // consume 'as'
 					p.skipWhitespaceAndComments()
 
 					localNamed, err = p.parseIdentifier()
@@ -2548,7 +2564,7 @@ func (p *parser) parseExportDeclaration() (*ast.ExportDeclaration, error) {
 
 	// Handle export default
 	if p.matchKeyword("default") {
-		p.advance() // consume 'default'
+		p.advanceWord() // consume 'default'
 		p.skipWhitespaceAndComments()
 
 		// Parse the default export value
@@ -2612,7 +2628,7 @@ func (p *parser) parseExportDeclaration() (*ast.ExportDeclaration, error) {
 
 			p.skipWhitespaceAndComments()
 			if p.matchKeyword("as") {
-				p.advance() // consume 'as'
+				p.advanceWord() // consume 'as'
 				p.skipWhitespaceAndComments()
 
 				exported, err = p.parseIdentifier()
