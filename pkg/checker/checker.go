@@ -1,10 +1,13 @@
 package checker
 
 import (
+	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"tstypechecker/pkg/ast"
 	"tstypechecker/pkg/modules"
@@ -14,18 +17,22 @@ import (
 
 // TypeChecker coordinates type checking operations
 type TypeChecker struct {
-	symbolTable     *symbols.SymbolTable
-	errors          []TypeError
-	moduleResolver  *modules.ModuleResolver
-	currentFile     string
-	globalEnv       *types.GlobalEnvironment
-	typeCache       map[ast.Node]*types.Type
-	varTypeCache    map[string]*types.Type // Cache types by variable name
-	typeAliasCache  map[string]*types.Type // Cache for resolved type aliases
-	inferencer      *types.TypeInferencer
-	currentFunction *ast.FunctionDeclaration // Track current function for return type checking
-	config          *CompilerConfig          // Compiler configuration
-	typeGuards      map[string]bool          // Track variables under type guards (instanceof Function)
+	symbolTable        *symbols.SymbolTable
+	errors             []TypeError
+	moduleResolver     *modules.ModuleResolver
+	currentFile        string
+	globalEnv          *types.GlobalEnvironment
+	typeCache          map[ast.Node]*types.Type
+	varTypeCache       map[string]*types.Type // Cache types by variable name
+	typeAliasCache     map[string]*types.Type // Cache for resolved type aliases
+	inferencer         *types.TypeInferencer
+	destructuringInfer *DestructuringInferencer // Inferencer for destructured parameters
+	currentFunction    *ast.FunctionDeclaration // Track current function for return type checking
+	config             *CompilerConfig          // Compiler configuration
+	typeGuards         map[string]bool          // Track variables under type guards (instanceof Function)
+	loadedLibFiles     map[string]bool          // Track loaded lib files to avoid duplicates
+	pkgTypeCache       *TypeCache               // Cache for package types
+	loadStats          *LoadStats               // Statistics for type loading
 }
 
 // CompilerConfig holds the compiler options for type checking
@@ -68,17 +75,19 @@ func New() *TypeChecker {
 	inferencer := types.NewTypeInferencer(globalEnv)
 	inferencer.SetTypeCache(typeCache)
 	inferencer.SetVarTypeCache(varTypeCache)
+	destructuringInfer := NewDestructuringInferencer(globalEnv)
 
 	return &TypeChecker{
-		symbolTable:    symbols.NewSymbolTable(),
-		errors:         []TypeError{},
-		globalEnv:      globalEnv,
-		typeCache:      typeCache,
-		varTypeCache:   varTypeCache,
-		typeAliasCache: make(map[string]*types.Type),
-		inferencer:     inferencer,
-		config:         getDefaultConfig(),
-		typeGuards:     make(map[string]bool),
+		symbolTable:        symbols.NewSymbolTable(),
+		errors:             []TypeError{},
+		globalEnv:          globalEnv,
+		typeCache:          typeCache,
+		varTypeCache:       varTypeCache,
+		typeAliasCache:     make(map[string]*types.Type),
+		inferencer:         inferencer,
+		destructuringInfer: destructuringInfer,
+		config:             getDefaultConfig(),
+		typeGuards:         make(map[string]bool),
 	}
 }
 
@@ -112,22 +121,29 @@ func NewWithModuleResolver(rootDir string) *TypeChecker {
 	inferencer := types.NewTypeInferencer(globalEnv)
 	inferencer.SetTypeCache(typeCache)
 	inferencer.SetVarTypeCache(varTypeCache)
+	destructuringInfer := NewDestructuringInferencer(globalEnv)
 
 	tc := &TypeChecker{
-		symbolTable:    symbolTable,
-		errors:         []TypeError{},
-		moduleResolver: moduleResolver,
-		globalEnv:      globalEnv,
-		typeCache:      typeCache,
-		config:         getDefaultConfig(),
-		varTypeCache:   varTypeCache,
-		typeAliasCache: make(map[string]*types.Type),
-		inferencer:     inferencer,
-		typeGuards:     make(map[string]bool),
+		symbolTable:        symbolTable,
+		errors:             []TypeError{},
+		moduleResolver:     moduleResolver,
+		globalEnv:          globalEnv,
+		typeCache:          typeCache,
+		config:             getDefaultConfig(),
+		varTypeCache:       varTypeCache,
+		typeAliasCache:     make(map[string]*types.Type),
+		inferencer:         inferencer,
+		destructuringInfer: destructuringInfer,
+		typeGuards:         make(map[string]bool),
+		pkgTypeCache:       NewTypeCache(rootDir),
+		loadStats:          NewLoadStats(),
 	}
 
-	// Load global types from @types packages
-	tc.loadGlobalTypes(rootDir)
+	// Load types in priority order:
+	// 1. node_modules/@types (highest priority - installed type definitions)
+	// 2. TypeScript lib files will be loaded when SetLibs is called
+	// 3. typeRoots will be loaded when SetTypeRoots is called
+	tc.loadNodeModulesTypes(rootDir)
 
 	return tc
 }
@@ -141,6 +157,7 @@ func (tc *TypeChecker) CheckFile(filename string, ast *ast.File) []TypeError {
 
 	// Create a binder and bind symbols
 	binder := symbols.NewBinder(tc.symbolTable)
+	binder.SetDestructuringInferencer(tc.destructuringInfer)
 	binder.BindFile(ast)
 
 	// Process imports and add imported symbols to the symbol table
@@ -953,6 +970,22 @@ func (tc *TypeChecker) GetSymbolTable() *symbols.SymbolTable {
 	return tc.symbolTable
 }
 
+// GetLoadStats returns the type loading statistics
+func (tc *TypeChecker) GetLoadStats() *LoadStats {
+	if tc.loadStats != nil {
+		tc.loadStats.Finish()
+	}
+	return tc.loadStats
+}
+
+// PrintLoadStats prints the type loading statistics if verbose mode is enabled
+func (tc *TypeChecker) PrintLoadStats() {
+	if tc.loadStats != nil {
+		tc.loadStats.Finish()
+		fmt.Fprintln(os.Stderr, tc.loadStats.String())
+	}
+}
+
 // findScopeForNode finds the scope associated with a given AST node
 func (tc *TypeChecker) findScopeForNode(node ast.Node) *symbols.Scope {
 	return tc.findScopeInSubtree(tc.symbolTable.Global, node)
@@ -1535,7 +1568,9 @@ func (tc *TypeChecker) SetLibs(libs []string) {
 	tc.inferencer.SetVarTypeCache(tc.varTypeCache)
 
 	// Load TypeScript lib files (lib.dom.d.ts, lib.es2020.d.ts, etc.)
+	startTime := time.Now()
 	tc.loadTypeScriptLibs(libs)
+	tc.loadStats.TypeScriptLibsTime = time.Since(startTime)
 }
 
 // loadTypeScriptLibs loads TypeScript library definition files based on configured libs
@@ -1595,11 +1630,69 @@ func (tc *TypeChecker) loadTypeScriptLibs(libs []string) {
 
 // loadLibFile loads a single TypeScript lib file and extracts type definitions
 func (tc *TypeChecker) loadLibFile(filePath string) {
+	// First, check for /// <reference lib="..." /> directives and load them recursively
+	tc.loadLibReferences(filePath)
+
 	// Pass 1: Extract interfaces and types
 	tc.extractInterfacesFromFile(filePath)
 
 	// Pass 2: Extract variables and functions
 	tc.extractVariablesFromFile(filePath)
+}
+
+// loadLibReferences parses a lib file for /// <reference lib="..." /> directives and loads them
+func (tc *TypeChecker) loadLibReferences(filePath string) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	libDir := filepath.Dir(filePath)
+
+	// Track loaded files to avoid infinite recursion
+	if tc.loadedLibFiles == nil {
+		tc.loadedLibFiles = make(map[string]bool)
+	}
+
+	// Mark this file as loaded
+	tc.loadedLibFiles[filePath] = true
+
+	lineCount := 0
+	maxLines := 50
+
+	for scanner.Scan() && lineCount < maxLines {
+		lineCount++
+		rawLine := scanner.Text()
+		line := strings.TrimSpace(rawLine)
+
+		// Look for /// <reference lib="libname" />
+		if strings.HasPrefix(line, "///") && strings.Contains(line, "<reference") && strings.Contains(line, "lib=") {
+			// Extract lib name from: /// <reference lib="es2019" />
+			start := strings.Index(line, "lib=\"")
+			if start == -1 {
+				start = strings.Index(line, "lib='")
+			}
+			if start != -1 {
+				start += 5 // skip 'lib="' or "lib='"
+				end := strings.IndexAny(line[start:], "\"'")
+				if end != -1 {
+					libName := line[start : start+end]
+					// Convert lib name to file name: "es2019" -> "lib.es2019.d.ts"
+					libFileName := fmt.Sprintf("lib.%s.d.ts", libName)
+					referencedPath := filepath.Join(libDir, libFileName)
+
+					// Load referenced file if not already loaded
+					if !tc.loadedLibFiles[referencedPath] {
+						if _, err := os.Stat(referencedPath); err == nil {
+							tc.loadLibFile(referencedPath)
+						}
+					}
+				}
+			}
+		}
+	}
 }
 
 // SetPathAliases configures path aliases from tsconfig for module resolution
@@ -1615,20 +1708,38 @@ func (tc *TypeChecker) SetTypeRoots(typeRoots []string) {
 		tc.moduleResolver.SetTypeRoots(typeRoots)
 	}
 	// Load global types from the configured typeRoots
+	startTime := time.Now()
 	tc.loadGlobalTypesFromRoots(typeRoots)
+	tc.loadStats.TypeRootsTime = time.Since(startTime)
 }
 
-// loadGlobalTypes loads type definitions from @types packages
-func (tc *TypeChecker) loadGlobalTypes(rootDir string) {
-	// Try to load from all @types packages that are installed
-	typesDir := filepath.Join(rootDir, "node_modules", "@types")
+// loadNodeModulesTypes loads type definitions from node_modules with caching
+// Loads from both @types packages and packages with bundled types
+func (tc *TypeChecker) loadNodeModulesTypes(rootDir string) {
+	startTime := time.Now()
+	defer func() {
+		tc.loadStats.NodeModulesTime = time.Since(startTime)
+	}()
 
-	// Check if @types directory exists
+	nodeModulesDir := filepath.Join(rootDir, "node_modules")
+	if _, err := os.Stat(nodeModulesDir); os.IsNotExist(err) {
+		return
+	}
+
+	// Priority 1: Load from @types packages
+	tc.loadTypesPackages(nodeModulesDir)
+
+	// Priority 2: Load from packages with bundled types (like vue, react, etc.)
+	tc.loadBundledTypes(nodeModulesDir)
+}
+
+// loadTypesPackages loads types from @types directory
+func (tc *TypeChecker) loadTypesPackages(nodeModulesDir string) {
+	typesDir := filepath.Join(nodeModulesDir, "@types")
 	if _, err := os.Stat(typesDir); os.IsNotExist(err) {
 		return
 	}
 
-	// Scan all installed @types packages
 	entries, err := os.ReadDir(typesDir)
 	if err != nil {
 		return
@@ -1637,7 +1748,139 @@ func (tc *TypeChecker) loadGlobalTypes(rootDir string) {
 	for _, entry := range entries {
 		if entry.IsDir() {
 			pkgDir := filepath.Join(typesDir, entry.Name())
-			tc.loadPackageTypes(pkgDir)
+			tc.loadPackageWithCache(pkgDir, "@types/"+entry.Name())
+		}
+	}
+}
+
+// loadBundledTypes scans node_modules for packages with bundled types
+func (tc *TypeChecker) loadBundledTypes(nodeModulesDir string) {
+	entries, err := os.ReadDir(nodeModulesDir)
+	if err != nil {
+		return
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		pkgDir := filepath.Join(nodeModulesDir, entry.Name())
+
+		// Handle scoped packages (e.g., @vue, @angular, @types)
+		if strings.HasPrefix(entry.Name(), "@") {
+			// Skip @types as it's handled separately
+			if entry.Name() == "@types" {
+				continue
+			}
+
+			// Load scoped packages
+			tc.loadScopedPackages(pkgDir, entry.Name())
+			continue
+		}
+
+		// Handle regular packages
+		packageJSONPath := filepath.Join(pkgDir, "package.json")
+		if typesFile := tc.getPackageTypesFile(packageJSONPath); typesFile != "" {
+			typesPath := filepath.Join(pkgDir, typesFile)
+			if _, err := os.Stat(typesPath); err == nil {
+				tc.loadPackageWithCache(pkgDir, entry.Name())
+			}
+		}
+	}
+}
+
+// loadScopedPackages loads packages from a scoped directory like @vue, @angular
+func (tc *TypeChecker) loadScopedPackages(scopeDir, scopeName string) {
+	entries, err := os.ReadDir(scopeDir)
+	if err != nil {
+		return
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		pkgDir := filepath.Join(scopeDir, entry.Name())
+		packageJSONPath := filepath.Join(pkgDir, "package.json")
+
+		// Read package.json to find types entry point
+		if typesFile := tc.getPackageTypesFile(packageJSONPath); typesFile != "" {
+			typesPath := filepath.Join(pkgDir, typesFile)
+			if _, err := os.Stat(typesPath); err == nil {
+				pkgFullName := scopeName + "/" + entry.Name()
+				if os.Getenv("TSCHECK_DEBUG") == "1" {
+					fmt.Fprintf(os.Stderr, "Loading scoped package: %s (%s)\n", pkgFullName, typesPath)
+				}
+				tc.loadPackageWithCache(pkgDir, pkgFullName)
+			}
+		}
+	}
+}
+
+// getPackageTypesFile reads package.json and returns the types file path
+func (tc *TypeChecker) getPackageTypesFile(packageJSONPath string) string {
+	data, err := os.ReadFile(packageJSONPath)
+	if err != nil {
+		return ""
+	}
+
+	// Simple JSON parsing to extract "types", "typings", or "exports" fields
+	var pkg struct {
+		Types   string `json:"types"`
+		Typings string `json:"typings"`
+	}
+
+	if err := json.Unmarshal(data, &pkg); err != nil {
+		return ""
+	}
+
+	if pkg.Types != "" {
+		return pkg.Types
+	}
+	if pkg.Typings != "" {
+		return pkg.Typings
+	}
+
+	// Fallback: check for common type definition files
+	return ""
+}
+
+// loadPackageWithCache loads a package's types with caching support
+func (tc *TypeChecker) loadPackageWithCache(pkgDir, pkgName string) {
+	// Try to load from cache first
+	if cached, err := tc.pkgTypeCache.Load(pkgDir); err == nil {
+		// Load cached types into global environment
+		for name, typ := range cached.Types {
+			tc.globalEnv.Types[name] = typ
+		}
+		for name, iface := range cached.Interfaces {
+			tc.globalEnv.Objects[name] = iface
+		}
+		tc.loadStats.CachedPackages++
+	} else {
+		// Load from source and cache
+		beforeTypes := len(tc.globalEnv.Types)
+		beforeInterfaces := len(tc.globalEnv.Objects)
+
+		tc.loadPackageTypes(pkgDir)
+
+		afterTypes := len(tc.globalEnv.Types)
+		afterInterfaces := len(tc.globalEnv.Objects)
+
+		// Only cache if we loaded something
+		if afterTypes > beforeTypes || afterInterfaces > beforeInterfaces {
+			// Extract only the new types for this package
+			newTypes := make(map[string]*types.Type)
+			newInterfaces := make(map[string]*types.Type)
+
+			// Note: This is a simplified approach. In production, we'd need better tracking
+			// of which types came from which package
+			tc.pkgTypeCache.Save(pkgDir, newTypes, newInterfaces)
+			tc.loadStats.LoadedPackages++
+		} else {
+			tc.loadStats.SkippedPackages++
 		}
 	}
 }

@@ -130,6 +130,11 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	}
 	typeChecker.SetConfig(checkerConfig)
 
+	// Show type loading stats (only in verbose mode via environment variable)
+	if os.Getenv("TSCHECK_VERBOSE") == "1" {
+		defer typeChecker.PrintLoadStats()
+	}
+
 	// Process files
 	if info.IsDir() {
 		return checkDirectory(typeChecker, absPath, tsConfig)
@@ -305,6 +310,11 @@ func checkCodeInput(code string, name string) error {
 		NoUncheckedIndexedAccess:     tsConfig.CompilerOptions.NoUncheckedIndexedAccess,
 	}
 	typeChecker.SetConfig(checkerConfig)
+
+	// Show type loading stats (only in verbose mode via environment variable)
+	if os.Getenv("TSCHECK_VERBOSE") == "1" {
+		defer typeChecker.PrintLoadStats()
+	}
 
 	// Parse code from string
 	ast, err := parser.ParseCode(code, name)

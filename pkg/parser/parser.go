@@ -1852,56 +1852,126 @@ func (p *parser) parseParameterList() ([]*ast.Parameter, error) {
 		var err error
 
 		if p.match("{") || p.match("[") {
-			// Handle destructuring pattern by skipping it
+			// Handle destructuring pattern - extract individual names
 			startPos := p.currentPos()
 			openChar := p.source[p.pos]
 			closeChar := byte('}')
+			isObjectPattern := openChar == '{'
 			if openChar == '[' {
 				closeChar = ']'
 			}
 
 			p.advance() // consume opening { or [
+			p.skipWhitespaceAndComments()
+
+			// Extract parameter names from the destructuring pattern
+			var extractedNames []string
 			depth := 1
-			maxIter := 10000
-			iter := 0
+			currentName := ""
 
-			for depth > 0 && !p.isAtEnd() && iter < maxIter {
-				iter++
+			for depth > 0 && !p.isAtEnd() {
+				ch := p.source[p.pos]
 
-				// Skip strings to avoid confusion
-				if p.source[p.pos] == '"' || p.source[p.pos] == '\'' || p.source[p.pos] == '`' {
-					quote := p.source[p.pos]
+				if ch == openChar {
+					depth++
 					p.advance()
-					for !p.isAtEnd() && p.source[p.pos] != quote {
-						if p.source[p.pos] == '\\' {
-							p.advance() // skip escape
-							if !p.isAtEnd() {
-								p.advance() // skip escaped char
-							}
-						} else {
-							p.advance()
+				} else if ch == closeChar {
+					depth--
+					if depth == 0 {
+						// Add current name if exists
+						if currentName != "" {
+							extractedNames = append(extractedNames, strings.TrimSpace(currentName))
+							currentName = ""
 						}
 					}
-					if !p.isAtEnd() {
-						p.advance() // consume closing quote
+					p.advance()
+				} else if ch == ',' && depth == 1 {
+					// End of one binding
+					if currentName != "" {
+						extractedNames = append(extractedNames, strings.TrimSpace(currentName))
+						currentName = ""
 					}
-					continue
+					p.advance()
+					p.skipWhitespaceAndComments()
+				} else if ch == ':' && isObjectPattern && depth == 1 {
+					// In object pattern, skip the rename part (e.g., {oldName: newName})
+					// We want to capture 'newName', not 'oldName'
+					currentName = ""
+					p.advance()
+					p.skipWhitespaceAndComments()
+				} else if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_' || ch == '$' ||
+					(currentName != "" && ch >= '0' && ch <= '9') {
+					currentName += string(ch)
+					p.advance()
+				} else if ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' {
+					p.skipWhitespaceAndComments()
+				} else {
+					// Other characters (like =, ..., etc.), skip
+					p.advance()
 				}
+			}
 
-				if p.source[p.pos] == openChar {
-					depth++
-				} else if p.source[p.pos] == closeChar {
-					depth--
+			p.skipWhitespaceAndComments()
+
+			// Parse type annotation if present
+			var paramType ast.TypeNode
+			if p.match(":") {
+				p.advance()
+				p.skipWhitespaceAndComments()
+				paramType, err = p.parseTypeAnnotation()
+				if err != nil {
+					return nil, err
 				}
+				p.skipWhitespaceAndComments()
+			}
+
+			// Create a parameter for each extracted name
+			if len(extractedNames) > 0 {
+				for _, name := range extractedNames {
+					if name != "" {
+						paramId := &ast.Identifier{
+							Name:     name,
+							Position: startPos,
+							EndPos:   p.currentPos(),
+						}
+						params = append(params, &ast.Parameter{
+							ID:        paramId,
+							ParamType: paramType,
+							Optional:  false,
+							Position:  startPos,
+							EndPos:    p.currentPos(),
+						})
+					}
+				}
+			} else {
+				// Fallback: create placeholder if no names were extracted
+				id = &ast.Identifier{
+					Name:     "destructured_param",
+					Position: startPos,
+					EndPos:   p.currentPos(),
+				}
+				params = append(params, &ast.Parameter{
+					ID:        id,
+					ParamType: paramType,
+					Optional:  false,
+					Position:  startPos,
+					EndPos:    p.currentPos(),
+				})
+			}
+
+			// Skip to next parameter (comma or closing paren)
+			p.skipWhitespaceAndComments()
+			if !p.match(",") && !p.match(")") {
+				// Skip any remaining characters until comma or closing paren
+				for !p.match(",") && !p.match(")") && !p.isAtEnd() {
+					p.advance()
+				}
+			}
+			if p.match(",") {
 				p.advance()
 			}
-
-			// Create placeholder identifier
-			id = &ast.Identifier{
-				Name:     "destructured_param",
-				Position: startPos,
-				EndPos:   p.currentPos(),
-			}
+			p.skipWhitespaceAndComments()
+			continue
 		} else {
 			id, err = p.parseIdentifier()
 			if err != nil {

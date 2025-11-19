@@ -122,7 +122,17 @@ func (b *Binder) bindFunctionDeclaration(decl *ast.FunctionDeclaration) {
 	// Define parameters in the function scope
 	for _, param := range decl.Params {
 		if param.ID != nil {
-			b.table.DefineSymbol(param.ID.Name, ParameterSymbol, param, false)
+			symbol := b.table.DefineSymbol(param.ID.Name, ParameterSymbol, param, false)
+
+			// Mark known Vue composition API context properties as functions
+			// These come from setup(props, { emit, expose, slots, attrs })
+			vueContextFunctions := []string{"emit", "expose"}
+			for _, fnName := range vueContextFunctions {
+				if param.ID.Name == fnName {
+					symbol.IsFunction = true
+					break
+				}
+			}
 		}
 	}
 
@@ -194,7 +204,12 @@ func (b *Binder) bindExpression(expr ast.Expression) {
 		for _, prop := range e.Properties {
 			switch p := prop.(type) {
 			case *ast.Property:
-				b.bindExpression(p.Value)
+				// Check if the property value is a function expression
+				if fnExpr, ok := p.Value.(*ast.FunctionExpression); ok {
+					b.bindFunctionExpression(fnExpr)
+				} else {
+					b.bindExpression(p.Value)
+				}
 			case *ast.SpreadElement:
 				b.bindExpression(p.Argument)
 			}
@@ -430,6 +445,35 @@ func (b *Binder) bindConditionalExpression(expr *ast.ConditionalExpression) {
 	}
 }
 
+func (b *Binder) bindFunctionExpression(fnExpr *ast.FunctionExpression) {
+	// Create a new scope for the function expression
+	b.table.EnterScope(fnExpr)
+
+	// Define parameters in the function scope
+	for _, param := range fnExpr.Params {
+		if param.ID != nil {
+			symbol := b.table.DefineSymbol(param.ID.Name, ParameterSymbol, param, false)
+
+			// Mark known Vue composition API context properties as functions
+			vueContextFunctions := []string{"emit", "expose"}
+			for _, fnName := range vueContextFunctions {
+				if param.ID.Name == fnName {
+					symbol.IsFunction = true
+					break
+				}
+			}
+		}
+	}
+
+	// Bind the function body
+	if fnExpr.Body != nil {
+		b.bindBlockStatement(fnExpr.Body)
+	}
+
+	// Exit the function scope
+	b.table.ExitScope()
+}
+
 func (b *Binder) bindArrowFunction(arrow *ast.ArrowFunctionExpression) {
 	// Create a new scope for the arrow function
 	b.table.EnterScope(arrow)
@@ -563,6 +607,16 @@ func (b *Binder) bindClassDeclaration(decl *ast.ClassDeclaration) {
 								Node:     param,
 								DeclSpan: param.Pos(),
 							}
+
+							// Mark known Vue composition API context properties as functions
+							vueContextFunctions := []string{"emit", "expose"}
+							for _, fnName := range vueContextFunctions {
+								if param.ID.Name == fnName {
+									paramSymbol.IsFunction = true
+									break
+								}
+							}
+
 							b.table.Current.Symbols[paramSymbol.Name] = paramSymbol
 						}
 					}

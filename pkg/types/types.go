@@ -97,6 +97,7 @@ type Type struct {
 	ReturnType  *Type       // Para funciones
 	Types       []*Type     // Para unions/intersections
 	Value       interface{} // Para literal types
+	IsFunction  bool        // Indica si el tipo es una función callable
 
 	// Para mapped types: { [K in keyof T]: U }
 	TypeParameter *Type // K
@@ -408,3 +409,9 @@ var (
 	Symbol    = NewPrimitiveType(SymbolType)
 	BigInt    = NewPrimitiveType(BigIntType)
 )
+
+// ParameterTypeInferencer interface for inferring types of destructured parameters
+type ParameterTypeInferencer interface {
+	// InferDestructuredParamType infers the type of a destructured parameter property
+	InferDestructuredParamType(functionName string, paramIndex int, propertyName string) *Type
+}
