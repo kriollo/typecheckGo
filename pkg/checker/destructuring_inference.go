@@ -32,7 +32,9 @@ func (di *DestructuringInferencer) InferDestructuredParamType(
 	propertyName string,
 ) *types.Type {
 	// Special handling for Vue's setup function second parameter (SetupContext)
-	if functionName == "setup" && paramIndex == 1 {
+	// Note: paramIndex might be >= 1 because the parser creates multiple parameters
+	// for destructured properties (e.g., setup(props, { emit, expose }) creates 3 params)
+	if functionName == "setup" && paramIndex >= 1 {
 		// Known properties from Vue's SetupContext that are functions
 		vueSetupContextFunctions := map[string]bool{
 			"emit":   true,
@@ -55,9 +57,7 @@ func (di *DestructuringInferencer) InferDestructuredParamType(
 		if setupContext != nil {
 			return di.getPropertyType(setupContext, propertyName)
 		}
-	}
-
-	// First, try to find the function definition
+	} // First, try to find the function definition
 	funcType := di.findFunctionDefinition(functionName)
 	if funcType == nil {
 		return nil
