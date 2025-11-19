@@ -188,6 +188,8 @@ type ExportDeclaration struct {
 	Declaration Statement // can be VariableDeclaration, FunctionDeclaration, etc.
 	Specifiers  []ExportSpecifier
 	Source      *Literal // for re-exports
+	IsWildcard  bool
+	Exported    *Identifier // for export * as name
 	Position    Position
 	EndPos      Position
 }
@@ -392,6 +394,17 @@ func (i *IntersectionType) Type() string  { return "IntersectionType" }
 func (i *IntersectionType) Pos() Position { return i.Position }
 func (i *IntersectionType) End() Position { return i.EndPos }
 func (i *IntersectionType) typeNode()     {}
+
+type TupleType struct {
+	Elements []TypeNode
+	Position Position
+	EndPos   Position
+}
+
+func (t *TupleType) Type() string  { return "TupleType" }
+func (t *TupleType) Pos() Position { return t.Position }
+func (t *TupleType) End() Position { return t.EndPos }
+func (t *TupleType) typeNode()     {}
 
 // LiteralType represents a literal type like 'foo' or 42
 type LiteralType struct {
@@ -681,6 +694,7 @@ func (t *TypeParameter) typeNode()     {}
 type ClassDeclaration struct {
 	ID             *Identifier
 	SuperClass     *Identifier // extends clause
+	Implements     []TypeNode  // implements clause
 	Body           []ClassMember
 	TypeParameters []TypeNode // Generic type parameters
 	Position       Position
@@ -827,3 +841,29 @@ type TemplateElementValue struct {
 	Raw    string
 	Cooked string
 }
+
+// EnumDeclaration represents an enum declaration
+type EnumDeclaration struct {
+	Name     *Identifier
+	Members  []*EnumMember
+	Position Position
+	EndPos   Position
+}
+
+func (e *EnumDeclaration) Type() string  { return "EnumDeclaration" }
+func (e *EnumDeclaration) Pos() Position { return e.Position }
+func (e *EnumDeclaration) End() Position { return e.EndPos }
+func (e *EnumDeclaration) stmtNode()     {}
+func (e *EnumDeclaration) declNode()     {}
+
+// EnumMember represents a member of an enum
+type EnumMember struct {
+	Name     *Identifier
+	Value    Expression // can be nil
+	Position Position
+	EndPos   Position
+}
+
+func (e *EnumMember) Type() string  { return "EnumMember" }
+func (e *EnumMember) Pos() Position { return e.Position }
+func (e *EnumMember) End() Position { return e.EndPos }
