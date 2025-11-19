@@ -1,0 +1,1 @@
+export let tuple: [string, number] = ["hello", 42];

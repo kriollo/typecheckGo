@@ -1,0 +1,1 @@
+export let mixed: (string | number)[] = ["a", 1];

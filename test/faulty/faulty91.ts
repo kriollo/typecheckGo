@@ -1,0 +1,1 @@
+export const readonlyObj: Readonly<{ name: string }> = { name: 123 };

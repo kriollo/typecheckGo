@@ -1,0 +1,1 @@
+export let flag: boolean = 1;

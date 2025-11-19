@@ -1,0 +1,1 @@
+var name: string = 123;

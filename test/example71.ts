@@ -1,0 +1,1 @@
+export async function fetchData(): Promise<string> { return "data"; }

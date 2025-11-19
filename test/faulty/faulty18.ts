@@ -1,0 +1,1 @@
+var readonlyArr: readonly number[] = ["readonly"];

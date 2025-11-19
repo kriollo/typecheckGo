@@ -1,0 +1,2 @@
+async function awaitMultiple() { const [a, b] = await Promise.all([Promise.resolve(1), Promise.resolve(2)]); return a + b; }
+var am: string = awaitMultiple();

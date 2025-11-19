@@ -1,0 +1,1 @@
+var nums: Array<number> = [4,5,6];

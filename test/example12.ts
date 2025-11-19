@@ -1,0 +1,1 @@
+var list: string[] = ["a","b"];

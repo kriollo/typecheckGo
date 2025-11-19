@@ -1,0 +1,1 @@
+export { constant as renamedConstant } from './example61';
