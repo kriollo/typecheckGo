@@ -144,6 +144,28 @@
 - ✅ **Soporte para propiedades anidadas**
 - ✅ **Integración con type inference**
 
+### Vue 3 Support (COMPLETADO)
+- ✅ **Destructuring en parámetros de setup**: Parser extrae nombres individuales de patrones como `{ emit }`
+- ✅ **Inferencia de tipos para Vue setup context**: Detecta automáticamente `emit` y `expose` como funciones
+- ✅ **Scope chain mejorado**: Los parámetros destructurados son accesibles en funciones anidadas
+- ✅ **Binding especial para defineComponent**: Manejo específico de la función `setup` en componentes Vue
+
+**Problema Resuelto**: El parser tenía código HACK que creaba un placeholder `"destructured_param"` en lugar de extraer los nombres individuales de patrones de destructuring. Esto causaba que `emit` no se encontrara en el scope. Se implementaron los siguientes fixes:
+
+1. **Parser mejorado** (`pkg/parser/parser.go`):
+   - Función `extractDestructuringNames()` que extrae nombres individuales de patrones como `{ emit, expose }`
+   - Aplicado en `parseArrowFunction()` y `parseObjectLiteral()` para parámetros de métodos
+   - Maneja correctamente `:` para aliases y `,` como separador
+
+2. **Binder específico para Vue** (`pkg/symbols/binder.go`):
+   - `bindSetupArrowFunction()` y `bindSetupFunction()` crean símbolos para cada parámetro destructurado
+   - Llama al inferenciador para detectar el tipo de cada propiedad
+
+3. **Inferenciador de tipos** (`pkg/checker/destructuring_inference.go`):
+   - Detecta cuando `functionName == "setup"` y `paramIndex == 1` (segundo parámetro)
+   - Marca conocidas propiedades de Vue's SetupContext como funciones: `emit`, `expose`
+   - Fallback a búsqueda de tipos cargados si están disponibles
+
 ### Pendiente (Características Avanzadas)
 - ⏳ **infer keyword** en conditional types
 - ⏳ **Mapped type modifiers**: `+readonly`, `-readonly`, `+?`, `-?`

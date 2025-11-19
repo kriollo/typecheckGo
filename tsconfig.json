@@ -3,14 +3,23 @@
         "target": "ES2020",
         "module": "nodenext",
         "declaration": true,
-        "lib": ["ES2020", "DOM"],
+        "lib": [
+            "ES2020",
+            "DOM"
+        ],
         "outDir": "./dist",
         "rootDir": "./",
         "baseUrl": "./",
         "paths": {
-            "@/*": ["src/*"],
-            "P@/*": ["./assets/*"],
-            "N@/*": ["./node_modules/*"]
+            "@/*": [
+                "./src/*"
+            ],
+            "P@/*": [
+                "./assets/*"
+            ],
+            "N@/*": [
+                "./node_modules/*"
+            ]
         },
         "strict": true,
         "noImplicitAny": false,
@@ -22,8 +31,20 @@
         "allowJs": false,
         "checkJs": false,
         "moduleResolution": "nodenext",
-        "typeRoots": ["./node_modules/@types", "./types", "./src/jscontrollers/types", "./src/types"]
+        "typeRoots": [
+            "./node_modules/@types",
+            "./types",
+            "./src/jscontrollers/types",
+            "./src/types"
+        ]
     },
-    "include": ["test/**/*", "pkg/**/*"],
-    "exclude": ["node_modules", "dist", "**/*.spec.ts"]
+    "include": [
+        "test/**/*",
+        "pkg/**/*"
+    ],
+    "exclude": [
+        "node_modules",
+        "dist",
+        "**/*.spec.ts"
+    ]
 }

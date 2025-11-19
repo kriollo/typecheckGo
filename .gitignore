@@ -7,3 +7,4 @@ package-lock.json
 .env.production.local
 dist
 
+.tscheck_cache

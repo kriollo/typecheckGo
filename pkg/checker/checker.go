@@ -725,13 +725,55 @@ func (tc *TypeChecker) checkCallExpression(call *ast.CallExpression, filename st
 				// Check parameter count
 				// Skip validation for symbols from .d.ts files (they may have complex overloads)
 				if len(symbol.Params) > 0 && !symbol.FromDTS {
-					expectedCount := len(symbol.Params)
-					actualCount := len(call.Arguments)
-					if actualCount != expectedCount {
-						msg := fmt.Sprintf("Expected %d arguments, but got %d.", expectedCount, actualCount)
+					// Count required and total parameters from the AST node
+					requiredCount := len(symbol.Params)
+					totalCount := len(symbol.Params)
+					hasRest := false
 
-						if actualCount < expectedCount {
-							msg += fmt.Sprintf("\n  Sugerencia: La función '%s' requiere %d argumento(s)", id.Name, expectedCount)
+					// Try to get parameter info from the AST node
+					if funcDecl, ok := symbol.Node.(*ast.FunctionDeclaration); ok && funcDecl != nil {
+						requiredCount = 0
+						totalCount = len(funcDecl.Params)
+						for _, param := range funcDecl.Params {
+							if param.Rest {
+								hasRest = true
+								break
+							}
+							if !param.Optional {
+								requiredCount++
+							}
+						}
+					} else if varDeclarator, ok := symbol.Node.(*ast.VariableDeclarator); ok && varDeclarator != nil {
+						// Arrow function assigned to variable
+						if arrowFunc, ok := varDeclarator.Init.(*ast.ArrowFunctionExpression); ok && arrowFunc != nil {
+							requiredCount = 0
+							totalCount = len(arrowFunc.Params)
+							for _, param := range arrowFunc.Params {
+								if param.Rest {
+									hasRest = true
+									break
+								}
+								if !param.Optional {
+									requiredCount++
+								}
+							}
+						}
+					}
+
+					actualCount := len(call.Arguments)
+
+					// If has rest parameter, only check minimum required
+					if hasRest {
+						if actualCount < requiredCount {
+							msg := fmt.Sprintf("Expected at least %d arguments, but got %d.", requiredCount, actualCount)
+							msg += fmt.Sprintf("\n  Sugerencia: La función '%s' requiere al menos %d argumento(s)", id.Name, requiredCount)
+							tc.addError(filename, call.Pos().Line, call.Pos().Column, msg, "TS2554", "error")
+						}
+					} else if actualCount < requiredCount || actualCount > totalCount {
+						var msg string
+						if actualCount < requiredCount {
+							msg = fmt.Sprintf("Expected %d arguments, but got %d.", requiredCount, actualCount)
+							msg += fmt.Sprintf("\n  Sugerencia: La función '%s' requiere %d argumento(s)", id.Name, requiredCount)
 							if len(symbol.Params) > 0 {
 								msg += "\n  Parámetros esperados:"
 								for i, param := range symbol.Params {
@@ -741,9 +783,9 @@ func (tc *TypeChecker) checkCallExpression(call *ast.CallExpression, filename st
 								}
 							}
 						} else {
-							msg += fmt.Sprintf("\n  Sugerencia: La función '%s' solo acepta %d argumento(s)", id.Name, expectedCount)
+							msg = fmt.Sprintf("Expected %d arguments, but got %d.", totalCount, actualCount)
+							msg += fmt.Sprintf("\n  Sugerencia: La función '%s' solo acepta %d argumento(s)", id.Name, totalCount)
 						}
-
 						tc.addError(filename, call.Pos().Line, call.Pos().Column, msg, "TS2554", "error")
 					}
 				}

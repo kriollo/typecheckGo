@@ -1519,14 +1519,16 @@ func (p *parser) parsePostfixExpression() (ast.Expression, error) {
 
 	p.skipWhitespaceAndComments()
 
-	// Check for type assertion: expr as Type
-	if p.matchKeyword("as") {
+	// Check for type assertion: expr as Type (can be chained: expr as T1 as T2)
+	iterations := 0
+	for p.matchKeyword("as") && iterations < maxParserIterations {
+		iterations++
 		p.advanceWord()
 		p.skipWhitespaceAndComments()
 		// Skip the type annotation (can be union type: Type1 | Type2)
 		p.skipTypeAnnotation()
-		// Return original expression (type assertion is compile-time only)
-		return expr, nil
+		p.skipWhitespaceAndComments()
+		// Continue to check for more 'as' keywords
 	}
 
 	// Check for postfix ++ or --
@@ -1691,7 +1693,41 @@ func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 			return p.parseArrowFunction()
 		}
 
-		// Not a generic arrow function, restore
+		// Try to parse as type assertion: <Type>expression
+		// Look for pattern: <Type> followed by expression (not an operator)
+		p.pos = savedPos
+		p.advance() // consume <
+		p.skipWhitespaceAndComments()
+
+		// Try to skip the type
+		canBeTypeAssertion := false
+		if p.matchIdentifier() {
+			p.skipTypeAnnotation()
+			p.skipWhitespaceAndComments()
+			// Check if followed by >
+			if p.match(">") {
+				p.advance()
+				p.skipWhitespaceAndComments()
+				// Check if followed by something that can start an expression
+				// (not an operator like <, >, =, etc.)
+				if p.match("{") || p.match("[") || p.match("(") || p.matchIdentifier() ||
+					p.match("\"") || p.match("'") || p.match("`") || p.matchNumber() {
+					canBeTypeAssertion = true
+				}
+			}
+		}
+
+		if canBeTypeAssertion {
+			// Parse the expression after the type assertion
+			expr, err := p.parseUnaryExpression()
+			if err != nil {
+				return nil, err
+			}
+			// Return the expression (type assertion is compile-time only)
+			return expr, nil
+		}
+
+		// Not a type assertion, restore
 		p.pos = savedPos
 	}
 
@@ -1719,9 +1755,49 @@ func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 			if p.match("=") && p.peek(1) == ">" {
 				isArrowFunc = true
 			}
-		} else if p.match("{") {
-			// Destructuring param ({...}) => ...
-			isArrowFunc = true
+		} else if p.match("{") || p.match("[") {
+			// Could be destructuring param ({...}) => ... or ([...]) => ...
+			// Or grouped object/array literal ({...}) or ([...])
+			// Need to look ahead further to determine
+			tempPos := p.pos
+			depth := 1
+			openChar := p.current()
+			closeChar := "}"
+			if openChar == "[" {
+				closeChar = "]"
+			}
+			p.advance() // consume { or [
+
+			// Skip the entire object/array destructuring pattern
+			for depth > 0 && !p.isAtEnd() {
+				if string(p.current()) == string(openChar) {
+					depth++
+				} else if string(p.current()) == closeChar {
+					depth--
+				}
+				p.advance()
+			}
+
+			p.skipWhitespaceAndComments()
+
+			// Check if followed by ): Type => or ) =>
+			if p.match(")") {
+				p.advance()
+				p.skipWhitespaceAndComments()
+				// Check for return type annotation
+				if p.match(":") {
+					p.advance()
+					p.skipWhitespaceAndComments()
+					p.skipTypeAnnotation()
+					p.skipWhitespaceAndComments()
+				}
+				if p.match("=") && p.peek(1) == ">" {
+					isArrowFunc = true
+				}
+			}
+
+			// Restore position
+			p.pos = tempPos
 		} else if p.matchIdentifier() {
 			// Could be (x) => ... or (x, y) => ...
 			// Save position and try to parse params
@@ -2119,6 +2195,7 @@ func (p *parser) parseParameterList() ([]*ast.Parameter, error) {
 							ID:        paramId,
 							ParamType: paramType,
 							Optional:  false,
+							Rest:      isRest,
 							Position:  startPos,
 							EndPos:    p.currentPos(),
 						})
@@ -2135,6 +2212,7 @@ func (p *parser) parseParameterList() ([]*ast.Parameter, error) {
 					ID:        id,
 					ParamType: paramType,
 					Optional:  false,
+					Rest:      isRest,
 					Position:  startPos,
 					EndPos:    p.currentPos(),
 				})
@@ -2180,9 +2258,40 @@ func (p *parser) parseParameterList() ([]*ast.Parameter, error) {
 			}
 		}
 
+		// Handle default value (= expression)
+		hasDefault := false
+		p.skipWhitespaceAndComments()
+		if p.match("=") {
+			hasDefault = true
+			p.advance() // consume '='
+			p.skipWhitespaceAndComments()
+
+			// Parse the default value expression but don't store it
+			// We need to skip until we find a comma or closing paren
+			depth := 0
+			for !p.isAtEnd() {
+				if p.match("(") || p.match("[") || p.match("{") {
+					depth++
+					p.advance()
+				} else if p.match(")") || p.match("]") || p.match("}") {
+					if depth == 0 && p.match(")") {
+						break // End of parameter list
+					}
+					depth--
+					p.advance()
+				} else if p.match(",") && depth == 0 {
+					break // Next parameter
+				} else {
+					p.advance()
+				}
+			}
+		}
+
 		param := &ast.Parameter{
 			ID:        id,
 			ParamType: paramType,
+			Optional:  hasDefault,
+			Rest:      isRest,
 			Position:  id.Pos(),
 			EndPos:    p.currentPos(),
 		}
@@ -2589,6 +2698,45 @@ func (p *parser) parseExportDeclaration() (*ast.ExportDeclaration, error) {
 
 		return &ast.ExportDeclaration{
 			Declaration: varDecl,
+			Position:    startPos,
+			EndPos:      p.currentPos(),
+		}, nil
+	}
+
+	if p.matchKeyword("type") {
+		typeAliasDecl, err := p.parseTypeAliasDeclaration()
+		if err != nil {
+			return nil, err
+		}
+
+		return &ast.ExportDeclaration{
+			Declaration: typeAliasDecl,
+			Position:    startPos,
+			EndPos:      p.currentPos(),
+		}, nil
+	}
+
+	if p.matchKeyword("interface") {
+		interfaceDecl, err := p.parseInterfaceDeclaration()
+		if err != nil {
+			return nil, err
+		}
+
+		return &ast.ExportDeclaration{
+			Declaration: interfaceDecl,
+			Position:    startPos,
+			EndPos:      p.currentPos(),
+		}, nil
+	}
+
+	if p.matchKeyword("class") {
+		classDecl, err := p.parseClassDeclaration()
+		if err != nil {
+			return nil, err
+		}
+
+		return &ast.ExportDeclaration{
+			Declaration: classDecl,
 			Position:    startPos,
 			EndPos:      p.currentPos(),
 		}, nil
@@ -3397,6 +3545,18 @@ func (p *parser) parseObjectLiteral() (*ast.ObjectExpression, error) {
 				p.advance()
 				p.skipWhitespaceAndComments()
 
+				// Parse return type annotation if present (: Type)
+				if p.match(":") {
+					p.advance() // consume ':'
+					p.skipWhitespaceAndComments()
+					// Skip the return type annotation
+					_, err = p.parseTypeAnnotation()
+					if err != nil {
+						return nil, err
+					}
+					p.skipWhitespaceAndComments()
+				}
+
 				// Parse function body
 				if !p.match("{") {
 					return nil, fmt.Errorf("expected '{' for method body at %s", p.currentPos())
@@ -3687,7 +3847,9 @@ func (p *parser) parseArrowFunction() (*ast.ArrowFunctionExpression, error) {
 			p.skipWhitespaceAndComments()
 
 			// Handle default value
+			hasDefault := false
 			if p.match("=") {
+				hasDefault = true
 				p.advance()
 				p.skipWhitespaceAndComments()
 				// Parse but don't store default value for now
@@ -3700,6 +3862,7 @@ func (p *parser) parseArrowFunction() (*ast.ArrowFunctionExpression, error) {
 			param := &ast.Parameter{
 				ID:        id,
 				ParamType: paramType,
+				Optional:  hasDefault,
 				Position:  id.Pos(),
 				EndPos:    p.currentPos(),
 			}
@@ -3937,6 +4100,13 @@ func (p *parser) parseTypePrimaryNode() (ast.TypeNode, error) {
 func (p *parser) skipTypeAnnotation() {
 	p.skipTypePrimary()
 
+	// Handle array types: Type[] or Type[][]
+	for p.match("[") && p.peek(1) == "]" {
+		p.advance() // [
+		p.advance() // ]
+		p.skipWhitespaceAndComments()
+	}
+
 	// Handle union types (|) and intersection types (&)
 	iterations := 0
 	for (p.match("|") || p.match("&")) && !p.isAtEnd() && iterations < maxParserIterations {
@@ -3944,14 +4114,13 @@ func (p *parser) skipTypeAnnotation() {
 		p.advance()
 		p.skipWhitespaceAndComments()
 		p.skipTypePrimary()
-	}
 
-	// Handle array types: Type[] or Type[][]
-	for p.match("[") && p.peek(1) == "]" && iterations < maxParserIterations {
-		iterations++
-		p.advance() // [
-		p.advance() // ]
-		p.skipWhitespaceAndComments()
+		// Handle array types after each type in union/intersection
+		for p.match("[") && p.peek(1) == "]" {
+			p.advance() // [
+			p.advance() // ]
+			p.skipWhitespaceAndComments()
+		}
 	}
 }
 

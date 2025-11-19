@@ -30,10 +30,11 @@
     "@types/jquery": "^3.5.33",
     "@types/vue": "^2.0.0",
     "@typescript/native-preview": "^7.0.0-dev.20251117.1",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "@types/node": "^24.10.1",
+    "code-tag": "^1.2.0"
   },
   "dependencies": {
-    "code-tag": "^1.2.0",
     "sweetalert2": "^11.26.3"
   }
 }

@@ -1,0 +1,378 @@
+AST for C:\Users\jjara\Desktop\proyectos\typecheker\test\vue_emit_test.ts:
+{
+  "Name": "C:\\Users\\jjara\\Desktop\\proyectos\\typecheker\\test\\vue_emit_test.ts",
+  "Source": "const { defineComponent } = Vue;\r\n\r\nexport default defineComponent({\r\n    setup(props, { emit }) {\r\n        // Direct use of emit in setup - this should work\r\n        emit('test', 123);\r\n\r\n        return {};\r\n    }\r\n});\r\n",
+  "Body": [
+    {
+      "Kind": "const",
+      "Decls": [
+        {
+          "ID": {
+            "Name": "defineComponent",
+            "Position": {
+              "Line": 1,
+              "Column": 7,
+              "Offset": 6
+            },
+            "EndPos": {
+              "Line": 1,
+              "Column": 35,
+              "Offset": 31
+            }
+          },
+          "TypeAnnotation": null,
+          "Init": {
+            "Name": "Vue",
+            "Position": {
+              "Line": 1,
+              "Column": 32,
+              "Offset": 28
+            },
+            "EndPos": {
+              "Line": 1,
+              "Column": 35,
+              "Offset": 31
+            }
+          },
+          "Position": {
+            "Line": 1,
+            "Column": 7,
+            "Offset": 6
+          },
+          "EndPos": {
+            "Line": 1,
+            "Column": 35,
+            "Offset": 31
+          }
+        }
+      ],
+      "Position": {
+        "Line": 1,
+        "Column": 1,
+        "Offset": 0
+      },
+      "EndPos": {
+        "Line": 1,
+        "Column": 36,
+        "Offset": 32
+      }
+    },
+    {
+      "Declaration": {
+        "Expression": {
+          "Name": "efault",
+          "Position": {
+            "Line": 3,
+            "Column": 16,
+            "Offset": 44
+          },
+          "EndPos": {
+            "Line": 3,
+            "Column": 22,
+            "Offset": 50
+          }
+        },
+        "Position": {
+          "Line": 3,
+          "Column": 16,
+          "Offset": 44
+        },
+        "EndPos": {
+          "Line": 3,
+          "Column": 23,
+          "Offset": 51
+        }
+      },
+      "Specifiers": null,
+      "Source": null,
+      "Position": {
+        "Line": 3,
+        "Column": 1,
+        "Offset": 36
+      },
+      "EndPos": {
+        "Line": 3,
+        "Column": 23,
+        "Offset": 51
+      }
+    },
+    {
+      "Expression": {
+        "Callee": {
+          "Name": "defineComponent",
+          "Position": {
+            "Line": 3,
+            "Column": 38,
+            "Offset": 51
+          },
+          "EndPos": {
+            "Line": 3,
+            "Column": 53,
+            "Offset": 66
+          }
+        },
+        "Arguments": [
+          {
+            "Properties": [
+              {
+                "Key": {
+                  "Name": "setup",
+                  "Position": {
+                    "Line": 4,
+                    "Column": 5,
+                    "Offset": 74
+                  },
+                  "EndPos": {
+                    "Line": 4,
+                    "Column": 10,
+                    "Offset": 79
+                  }
+                },
+                "Value": {
+                  "Params": [
+                    {
+                      "ID": {
+                        "Name": "props",
+                        "Position": {
+                          "Line": 4,
+                          "Column": 11,
+                          "Offset": 80
+                        },
+                        "EndPos": {
+                          "Line": 4,
+                          "Column": 16,
+                          "Offset": 85
+                        }
+                      },
+                      "ParamType": null,
+                      "Optional": false,
+                      "Position": {
+                        "Line": 4,
+                        "Column": 11,
+                        "Offset": 80
+                      },
+                      "EndPos": {
+                        "Line": 4,
+                        "Column": 16,
+                        "Offset": 85
+                      }
+                    },
+                    {
+                      "ID": {
+                        "Name": "destructured_param",
+                        "Position": {
+                          "Line": 4,
+                          "Column": 18,
+                          "Offset": 87
+                        },
+                        "EndPos": {
+                          "Line": 4,
+                          "Column": 26,
+                          "Offset": 95
+                        }
+                      },
+                      "ParamType": null,
+                      "Optional": false,
+                      "Position": {
+                        "Line": 4,
+                        "Column": 18,
+                        "Offset": 87
+                      },
+                      "EndPos": {
+                        "Line": 4,
+                        "Column": 26,
+                        "Offset": 95
+                      }
+                    }
+                  ],
+                  "Body": {
+                    "Body": [
+                      {
+                        "Expression": {
+                          "Callee": {
+                            "Name": "emit",
+                            "Position": {
+                              "Line": 6,
+                              "Column": 13,
+                              "Offset": 167
+                            },
+                            "EndPos": {
+                              "Line": 6,
+                              "Column": 17,
+                              "Offset": 171
+                            }
+                          },
+                          "Arguments": [
+                            {
+                              "Value": "test",
+                              "Raw": "'test'",
+                              "Position": {
+                                "Line": 6,
+                                "Column": 18,
+                                "Offset": 172
+                              },
+                              "EndPos": {
+                                "Line": 6,
+                                "Column": 24,
+                                "Offset": 178
+                              }
+                            },
+                            {
+                              "Value": "123",
+                              "Raw": "123",
+                              "Position": {
+                                "Line": 6,
+                                "Column": 26,
+                                "Offset": 180
+                              },
+                              "EndPos": {
+                                "Line": 6,
+                                "Column": 29,
+                                "Offset": 183
+                              }
+                            }
+                          ],
+                          "Position": {
+                            "Line": 6,
+                            "Column": 13,
+                            "Offset": 167
+                          },
+                          "EndPos": {
+                            "Line": 6,
+                            "Column": 30,
+                            "Offset": 184
+                          }
+                        },
+                        "Position": {
+                          "Line": 6,
+                          "Column": 13,
+                          "Offset": 167
+                        },
+                        "EndPos": {
+                          "Line": 6,
+                          "Column": 31,
+                          "Offset": 185
+                        }
+                      },
+                      {
+                        "Argument": {
+                          "Properties": null,
+                          "Position": {
+                            "Line": 8,
+                            "Column": 16,
+                            "Offset": 204
+                          },
+                          "EndPos": {
+                            "Line": 8,
+                            "Column": 18,
+                            "Offset": 206
+                          }
+                        },
+                        "Position": {
+                          "Line": 8,
+                          "Column": 9,
+                          "Offset": 197
+                        },
+                        "EndPos": {
+                          "Line": 8,
+                          "Column": 19,
+                          "Offset": 207
+                        }
+                      }
+                    ],
+                    "Position": {
+                      "Line": 4,
+                      "Column": 28,
+                      "Offset": 97
+                    },
+                    "EndPos": {
+                      "Line": 9,
+                      "Column": 6,
+                      "Offset": 214
+                    }
+                  },
+                  "Async": false,
+                  "Position": {
+                    "Line": 4,
+                    "Column": 5,
+                    "Offset": 74
+                  },
+                  "EndPos": {
+                    "Line": 9,
+                    "Column": 6,
+                    "Offset": 214
+                  }
+                },
+                "Position": {
+                  "Line": 4,
+                  "Column": 5,
+                  "Offset": 74
+                },
+                "EndPos": {
+                  "Line": 9,
+                  "Column": 6,
+                  "Offset": 214
+                }
+              }
+            ],
+            "Position": {
+              "Line": 3,
+              "Column": 54,
+              "Offset": 67
+            },
+            "EndPos": {
+              "Line": 10,
+              "Column": 2,
+              "Offset": 217
+            }
+          }
+        ],
+        "Position": {
+          "Line": 3,
+          "Column": 38,
+          "Offset": 51
+        },
+        "EndPos": {
+          "Line": 10,
+          "Column": 3,
+          "Offset": 218
+        }
+      },
+      "Position": {
+        "Line": 3,
+        "Column": 38,
+        "Offset": 51
+      },
+      "EndPos": {
+        "Line": 10,
+        "Column": 4,
+        "Offset": 219
+      }
+    }
+  ],
+  "Position": {
+    "Line": 1,
+    "Column": 1,
+    "Offset": 0
+  },
+  "EndPos": {
+    "Line": 11,
+    "Column": 1,
+    "Offset": 221
+  }
+}
+
+  [31m├ù[0m [1mCannot find name 'emit'.
+  Sugerencia: ┬┐Quisiste decir alguno de estos?
+    ÔÇó 'Init'
+    ÔÇó 'Omit'[0m
+   [90mÔò¡ÔöÇ[[36mtest\vue_emit_test.ts:6:13[90m]
+ [90m  5[0m [90mÔöé[0m         // Direct use of emit in setup - this should work
+ [90m  6[0m [90mÔöé[0m         emit('test', 123);
+                 [31m^[0m [90m[TS2304][0m
+ [90m  7[0m [90mÔöé[0m 
+   [90mÔò░ÔöÇÔöÇÔöÇÔöÇ[0m
+
+[31mFound 1 error(s).[0m
+
+[90mFinished in 2ms.[0m
