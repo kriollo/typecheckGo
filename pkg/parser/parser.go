@@ -3,7 +3,6 @@ package parser
 import (
 	"fmt"
 	"io/ioutil"
-	"os"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -1870,8 +1869,6 @@ func (p *parser) parseParameterList() ([]*ast.Parameter, error) {
 			depth := 1
 			currentName := ""
 
-			fmt.Fprintf(os.Stderr, "PARSER: Starting destructuring extraction, openChar=%c, closeChar=%c\n", openChar, closeChar)
-
 			for depth > 0 && !p.isAtEnd() {
 				ch := p.source[p.pos]
 
@@ -1883,7 +1880,6 @@ func (p *parser) parseParameterList() ([]*ast.Parameter, error) {
 					if depth == 0 {
 						// Add current name if exists
 						if currentName != "" {
-							fmt.Fprintf(os.Stderr, "PARSER: Adding name at close: '%s'\n", currentName)
 							extractedNames = append(extractedNames, strings.TrimSpace(currentName))
 							currentName = ""
 						}
@@ -1892,7 +1888,6 @@ func (p *parser) parseParameterList() ([]*ast.Parameter, error) {
 				} else if ch == ',' && depth == 1 {
 					// End of one binding
 					if currentName != "" {
-						fmt.Fprintf(os.Stderr, "PARSER: Adding name at comma: '%s'\n", currentName)
 						extractedNames = append(extractedNames, strings.TrimSpace(currentName))
 						currentName = ""
 					}
@@ -1901,7 +1896,6 @@ func (p *parser) parseParameterList() ([]*ast.Parameter, error) {
 				} else if ch == ':' && isObjectPattern && depth == 1 {
 					// In object pattern, skip the rename part (e.g., {oldName: newName})
 					// We want to capture 'newName', not 'oldName'
-					fmt.Fprintf(os.Stderr, "PARSER: Found ':' - clearing currentName (was '%s')\n", currentName)
 					currentName = ""
 					p.advance()
 					p.skipWhitespaceAndComments()
@@ -1913,12 +1907,9 @@ func (p *parser) parseParameterList() ([]*ast.Parameter, error) {
 					p.skipWhitespaceAndComments()
 				} else {
 					// Other characters (like =, ..., etc.), skip
-					fmt.Fprintf(os.Stderr, "PARSER: Skipping char '%c' (0x%x)\n", ch, ch)
 					p.advance()
 				}
 			}
-
-			fmt.Fprintf(os.Stderr, "PARSER: Finished extraction, got %d names: %v\n", len(extractedNames), extractedNames)
 
 			p.skipWhitespaceAndComments()
 
@@ -1936,10 +1927,6 @@ func (p *parser) parseParameterList() ([]*ast.Parameter, error) {
 
 			// Create a parameter for each extracted name
 			if len(extractedNames) > 0 {
-				// Debug: log extracted names
-				if len(extractedNames) > 0 {
-					fmt.Fprintf(os.Stderr, "PARSER: Extracted names from destructuring: %v\n", extractedNames)
-				}
 				for _, name := range extractedNames {
 					if name != "" {
 						paramId := &ast.Identifier{
@@ -1958,7 +1945,6 @@ func (p *parser) parseParameterList() ([]*ast.Parameter, error) {
 				}
 			} else {
 				// Fallback: create placeholder if no names were extracted
-				fmt.Fprintf(os.Stderr, "PARSER: No names extracted, using fallback\n")
 				id = &ast.Identifier{
 					Name:     "destructured_param",
 					Position: startPos,
