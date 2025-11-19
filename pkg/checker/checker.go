@@ -2480,6 +2480,11 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 	case *ast.TypeReference:
 		// Handle generic type alias instantiation
 		if symbol, exists := tc.symbolTable.ResolveSymbol(t.Name); exists && symbol.Type == symbols.TypeAliasSymbol {
+			if symbol.Node == nil {
+				// Built-in type alias without AST node (e.g. Record)
+				// TODO: Implement proper built-in type handling
+				return types.Any
+			}
 			aliasDecl := symbol.Node.(*ast.TypeAliasDeclaration)
 
 			// Create substitution map

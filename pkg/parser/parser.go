@@ -1825,41 +1825,100 @@ func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 					p.advanceWord()
 					p.skipWhitespaceAndComments()
 					if p.match(":") {
-						// Type annotation
 						p.advance()
 						p.skipWhitespaceAndComments()
-						// Skip type (including generics like Record<K, V>)
 						p.skipTypeAnnotation()
 						p.skipWhitespaceAndComments()
 					}
-					// Check for default value
 					if p.match("=") {
 						p.advance()
 						p.skipWhitespaceAndComments()
-						// Skip default value expression
-						// Find the end (comma or closing paren)
+						// Skip default value
 						depth := 0
 						for !p.isAtEnd() && paramIter < maxParserIterations {
 							if p.match("(") || p.match("[") || p.match("{") {
 								depth++
 							} else if p.match(")") || p.match("]") || p.match("}") {
-								if depth == 0 && p.match(")") {
-									break // End of params
+								if depth == 0 && (p.match(")") || p.match(",")) {
+									break
 								}
 								depth--
 							} else if p.match(",") && depth == 0 {
-								break // Next param
+								break
 							}
 							p.advance()
 						}
 						p.skipWhitespaceAndComments()
 					}
-					if p.match(",") {
+				} else if p.match("{") || p.match("[") {
+					// Destructuring parameter
+					depth := 0
+					startChar := p.current()
+					p.advance()
+					depth++
+					for depth > 0 && !p.isAtEnd() {
+						if string(p.current()) == startChar {
+							depth++
+						} else if (startChar == "{" && p.match("}")) || (startChar == "[" && p.match("]")) {
+							depth--
+						}
+						p.advance()
+						if depth == 0 {
+							break
+						}
+					}
+					p.skipWhitespaceAndComments()
+
+					// Type annotation
+					if p.match(":") {
 						p.advance()
 						p.skipWhitespaceAndComments()
+						p.skipTypeAnnotation()
+						p.skipWhitespaceAndComments()
+					}
+
+					// Default value
+					if p.match("=") {
+						p.advance()
+						p.skipWhitespaceAndComments()
+						// Skip default value
+						depth := 0
+						for !p.isAtEnd() && paramIter < maxParserIterations {
+							if p.match("(") || p.match("[") || p.match("{") {
+								depth++
+							} else if p.match(")") || p.match("]") || p.match("}") {
+								if depth == 0 && (p.match(")") || p.match(",")) {
+									break
+								}
+								depth--
+							} else if p.match(",") && depth == 0 {
+								break
+							}
+							p.advance()
+						}
+						p.skipWhitespaceAndComments()
+					}
+				} else if p.match("...") {
+					// Rest parameter
+					p.advanceString(3)
+					p.skipWhitespaceAndComments()
+					if p.matchIdentifier() {
+						p.advanceWord()
+						p.skipWhitespaceAndComments()
+						if p.match(":") {
+							p.advance()
+							p.skipWhitespaceAndComments()
+							p.skipTypeAnnotation()
+							p.skipWhitespaceAndComments()
+						}
 					}
 				} else {
 					break
+				}
+
+				if p.match(",") {
+					p.advance()
+					p.skipWhitespaceAndComments()
 				}
 			}
 			if p.match(")") {
@@ -3280,13 +3339,29 @@ func (p *parser) parseArrayLiteral() (*ast.ArrayExpression, error) {
 	iterations := 0
 	for !p.match("]") && !p.isAtEnd() && iterations < maxParserIterations {
 		iterations++
-		elem, err := p.parseExpression()
-		if err != nil {
-			return nil, err
-		}
 
-		if elem != nil {
-			elements = append(elements, elem)
+		if p.match("...") {
+			startPos := p.currentPos()
+			p.advanceString(3)
+			p.skipWhitespaceAndComments()
+			arg, err := p.parseExpression()
+			if err != nil {
+				return nil, err
+			}
+			elements = append(elements, &ast.SpreadElement{
+				Argument: arg,
+				Position: startPos,
+				EndPos:   p.currentPos(),
+			})
+		} else {
+			elem, err := p.parseExpression()
+			if err != nil {
+				return nil, err
+			}
+
+			if elem != nil {
+				elements = append(elements, elem)
+			}
 		}
 
 		p.skipWhitespaceAndComments()
@@ -3994,6 +4069,7 @@ func (p *parser) parseTypeAnnotation() (ast.TypeNode, error) {
 // parseTypePrimaryNode parses a single type (without unions/intersections)
 func (p *parser) parseTypePrimaryNode() (ast.TypeNode, error) {
 	startPos := p.currentPos()
+	var result ast.TypeNode
 
 	// Parse object types (e.g., { prop: Type })
 	if p.match("{") {
@@ -4010,25 +4086,21 @@ func (p *parser) parseTypePrimaryNode() (ast.TypeNode, error) {
 			}
 			p.advance()
 		}
-		return &ast.TypeReference{
+		result = &ast.TypeReference{
 			Name:     "{ ... }", // Placeholder for object type
 			Position: startPos,
 			EndPos:   p.currentPos(),
-		}, nil
-	}
-
-	// Parse string literal types (e.g., 'id' | 'name')
-	if p.matchString() {
+		}
+	} else if p.matchString() {
+		// Parse string literal types (e.g., 'id' | 'name')
 		str := p.advanceStringLiteral()
-		return &ast.TypeReference{
+		result = &ast.TypeReference{
 			Name:     str, // Store the full string literal with quotes
 			Position: startPos,
 			EndPos:   p.currentPos(),
-		}, nil
-	}
-
-	// Parse simple type reference (e.g., string, number, MyType)
-	if p.matchIdentifier() {
+		}
+	} else if p.matchIdentifier() {
+		// Parse simple type reference (e.g., string, number, MyType)
 		typeName := p.advanceWord()
 
 		// Special handling for 'infer' keyword
@@ -4076,14 +4148,19 @@ func (p *parser) parseTypePrimaryNode() (ast.TypeNode, error) {
 			p.advance()
 		}
 
-		typeRef := &ast.TypeReference{
+		result = &ast.TypeReference{
 			Name:          typeName,
 			TypeArguments: typeArguments,
 			Position:      startPos,
 			EndPos:        p.currentPos(),
 		}
+	} else {
+		return nil, fmt.Errorf("expected type annotation at %s", p.currentPos())
+	}
 
-		// Check for array type suffix [] or indexed access type T[K]
+	// Check for array type suffix [] or indexed access type T[K]
+	// Loop to handle multidimensional arrays like string[][]
+	for {
 		p.skipWhitespaceAndComments()
 		if p.match("[") {
 			// Save position for potential backtracking
@@ -4095,21 +4172,29 @@ func (p *parser) parseTypePrimaryNode() (ast.TypeNode, error) {
 			if p.match("]") {
 				// Array type like string[]
 				p.advance()
-				return &ast.TypeReference{
-					Name:     typeName + "[]",
-					Position: startPos,
-					EndPos:   p.currentPos(),
-				}, nil
+				// Wrap the current result in an array type
+				if typeRef, ok := result.(*ast.TypeReference); ok {
+					typeRef.Name += "[]"
+					typeRef.EndPos = p.currentPos()
+				} else {
+					// If it's not a TypeReference (e.g. object type), we create a new TypeReference wrapping it
+					result = &ast.TypeReference{
+						Name:     "{ ... }[]", // Simplified representation
+						Position: startPos,
+						EndPos:   p.currentPos(),
+					}
+				}
 			} else {
-				// Indexed access type like Person['name'] - backtrack and let parseTypeAnnotationFull handle it
+				// Indexed access type like Person['name'] - backtrack and stop
 				p.pos = bracketStartPos // Reset to before the '['
+				break
 			}
+		} else {
+			break
 		}
-
-		return typeRef, nil
 	}
 
-	return nil, fmt.Errorf("expected type annotation at %s", p.currentPos())
+	return result, nil
 }
 
 // skipTypeAnnotation skips over a type annotation without parsing it
