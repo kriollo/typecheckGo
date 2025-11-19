@@ -25,6 +25,7 @@ type TypeChecker struct {
 	inferencer      *types.TypeInferencer
 	currentFunction *ast.FunctionDeclaration // Track current function for return type checking
 	config          *CompilerConfig          // Compiler configuration
+	typeGuards      map[string]bool          // Track variables under type guards (instanceof Function)
 }
 
 // CompilerConfig holds the compiler options for type checking
@@ -77,6 +78,7 @@ func New() *TypeChecker {
 		typeAliasCache: make(map[string]*types.Type),
 		inferencer:     inferencer,
 		config:         getDefaultConfig(),
+		typeGuards:     make(map[string]bool),
 	}
 }
 
@@ -121,6 +123,7 @@ func NewWithModuleResolver(rootDir string) *TypeChecker {
 		varTypeCache:   varTypeCache,
 		typeAliasCache: make(map[string]*types.Type),
 		inferencer:     inferencer,
+		typeGuards:     make(map[string]bool),
 	}
 
 	// Load global types from @types packages
@@ -406,6 +409,52 @@ func (tc *TypeChecker) checkIfStatement(stmt *ast.IfStatement, filename string) 
 	// Check the test condition
 	tc.checkExpression(stmt.Test, filename)
 
+	// Detect type guards
+	var typeGuardVar string
+	if binExpr, ok := stmt.Test.(*ast.BinaryExpression); ok {
+		// Type guard 1: if (variable instanceof Function)
+		if binExpr.Operator == "instanceof" {
+			if leftId, ok := binExpr.Left.(*ast.Identifier); ok {
+				if rightId, ok := binExpr.Right.(*ast.Identifier); ok {
+					if rightId.Name == "Function" {
+						typeGuardVar = leftId.Name
+						tc.typeGuards[typeGuardVar] = true
+					}
+				}
+			}
+		}
+
+		// Type guard 2: if (typeof variable === 'function')
+		if binExpr.Operator == "===" || binExpr.Operator == "==" {
+			// Check for: typeof variable === 'function'
+			if unaryExpr, ok := binExpr.Left.(*ast.UnaryExpression); ok {
+				if unaryExpr.Operator == "typeof" {
+					if argId, ok := unaryExpr.Argument.(*ast.Identifier); ok {
+						if literal, ok := binExpr.Right.(*ast.Literal); ok {
+							if literal.Value == "function" || literal.Value == "'function'" || literal.Value == "\"function\"" {
+								typeGuardVar = argId.Name
+								tc.typeGuards[typeGuardVar] = true
+							}
+						}
+					}
+				}
+			}
+			// Check for: 'function' === typeof variable (reversed order)
+			if unaryExpr, ok := binExpr.Right.(*ast.UnaryExpression); ok {
+				if unaryExpr.Operator == "typeof" {
+					if argId, ok := unaryExpr.Argument.(*ast.Identifier); ok {
+						if literal, ok := binExpr.Left.(*ast.Literal); ok {
+							if literal.Value == "function" || literal.Value == "'function'" || literal.Value == "\"function\"" {
+								typeGuardVar = argId.Name
+								tc.typeGuards[typeGuardVar] = true
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// Find the if statement scope (if it exists)
 	ifScope := tc.findScopeForNode(stmt)
 	if ifScope != nil {
@@ -431,6 +480,11 @@ func (tc *TypeChecker) checkIfStatement(stmt *ast.IfStatement, filename string) 
 		if stmt.Alternate != nil {
 			tc.checkStatement(stmt.Alternate, filename)
 		}
+	}
+
+	// Clean up type guard after if block
+	if typeGuardVar != "" {
+		delete(tc.typeGuards, typeGuardVar)
 	}
 }
 
@@ -555,6 +609,15 @@ func (tc *TypeChecker) checkConditionalExpression(cond *ast.ConditionalExpressio
 }
 
 func (tc *TypeChecker) checkIdentifier(id *ast.Identifier, filename string) {
+	// Skip TypeScript keywords that are type-related and not runtime identifiers
+	// These keywords are used for type assertions, type guards, etc.
+	typeKeywords := []string{"as", "is", "keyof", "typeof", "infer", "readonly"}
+	for _, keyword := range typeKeywords {
+		if id.Name == keyword {
+			return
+		}
+	}
+
 	// Check if the identifier is defined in the symbol table
 	if _, exists := tc.symbolTable.ResolveSymbol(id.Name); exists {
 		return
@@ -611,7 +674,10 @@ func (tc *TypeChecker) checkCallExpression(call *ast.CallExpression, filename st
 				return
 			}
 
-			if !symbol.IsFunction {
+			// Check if variable is under a type guard (instanceof Function)
+			isUnderTypeGuard := tc.typeGuards[id.Name]
+
+			if !symbol.IsFunction && !isUnderTypeGuard {
 				msg := fmt.Sprintf("This expression is not callable. Type '%s' has no call signatures.", id.Name)
 				msg += "\n  Sugerencia: Verifica que estés llamando a una función y no a una variable"
 				tc.addError(filename, call.Pos().Line, call.Pos().Column, msg, "TS2349", "error")
@@ -1467,6 +1533,73 @@ func (tc *TypeChecker) SetLibs(libs []string) {
 	tc.inferencer = types.NewTypeInferencer(tc.globalEnv)
 	tc.inferencer.SetTypeCache(tc.typeCache)
 	tc.inferencer.SetVarTypeCache(tc.varTypeCache)
+
+	// Load TypeScript lib files (lib.dom.d.ts, lib.es2020.d.ts, etc.)
+	tc.loadTypeScriptLibs(libs)
+}
+
+// loadTypeScriptLibs loads TypeScript library definition files based on configured libs
+func (tc *TypeChecker) loadTypeScriptLibs(libs []string) {
+	// Get root directory
+	var rootDir string
+	if tc.moduleResolver != nil {
+		rootDir = tc.moduleResolver.GetRootDir()
+	}
+	if rootDir == "" {
+		rootDir = "."
+	}
+
+	// Try to find TypeScript installation
+	typescriptLibPath := filepath.Join(rootDir, "node_modules", "typescript", "lib")
+
+	// Check if TypeScript lib directory exists
+	if _, err := os.Stat(typescriptLibPath); os.IsNotExist(err) {
+		// Try alternative path (@typescript/native-preview)
+		typescriptLibPath = filepath.Join(rootDir, "node_modules", "@typescript", "native-preview-win32-x64", "lib")
+		if _, err := os.Stat(typescriptLibPath); os.IsNotExist(err) {
+			return
+		}
+	}
+
+	// Map of lib names to file names
+	libFileMap := map[string]string{
+		"es5":          "lib.es5.d.ts",
+		"es6":          "lib.es2015.d.ts",
+		"es2015":       "lib.es2015.d.ts",
+		"es2016":       "lib.es2016.d.ts",
+		"es2017":       "lib.es2017.d.ts",
+		"es2018":       "lib.es2018.d.ts",
+		"es2019":       "lib.es2019.d.ts",
+		"es2020":       "lib.es2020.d.ts",
+		"es2021":       "lib.es2021.d.ts",
+		"es2022":       "lib.es2022.d.ts",
+		"es2023":       "lib.es2023.d.ts",
+		"esnext":       "lib.esnext.d.ts",
+		"dom":          "lib.dom.d.ts",
+		"dom.iterable": "lib.dom.iterable.d.ts",
+		"webworker":    "lib.webworker.d.ts",
+		"scripthost":   "lib.scripthost.d.ts",
+	}
+
+	// Load the requested lib files
+	for _, lib := range libs {
+		libLower := strings.ToLower(lib)
+		if fileName, ok := libFileMap[libLower]; ok {
+			libFilePath := filepath.Join(typescriptLibPath, fileName)
+			if _, err := os.Stat(libFilePath); err == nil {
+				tc.loadLibFile(libFilePath)
+			}
+		}
+	}
+}
+
+// loadLibFile loads a single TypeScript lib file and extracts type definitions
+func (tc *TypeChecker) loadLibFile(filePath string) {
+	// Pass 1: Extract interfaces and types
+	tc.extractInterfacesFromFile(filePath)
+
+	// Pass 2: Extract variables and functions
+	tc.extractVariablesFromFile(filePath)
 }
 
 // SetPathAliases configures path aliases from tsconfig for module resolution
