@@ -22,7 +22,7 @@
         "allowJs": false,
         "checkJs": false,
         "moduleResolution": "nodenext",
-        "typeRoots": ["./node_modules/@types", "./types", "./src/jscontrollers/types"]
+        "typeRoots": ["./node_modules/@types", "./types", "./src/jscontrollers/types", "./src/types"]
     },
     "include": ["test/**/*", "pkg/**/*"],
     "exclude": ["node_modules", "dist", "**/*.spec.ts"]

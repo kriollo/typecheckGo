@@ -59,6 +59,10 @@ func (b *Binder) bindStatement(stmt ast.Statement) {
 		b.bindTryStatement(s)
 	case *ast.ThrowStatement:
 		b.bindThrowStatement(s)
+	case *ast.BreakStatement:
+		b.bindBreakStatement(s)
+	case *ast.ContinueStatement:
+		b.bindContinueStatement(s)
 	default:
 		// Unknown statement type
 		fmt.Printf("Warning: Unknown statement type: %T\n", stmt)
@@ -580,4 +584,26 @@ func (b *Binder) bindClassDeclaration(decl *ast.ClassDeclaration) {
 
 	// Restore parent scope
 	b.table.Current = classScope.Parent
+}
+
+func (b *Binder) bindBreakStatement(stmt *ast.BreakStatement) {
+	// Break statements don't introduce new symbols
+	// Just validate that we're inside a loop or switch (could be added later)
+	// For now, just accept it
+	if stmt.Label != nil {
+		// If there's a label, we could check if it exists
+		// But for simplicity, we'll skip that for now
+		_ = stmt.Label
+	}
+}
+
+func (b *Binder) bindContinueStatement(stmt *ast.ContinueStatement) {
+	// Continue statements don't introduce new symbols
+	// Just validate that we're inside a loop (could be added later)
+	// For now, just accept it
+	if stmt.Label != nil {
+		// If there's a label, we could check if it exists
+		// But for simplicity, we'll skip that for now
+		_ = stmt.Label
+	}
 }

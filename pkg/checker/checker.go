@@ -3,6 +3,7 @@ package checker
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"tstypechecker/pkg/ast"
@@ -110,7 +111,7 @@ func NewWithModuleResolver(rootDir string) *TypeChecker {
 	inferencer.SetTypeCache(typeCache)
 	inferencer.SetVarTypeCache(varTypeCache)
 
-	return &TypeChecker{
+	tc := &TypeChecker{
 		symbolTable:    symbolTable,
 		errors:         []TypeError{},
 		moduleResolver: moduleResolver,
@@ -121,6 +122,11 @@ func NewWithModuleResolver(rootDir string) *TypeChecker {
 		typeAliasCache: make(map[string]*types.Type),
 		inferencer:     inferencer,
 	}
+
+	// Load global types from @types packages
+	tc.loadGlobalTypes(rootDir)
+
+	return tc
 }
 
 // CheckFile checks a single TypeScript file
@@ -190,6 +196,10 @@ func (tc *TypeChecker) checkStatement(stmt ast.Statement, filename string) {
 		tc.checkTryStatement(s, filename)
 	case *ast.ThrowStatement:
 		tc.checkThrowStatement(s, filename)
+	case *ast.BreakStatement:
+		tc.checkBreakStatement(s, filename)
+	case *ast.ContinueStatement:
+		tc.checkContinueStatement(s, filename)
 	default:
 		// Unknown statement type - just a warning, don't block compilation
 		fmt.Fprintf(os.Stderr, "Warning: Unknown statement type: %T\n", stmt)
@@ -607,26 +617,29 @@ func (tc *TypeChecker) checkCallExpression(call *ast.CallExpression, filename st
 				tc.addError(filename, call.Pos().Line, call.Pos().Column, msg, "TS2349", "error")
 			} else {
 				// Check parameter count
-				expectedCount := len(symbol.Params)
-				actualCount := len(call.Arguments)
-				if actualCount != expectedCount {
-					msg := fmt.Sprintf("Expected %d arguments, but got %d.", expectedCount, actualCount)
+				// Skip validation for symbols from .d.ts files (they may have complex overloads)
+				if len(symbol.Params) > 0 && !symbol.FromDTS {
+					expectedCount := len(symbol.Params)
+					actualCount := len(call.Arguments)
+					if actualCount != expectedCount {
+						msg := fmt.Sprintf("Expected %d arguments, but got %d.", expectedCount, actualCount)
 
-					if actualCount < expectedCount {
-						msg += fmt.Sprintf("\n  Sugerencia: La función '%s' requiere %d argumento(s)", id.Name, expectedCount)
-						if len(symbol.Params) > 0 {
-							msg += "\n  Parámetros esperados:"
-							for i, param := range symbol.Params {
-								if i < 5 { // Show max 5 parameters
-									msg += fmt.Sprintf("\n    %d. %s", i+1, param)
+						if actualCount < expectedCount {
+							msg += fmt.Sprintf("\n  Sugerencia: La función '%s' requiere %d argumento(s)", id.Name, expectedCount)
+							if len(symbol.Params) > 0 {
+								msg += "\n  Parámetros esperados:"
+								for i, param := range symbol.Params {
+									if i < 5 { // Show max 5 parameters
+										msg += fmt.Sprintf("\n    %d. %s", i+1, param)
+									}
 								}
 							}
+						} else {
+							msg += fmt.Sprintf("\n  Sugerencia: La función '%s' solo acepta %d argumento(s)", id.Name, expectedCount)
 						}
-					} else {
-						msg += fmt.Sprintf("\n  Sugerencia: La función '%s' solo acepta %d argumento(s)", id.Name, expectedCount)
-					}
 
-					tc.addError(filename, call.Pos().Line, call.Pos().Column, msg, "TS2554", "error")
+						tc.addError(filename, call.Pos().Line, call.Pos().Column, msg, "TS2554", "error")
+					}
 				}
 			}
 		}
@@ -1193,10 +1206,28 @@ func (tc *TypeChecker) checkTryStatement(stmt *ast.TryStatement, filename string
 
 // checkThrowStatement checks throw statements
 func (tc *TypeChecker) checkThrowStatement(stmt *ast.ThrowStatement, filename string) {
-	// Check the expression being thrown
+	// Check the argument being thrown
 	if stmt.Argument != nil {
 		tc.checkExpression(stmt.Argument, filename)
 	}
+}
+
+func (tc *TypeChecker) checkBreakStatement(stmt *ast.BreakStatement, filename string) {
+	// Break statements are valid - no additional checks needed for now
+	// In a more complete implementation, we would verify:
+	// - We're inside a loop or switch statement
+	// - If there's a label, it exists and is valid
+	_ = stmt
+	_ = filename
+}
+
+func (tc *TypeChecker) checkContinueStatement(stmt *ast.ContinueStatement, filename string) {
+	// Continue statements are valid - no additional checks needed for now
+	// In a more complete implementation, we would verify:
+	// - We're inside a loop statement
+	// - If there's a label, it exists and is valid
+	_ = stmt
+	_ = filename
 }
 
 // checkImportDeclaration checks import statements
@@ -1449,6 +1480,358 @@ func (tc *TypeChecker) SetPathAliases(baseUrl string, paths map[string][]string)
 func (tc *TypeChecker) SetTypeRoots(typeRoots []string) {
 	if tc.moduleResolver != nil {
 		tc.moduleResolver.SetTypeRoots(typeRoots)
+	}
+}
+
+// loadGlobalTypes loads type definitions from @types packages
+func (tc *TypeChecker) loadGlobalTypes(rootDir string) {
+	// Try to load from all @types packages that are installed
+	typesDir := filepath.Join(rootDir, "node_modules", "@types")
+
+	// Check if @types directory exists
+	if _, err := os.Stat(typesDir); os.IsNotExist(err) {
+		return
+	}
+
+	// Scan all installed @types packages
+	entries, err := os.ReadDir(typesDir)
+	if err != nil {
+		return
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			pkgDir := filepath.Join(typesDir, entry.Name())
+			tc.loadPackageTypes(pkgDir)
+		}
+	}
+}
+
+// loadPackageTypes loads all .d.ts files from a package directory
+// Uses two-pass approach: first load interfaces/types, then variables
+func (tc *TypeChecker) loadPackageTypes(pkgDir string) {
+	var dtsFiles []string
+
+	// Collect all .d.ts files
+	filepath.Walk(pkgDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // Skip errors
+		}
+		if !info.IsDir() && strings.HasSuffix(path, ".d.ts") {
+			dtsFiles = append(dtsFiles, path)
+		}
+		return nil
+	})
+
+	// Pass 1: Extract interfaces and types (they define callable signatures)
+	for _, path := range dtsFiles {
+		tc.extractInterfacesFromFile(path)
+	}
+
+	// Pass 2: Extract variables and functions (they may reference interfaces from pass 1)
+	for _, path := range dtsFiles {
+		tc.extractVariablesFromFile(path)
+	}
+}
+
+// extractInterfacesFromFile extracts interface and type declarations from a .d.ts file (Pass 1)
+func (tc *TypeChecker) extractInterfacesFromFile(filePath string) {
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return
+	}
+	tc.extractInterfacesUsingPatterns(string(content))
+}
+
+// extractVariablesFromFile extracts variable and function declarations from a .d.ts file (Pass 2)
+func (tc *TypeChecker) extractVariablesFromFile(filePath string) {
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return
+	}
+	tc.extractVariablesUsingPatterns(string(content))
+}
+
+// extractInterfacesUsingPatterns extracts interface and type declarations (Pass 1)
+func (tc *TypeChecker) extractInterfacesUsingPatterns(text string) {
+	lines := strings.Split(text, "\n")
+
+	// Track context
+	inDeclareBlock := false
+	blockDepth := 0
+	interfaceContext := ""
+	interfaceDepth := 0
+	hasCallSignature := false
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		// Track declare module/namespace blocks
+		if strings.HasPrefix(trimmed, "declare module") || strings.HasPrefix(trimmed, "declare namespace") {
+			inDeclareBlock = true
+			blockDepth = 0
+		}
+
+		// Track interface declarations to detect call signatures
+		if strings.HasPrefix(trimmed, "interface ") || strings.HasPrefix(trimmed, "export interface ") {
+			parts := strings.Fields(trimmed)
+			for j, part := range parts {
+				if part == "interface" && j+1 < len(parts) {
+					interfaceName := parts[j+1]
+					// Clean interface name
+					interfaceName = strings.TrimSuffix(interfaceName, "{")
+					interfaceName = strings.TrimSpace(interfaceName)
+					if idx := strings.IndexAny(interfaceName, "<{"); idx != -1 {
+						interfaceName = interfaceName[:idx]
+					}
+					interfaceContext = interfaceName
+					interfaceDepth = 0
+					hasCallSignature = false
+					break
+				}
+			}
+		}
+
+		// Detect call signatures in interfaces: (args): returnType;
+		// Call signatures can be indented and may span multiple lines
+		if interfaceContext != "" {
+			// Check if line contains a call signature pattern
+			// Pattern 1: (args): ReturnType;
+			// Pattern 2: <TElement>(args): ReturnType;
+			if strings.Contains(trimmed, "(") && (strings.Contains(trimmed, "):") || strings.Contains(trimmed, "): ")) {
+				// Check if it's a call signature (starts with ( or <generics>()
+				if strings.HasPrefix(trimmed, "(") ||
+					(strings.Contains(trimmed, "<") && strings.Index(trimmed, "<") < strings.Index(trimmed, "(")) {
+					hasCallSignature = true
+				}
+			}
+			// Pattern 3: Just opening paren at start (multi-line signature)
+			if strings.HasPrefix(trimmed, "(") && !strings.Contains(trimmed, ":") {
+				// Might be start of a multi-line call signature
+				hasCallSignature = true
+			}
+		}
+
+		// Count braces
+		openBraces := strings.Count(line, "{")
+		closeBraces := strings.Count(line, "}")
+		blockDepth += openBraces - closeBraces
+
+		if interfaceContext != "" {
+			interfaceDepth += openBraces - closeBraces
+			if interfaceDepth <= 0 {
+				// End of interface - register symbol if it has call signature
+				if hasCallSignature && isValidIdentifier(interfaceContext) {
+					symbol := tc.symbolTable.DefineSymbol(interfaceContext, symbols.InterfaceSymbol, nil, false)
+					symbol.IsFunction = true
+					symbol.FromDTS = true // Mark as coming from .d.ts
+				}
+				interfaceContext = ""
+				hasCallSignature = false
+			}
+		}
+
+		if inDeclareBlock && blockDepth <= 0 {
+			inDeclareBlock = false
+		}
+
+		// Process type aliases outside of declare module blocks
+		if !inDeclareBlock {
+			tc.extractTypeAliasFromLine(trimmed)
+		}
+	}
+}
+
+// extractVariablesUsingPatterns extracts variable and function declarations (Pass 2)
+func (tc *TypeChecker) extractVariablesUsingPatterns(text string) {
+	lines := strings.Split(text, "\n")
+
+	// Track context
+	inDeclareBlock := false
+	blockDepth := 0
+
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		// Track declare module/namespace blocks
+		if strings.HasPrefix(trimmed, "declare module") || strings.HasPrefix(trimmed, "declare namespace") {
+			inDeclareBlock = true
+			blockDepth = 0
+		}
+
+		// Count braces
+		blockDepth += strings.Count(line, "{") - strings.Count(line, "}")
+
+		if inDeclareBlock && blockDepth <= 0 {
+			inDeclareBlock = false
+		}
+
+		// Only extract global declarations (not inside declare module blocks)
+		if !inDeclareBlock {
+			tc.extractGlobalDeclarationFromLine(trimmed, i, lines)
+		}
+	}
+}
+
+// extractTypeAliasFromLine extracts type alias declarations
+func (tc *TypeChecker) extractTypeAliasFromLine(line string) {
+	// Pattern: type NAME = ...
+	if strings.HasPrefix(line, "type ") || strings.HasPrefix(line, "export type ") {
+		parts := strings.Fields(line)
+		for i, part := range parts {
+			if part == "type" && i+1 < len(parts) {
+				name := parts[i+1]
+				if idx := strings.Index(name, "="); idx != -1 {
+					name = name[:idx]
+				}
+				name = strings.TrimSpace(name)
+				if idx := strings.IndexAny(name, "<{"); idx != -1 {
+					name = name[:idx]
+				}
+				if name != "" && isValidIdentifier(name) {
+					tc.symbolTable.DefineSymbol(name, symbols.TypeAliasSymbol, nil, false)
+				}
+				break
+			}
+		}
+	}
+}
+
+// extractGlobalDeclarationFromLine extracts a global symbol from a single line
+func (tc *TypeChecker) extractGlobalDeclarationFromLine(line string, lineIdx int, allLines []string) {
+	// Pattern: declare const NAME: TYPE;
+	// Pattern: declare var NAME: TYPE;
+	// Pattern: declare let NAME: TYPE;
+	if strings.HasPrefix(line, "declare const ") ||
+		strings.HasPrefix(line, "declare var ") ||
+		strings.HasPrefix(line, "declare let ") {
+
+		parts := strings.Fields(line)
+		if len(parts) >= 3 {
+			name := parts[2]
+			// Remove : and everything after it
+			if idx := strings.Index(name, ":"); idx != -1 {
+				name = name[:idx]
+			}
+			name = strings.TrimSuffix(name, ";")
+
+			if name != "" && isValidIdentifier(name) {
+				symbol := tc.symbolTable.DefineSymbol(name, symbols.VariableSymbol, nil, false)
+				symbol.FromDTS = true // Mark as coming from .d.ts
+				// Check if the type suggests it's callable
+				typeStr := tc.extractTypeFromDeclaration(line)
+				if typeStr != "" {
+					// Check if the type is a known callable interface
+					if tc.isTypeCallable(typeStr) {
+						symbol.IsFunction = true
+					} else {
+						// Look ahead in the file to see if this type becomes callable
+						tc.checkIfTypeIsCallable(symbol, typeStr, lineIdx, allLines)
+					}
+				}
+			}
+		}
+	}
+
+	// Pattern: declare function NAME(...): TYPE;
+	if strings.HasPrefix(line, "declare function ") {
+		parts := strings.Fields(line)
+		if len(parts) >= 3 {
+			name := parts[2]
+			if idx := strings.Index(name, "("); idx != -1 {
+				name = name[:idx]
+			}
+
+			if name != "" && isValidIdentifier(name) {
+				symbol := tc.symbolTable.DefineSymbol(name, symbols.FunctionSymbol, nil, false)
+				symbol.IsFunction = true
+				symbol.FromDTS = true // Mark as coming from .d.ts
+			}
+		}
+	}
+
+	// Pattern: export = NAME; (CommonJS export)
+	if strings.HasPrefix(line, "export =") || strings.HasPrefix(line, "export=") {
+		exportedName := strings.TrimPrefix(line, "export=")
+		exportedName = strings.TrimPrefix(exportedName, "export =")
+		exportedName = strings.TrimSpace(exportedName)
+		exportedName = strings.TrimSuffix(exportedName, ";")
+
+		if exportedName != "" && isValidIdentifier(exportedName) {
+			// The exported name might be defined elsewhere, just ensure it exists
+			if existing, ok := tc.symbolTable.ResolveSymbol(exportedName); ok && existing != nil {
+				// Create an alias or ensure it's accessible
+				tc.symbolTable.DefineSymbol(exportedName, existing.Type, nil, false)
+			}
+		}
+	}
+}
+
+// extractTypeFromDeclaration extracts the type annotation from a declaration line
+func (tc *TypeChecker) extractTypeFromDeclaration(line string) string {
+	if idx := strings.Index(line, ":"); idx != -1 {
+		typeStr := line[idx+1:]
+		typeStr = strings.TrimSuffix(typeStr, ";")
+		typeStr = strings.TrimSpace(typeStr)
+		return typeStr
+	}
+	return ""
+}
+
+// isTypeCallable checks if a type name refers to a callable interface already registered
+func (tc *TypeChecker) isTypeCallable(typeName string) bool {
+	// Clean up type name (remove generics, etc)
+	if idx := strings.Index(typeName, "<"); idx != -1 {
+		typeName = typeName[:idx]
+	}
+	typeName = strings.TrimSpace(typeName)
+
+	// Look up the symbol
+	if sym, ok := tc.symbolTable.ResolveSymbol(typeName); ok && sym != nil {
+		return sym.IsFunction
+	}
+	return false
+}
+
+// checkIfTypeIsCallable checks if a type name suggests the symbol should be callable
+// This is called when we find a variable declaration with a type that might be callable
+func (tc *TypeChecker) checkIfTypeIsCallable(symbol *symbols.Symbol, typeName string, lineIdx int, allLines []string) {
+	// Clean type name
+	if idx := strings.Index(typeName, "<"); idx != -1 {
+		typeName = typeName[:idx]
+	}
+	typeName = strings.TrimSpace(typeName)
+
+	// Look for the interface definition in the current file
+	for i := 0; i < len(allLines); i++ {
+		line := strings.TrimSpace(allLines[i])
+		// Check if this line defines the interface/type
+		if strings.Contains(line, "interface "+typeName) || strings.Contains(line, "type "+typeName) {
+			// Look ahead for call signature
+			depth := 0
+			for j := i; j < len(allLines) && j < i+100; j++ {
+				checkLine := strings.TrimSpace(allLines[j])
+				depth += strings.Count(allLines[j], "{") - strings.Count(allLines[j], "}")
+
+				// Check for call signature patterns
+				// Pattern 1: (args): returnType;
+				if strings.HasPrefix(checkLine, "(") && (strings.Contains(checkLine, "):") || strings.Contains(checkLine, "): ")) {
+					symbol.IsFunction = true
+					return
+				}
+				// Pattern 2: generic call signature <T>(args): ReturnType;
+				if strings.Contains(checkLine, "(") && (strings.Contains(checkLine, "):") || strings.Contains(checkLine, "): ")) {
+					if strings.Contains(checkLine, "<") && strings.Index(checkLine, "<") < strings.Index(checkLine, "(") {
+						symbol.IsFunction = true
+						return
+					}
+				}
+
+				if depth <= 0 && j > i {
+					break
+				}
+			}
+		}
 	}
 }
 

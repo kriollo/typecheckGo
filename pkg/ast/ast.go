@@ -540,6 +540,30 @@ func (t *ThrowStatement) Pos() Position { return t.Position }
 func (t *ThrowStatement) End() Position { return t.EndPos }
 func (t *ThrowStatement) stmtNode()     {}
 
+// BreakStatement represents break statement
+type BreakStatement struct {
+	Label    *Identifier // optional label
+	Position Position
+	EndPos   Position
+}
+
+func (b *BreakStatement) Type() string  { return "BreakStatement" }
+func (b *BreakStatement) Pos() Position { return b.Position }
+func (b *BreakStatement) End() Position { return b.EndPos }
+func (b *BreakStatement) stmtNode()     {}
+
+// ContinueStatement represents continue statement
+type ContinueStatement struct {
+	Label    *Identifier // optional label
+	Position Position
+	EndPos   Position
+}
+
+func (c *ContinueStatement) Type() string  { return "ContinueStatement" }
+func (c *ContinueStatement) Pos() Position { return c.Position }
+func (c *ContinueStatement) End() Position { return c.EndPos }
+func (c *ContinueStatement) stmtNode()     {}
+
 // AssignmentExpression represents an assignment x = value
 type AssignmentExpression struct {
 	Left     Expression

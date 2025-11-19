@@ -385,6 +385,7 @@ func NewGlobalEnvironmentWithLibs(libs []string) *GlobalEnvironment {
 		// Register DOM globals
 		env.Objects["document"] = documentType
 		env.Objects["window"] = windowType
+		env.Objects["location"] = locationType
 		env.Objects["fetch"] = NewFunctionType([]*Type{String, Any}, promiseType)
 		env.Objects["Event"] = eventType
 		env.Objects["HTMLElement"] = htmlElementType
@@ -396,6 +397,10 @@ func NewGlobalEnvironmentWithLibs(libs []string) *GlobalEnvironment {
 		env.Objects["IntersectionObserver"] = intersectionObserverType
 		env.Objects["FormData"] = formDataType
 	}
+
+	// Check for common third-party libraries in node_modules/@types
+	// and add their globals if they exist
+	env.addThirdPartyGlobals()
 
 	// Constantes globales
 	env.Objects["undefined"] = Undefined
@@ -415,6 +420,13 @@ func NewGlobalEnvironmentWithLibs(libs []string) *GlobalEnvironment {
 	}
 
 	return env
+}
+
+// addThirdPartyGlobals checks for installed @types packages and adds their globals
+func (env *GlobalEnvironment) addThirdPartyGlobals() {
+	// This function is intentionally left minimal
+	// Type definitions from @types packages are loaded via the checker's
+	// extractGlobalsFromFile method which handles .d.ts files generically
 }
 
 // GetType retorna un tipo por nombre

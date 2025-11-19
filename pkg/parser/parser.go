@@ -145,6 +145,14 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 		return p.parseThrowStatement()
 	}
 
+	if p.matchKeyword("break") {
+		return p.parseBreakStatement()
+	}
+
+	if p.matchKeyword("continue") {
+		return p.parseContinueStatement()
+	}
+
 	if p.matchKeyword("import") {
 		return p.parseImportDeclaration()
 	}
@@ -3967,6 +3975,64 @@ func (p *parser) parseDeclareGlobal(startPos ast.Position) (ast.Statement, error
 
 	return &ast.BlockStatement{
 		Body:     body,
+		Position: startPos,
+		EndPos:   p.currentPos(),
+	}, nil
+}
+
+// parseBreakStatement parses: break [label];
+func (p *parser) parseBreakStatement() (*ast.BreakStatement, error) {
+	startPos := p.currentPos()
+	p.consumeKeyword("break")
+	p.skipWhitespaceAndComments()
+
+	var label *ast.Identifier
+	// Check for optional label
+	if p.matchIdentifier() && !p.match(";") && !p.match("\n") {
+		var err error
+		label, err = p.parseIdentifier()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	p.skipWhitespaceAndComments()
+	// Optional semicolon
+	if p.match(";") {
+		p.advance()
+	}
+
+	return &ast.BreakStatement{
+		Label:    label,
+		Position: startPos,
+		EndPos:   p.currentPos(),
+	}, nil
+}
+
+// parseContinueStatement parses: continue [label];
+func (p *parser) parseContinueStatement() (*ast.ContinueStatement, error) {
+	startPos := p.currentPos()
+	p.consumeKeyword("continue")
+	p.skipWhitespaceAndComments()
+
+	var label *ast.Identifier
+	// Check for optional label
+	if p.matchIdentifier() && !p.match(";") && !p.match("\n") {
+		var err error
+		label, err = p.parseIdentifier()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	p.skipWhitespaceAndComments()
+	// Optional semicolon
+	if p.match(";") {
+		p.advance()
+	}
+
+	return &ast.ContinueStatement{
+		Label:    label,
 		Position: startPos,
 		EndPos:   p.currentPos(),
 	}, nil

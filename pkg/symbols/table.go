@@ -18,6 +18,7 @@ type Symbol struct {
 	Hoisted    bool
 	IsFunction bool
 	Params     []string
+	FromDTS    bool // True if this symbol was loaded from a .d.ts file
 }
 
 // SymbolType represents the type of symbol
