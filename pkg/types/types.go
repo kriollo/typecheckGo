@@ -356,6 +356,11 @@ func (t *Type) IsAssignableTo(target *Type) bool {
 		return target.Kind == UnknownType || target.Kind == AnyType
 	}
 
+	// unknown es el top type: todo es asignable a unknown
+	if target.Kind == UnknownType {
+		return true
+	}
+
 	// never es asignable a todo
 	if t.Kind == NeverType {
 		return true

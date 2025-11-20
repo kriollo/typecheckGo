@@ -15,7 +15,7 @@
                 "./src/*"
             ],
             "P@/*": [
-                "./assets/*"
+                "./public/*"
             ],
             "N@/*": [
                 "./node_modules/*"

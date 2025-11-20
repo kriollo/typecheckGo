@@ -99,6 +99,27 @@ func (p *parser) parseFile() (*ast.File, error) {
 	}, nil
 }
 
+// ParserState captures the full state of the parser at a specific point
+type ParserState struct {
+	Pos    int
+	Line   int
+	Column int
+}
+
+func (p *parser) saveState() ParserState {
+	return ParserState{
+		Pos:    p.pos,
+		Line:   p.line,
+		Column: p.column,
+	}
+}
+
+func (p *parser) restoreState(state ParserState) {
+	p.pos = state.Pos
+	p.line = state.Line
+	p.column = state.Column
+}
+
 func (p *parser) parseStatement() (ast.Statement, error) {
 	p.skipWhitespaceAndComments()
 
@@ -111,7 +132,7 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 
 	// Handle async function declarations
 	if p.matchKeyword("async") {
-		savedPos := p.pos
+		state := p.saveState()
 		p.advanceWord()
 		p.skipWhitespaceAndComments()
 
@@ -124,8 +145,8 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 			return funcDecl, nil
 		}
 
-		// Not an async function, restore position
-		p.pos = savedPos
+		// Not an async function, restore state
+		p.restoreState(state)
 	}
 
 	if p.matchKeyword("function") {
@@ -1644,7 +1665,7 @@ func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 
 	// Check for async arrow function or async function expression
 	if p.matchKeyword("async") {
-		savedPos := p.pos
+		state := p.saveState()
 		p.advanceWord()
 		p.skipWhitespaceAndComments()
 
@@ -1657,7 +1678,7 @@ func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 		// Check if followed by ( for async (params) => or identifier for async x =>
 		if p.match("(") || p.matchIdentifier() {
 			// Look ahead to confirm it's an arrow function
-			tempPos := p.pos
+			tempState := p.saveState()
 			isAsyncArrow := false
 
 			if p.match("(") {
@@ -1702,21 +1723,21 @@ func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 
 			if isAsyncArrow {
 				// Reset and parse as arrow function
-				p.pos = savedPos
+				p.restoreState(state)
 				return p.parseArrowFunction()
 			}
 
 			// Not an arrow function, restore position
-			p.pos = tempPos
+			p.restoreState(tempState)
 		}
 
 		// Not an async arrow function or async function expression, restore
-		p.pos = savedPos
+		p.restoreState(state)
 	}
 
 	// Check for generic arrow function: <T>(x: T) => T or <T = unknown>(x: T) => T
 	if p.match("<") {
-		savedPos := p.pos
+		state := p.saveState()
 		p.advance()
 		p.skipWhitespaceAndComments()
 
@@ -1770,13 +1791,13 @@ func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 		}
 
 		if isGenericArrow {
-			p.pos = savedPos
+			p.restoreState(state)
 			return p.parseArrowFunction()
 		}
 
 		// Try to parse as type assertion: <Type>expression
 		// Look for pattern: <Type> followed by expression (not an operator)
-		p.pos = savedPos
+		p.restoreState(state)
 		p.advance() // consume <
 		p.skipWhitespaceAndComments()
 
@@ -1809,12 +1830,12 @@ func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 		}
 
 		// Not a type assertion, restore
-		p.pos = savedPos
+		p.restoreState(state)
 	}
 
 	// Handle parentheses (could be grouped expression or arrow function params)
 	if p.match("(") {
-		savedPos := p.pos
+		state := p.saveState()
 
 		// Try to parse as arrow function parameters
 		p.advance()
@@ -1836,39 +1857,24 @@ func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 			if p.match("=") && p.peek(1) == ">" {
 				isArrowFunc = true
 			}
-		} else if p.match("{") || p.match("[") {
-			// Could be destructuring param ({...}) => ... or ([...]) => ...
-			// Or grouped object/array literal ({...}) or ([...])
-			// Need to look ahead further to determine
-			tempPos := p.pos
+		} else {
+			// Non-empty params heuristic
 			depth := 1
-			openChar := p.current()
-			closeChar := "}"
-			if openChar == "[" {
-				closeChar = "]"
-			}
-			p.advance() // consume { or [
-
-			// Skip the entire object/array destructuring pattern
 			for depth > 0 && !p.isAtEnd() {
-				if string(p.current()) == string(openChar) {
+				if p.match("(") {
 					depth++
-				} else if string(p.current()) == closeChar {
+				} else if p.match(")") {
 					depth--
+					if depth == 0 {
+						break
+					}
 				}
 				p.advance()
-				if depth == 0 {
-					break
-				}
 			}
 
-			p.skipWhitespaceAndComments()
-
-			// Check if followed by ): Type => or ) =>
 			if p.match(")") {
-				p.advance()
+				p.advance() // consume )
 				p.skipWhitespaceAndComments()
-				// Check for return type annotation
 				if p.match(":") {
 					p.advance()
 					p.skipWhitespaceAndComments()
@@ -1879,176 +1885,41 @@ func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 					isArrowFunc = true
 				}
 			}
-
-			// Restore position
-			p.pos = tempPos
-		} else if p.match("...") {
-			// Rest parameter (...args) => ...
-			isArrowFunc = true
-		} else if p.matchIdentifier() {
-			// Could be (x) => ... or (x, y) => ...
-			// Save position and try to parse params
-			tempPos := p.pos
-			paramIter := 0
-			for !p.match(")") && !p.isAtEnd() && paramIter < maxParserIterations {
-				paramIter++
-				if p.matchIdentifier() {
-					p.advanceWord()
-					p.skipWhitespaceAndComments()
-					if p.match(":") {
-						p.advance()
-						p.skipWhitespaceAndComments()
-						p.skipTypeAnnotation()
-						p.skipWhitespaceAndComments()
-					}
-					if p.match("=") {
-						p.advance()
-						p.skipWhitespaceAndComments()
-						// Skip default value
-						depth := 0
-						for !p.isAtEnd() && paramIter < maxParserIterations {
-							if p.match("(") || p.match("[") || p.match("{") {
-								depth++
-							} else if p.match(")") || p.match("]") || p.match("}") {
-								if depth == 0 && (p.match(")") || p.match(",")) {
-									break
-								}
-								depth--
-							} else if p.match(",") && depth == 0 {
-								break
-							}
-							p.advance()
-						}
-						p.skipWhitespaceAndComments()
-					}
-				} else if p.match("{") || p.match("[") {
-					// Destructuring parameter
-					depth := 0
-					startChar := p.current()
-					p.advance()
-					depth++
-					for depth > 0 && !p.isAtEnd() {
-						if string(p.current()) == startChar {
-							depth++
-						} else if (startChar == "{" && p.match("}")) || (startChar == "[" && p.match("]")) {
-							depth--
-						}
-						p.advance()
-						if depth == 0 {
-							break
-						}
-					}
-					p.skipWhitespaceAndComments()
-
-					// Type annotation
-					if p.match(":") {
-						p.advance()
-						p.skipWhitespaceAndComments()
-						p.skipTypeAnnotation()
-						p.skipWhitespaceAndComments()
-					}
-
-					// Default value
-					if p.match("=") {
-						p.advance()
-						p.skipWhitespaceAndComments()
-						// Skip default value
-						depth := 0
-						for !p.isAtEnd() && paramIter < maxParserIterations {
-							if p.match("(") || p.match("[") || p.match("{") {
-								depth++
-							} else if p.match(")") || p.match("]") || p.match("}") {
-								if depth == 0 && (p.match(")") || p.match(",")) {
-									break
-								}
-								depth--
-							} else if p.match(",") && depth == 0 {
-								break
-							}
-							p.advance()
-						}
-						p.skipWhitespaceAndComments()
-					}
-				} else if p.match("...") {
-					// Rest parameter
-					p.advanceString(3)
-					p.skipWhitespaceAndComments()
-					if p.matchIdentifier() {
-						p.advanceWord()
-						p.skipWhitespaceAndComments()
-						if p.match(":") {
-							p.advance()
-							p.skipWhitespaceAndComments()
-							p.skipTypeAnnotation()
-							p.skipWhitespaceAndComments()
-						}
-					}
-				} else {
-					break
-				}
-
-				if p.match(",") {
-					p.advance()
-					p.skipWhitespaceAndComments()
-				}
-			}
-			if p.match(")") {
-				p.advance()
-				p.skipWhitespaceAndComments()
-				// Check for return type annotation
-				if p.match(":") {
-					p.advance()
-					p.skipWhitespaceAndComments()
-					p.skipTypeAnnotation()
-					p.skipWhitespaceAndComments()
-				}
-				if p.match("=") && p.peek(1) == ">" {
-					isArrowFunc = true
-				}
-			}
-			// Restore position
-			p.pos = tempPos
 		}
 
 		if isArrowFunc {
-			// Reset to start and parse as arrow function
-			p.pos = savedPos
+			p.restoreState(state)
 			return p.parseArrowFunction()
 		}
 
-		// Reset and parse as grouped expression
-		p.pos = savedPos
-		p.advance()
-		p.skipWhitespaceAndComments()
-
+		// If not arrow function, restore and parse as grouped expression
+		p.restoreState(state)
+		p.advance() // consume (
 		expr, err := p.parseExpression()
 		if err != nil {
 			return nil, err
 		}
-
-		p.skipWhitespaceAndComments()
 		if !p.match(")") {
 			return nil, fmt.Errorf("expected ')' after expression at %s", p.currentPos())
 		}
-		p.advance()
-
+		p.advance() // consume )
 		return expr, nil
 	}
 
 	// Single identifier arrow function: x => expr
 	if p.matchIdentifier() {
-		savedPos := p.pos
+		state := p.saveState()
 		p.advanceWord()
 		p.skipWhitespaceAndComments()
 
 		if p.match("=") && p.peek(1) == ">" {
 			// This is an arrow function
-			p.pos = savedPos
+			p.restoreState(state)
 			return p.parseArrowFunction()
 		}
 
 		// Not an arrow function, restore and parse as identifier
-		p.pos = savedPos
+		p.restoreState(state)
 	}
 
 	// new expression
@@ -2091,18 +1962,12 @@ func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 		}
 
 		// Parse the argument (value to yield)
-		// yield can be used without an argument
 		var argument ast.Expression
-
-		// Check if there's an expression following yield
-		// yield is followed by expression if not at statement end (;, }, newline)
 		if !p.match(";") && !p.match("}") && !p.match("\n") && !p.isAtEnd() {
-			// Try to parse an expression
 			arg, err := p.parseAssignmentExpression()
 			if err == nil {
 				argument = arg
 			}
-			// If error, treat as yield without argument (ignore error)
 		}
 
 		return &ast.YieldExpression{
@@ -2113,55 +1978,26 @@ func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 		}, nil
 	}
 
-	if p.matchKeyword("true", "false") {
-		startPos := p.currentPos()
-		value := p.advanceWord()
-		return &ast.Literal{
-			Value:    value == "true",
-			Raw:      value,
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		}, nil
-	}
-
-	if p.matchNumber() {
-		startPos := p.currentPos()
-		num := p.advanceNumber()
-		return &ast.Literal{
-			Value:    num,
-			Raw:      num,
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		}, nil
-	}
-
-	// Regex literal - simple heuristic: / followed by non-whitespace
-	// This is a HACK and doesn't handle all edge cases, but works for common patterns
+	// Regex literal
 	if p.match("/") {
 		startPos := p.currentPos()
 		p.advance() // consume /
 
-		// Find closing / (skip escaped characters and character classes)
 		inCharClass := false
 		for !p.isAtEnd() {
 			if p.source[p.pos] == '\\' {
-				// Skip escaped character
 				p.advance()
 				if !p.isAtEnd() {
 					p.advance()
 				}
 			} else if p.source[p.pos] == '[' && !inCharClass {
-				// Entering character class
 				inCharClass = true
 				p.advance()
 			} else if p.source[p.pos] == ']' && inCharClass {
-				// Exiting character class
 				inCharClass = false
 				p.advance()
 			} else if p.source[p.pos] == '/' && !inCharClass {
-				// Found closing / (only if not in character class)
 				p.advance() // consume closing /
-				// Parse flags (i, g, m, etc.)
 				for !p.isAtEnd() && (unicode.IsLetter(rune(p.source[p.pos])) || unicode.IsDigit(rune(p.source[p.pos]))) {
 					p.advance()
 				}
@@ -2201,7 +2037,7 @@ func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 		return p.parseObjectLiteral()
 	}
 
-	// Function expression: function() {} or function name() {}
+	// Function expression
 	if p.matchKeyword("function") {
 		return p.parseFunctionExpression()
 	}
@@ -2221,170 +2057,18 @@ func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 	// Boolean literal
 	if p.matchKeyword("true", "false") {
 		startPos := p.currentPos()
-		val := p.advanceWord()
-		return &ast.Literal{
-			Value:    val,
-			Raw:      val,
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		}, nil
-	}
-
-	// Null literal
-	if p.matchKeyword("null") {
-		startPos := p.currentPos()
-		val := p.advanceWord()
-		return &ast.Literal{
-			Value:    val,
-			Raw:      val,
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		}, nil
-	}
-
-	// Undefined
-	if p.matchKeyword("undefined") {
-		startPos := p.currentPos()
-		val := p.advanceWord()
-		return &ast.Identifier{
-			Name:     val,
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		}, nil
-	}
-
-	// This
-	if p.matchKeyword("this") {
-		startPos := p.currentPos()
-		p.advanceWord()
-		return &ast.ThisExpression{
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		}, nil
-	}
-
-	// super expression
-	if p.matchKeyword("super") {
-		startPos := p.currentPos()
-		p.advanceWord()
-		return &ast.SuperExpression{
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		}, nil
-	}
-
-	if p.matchKeyword("true", "false") {
-		startPos := p.currentPos()
-		value := p.advanceWord()
-		return &ast.Literal{
-			Value:    value == "true",
-			Raw:      value,
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		}, nil
-	}
-
-	if p.matchNumber() {
-		startPos := p.currentPos()
-		num := p.advanceNumber()
-		return &ast.Literal{
-			Value:    num,
-			Raw:      num,
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		}, nil
-	}
-
-	// Regex literal - simple heuristic: / followed by non-whitespace
-	// This is a HACK and doesn't handle all edge cases, but works for common patterns
-	if p.match("/") {
-		startPos := p.currentPos()
-		p.advance() // consume /
-
-		// Find closing / (skip escaped characters and character classes)
-		inCharClass := false
-		for !p.isAtEnd() {
-			if p.source[p.pos] == '\\' {
-				// Skip escaped character
-				p.advance()
-				if !p.isAtEnd() {
-					p.advance()
-				}
-			} else if p.source[p.pos] == '[' && !inCharClass {
-				// Entering character class
-				inCharClass = true
-				p.advance()
-			} else if p.source[p.pos] == ']' && inCharClass {
-				// Exiting character class
-				inCharClass = false
-				p.advance()
-			} else if p.source[p.pos] == '/' && !inCharClass {
-				// Found closing / (only if not in character class)
-				p.advance() // consume closing /
-				// Parse flags (i, g, m, etc.)
-				for !p.isAtEnd() && (unicode.IsLetter(rune(p.source[p.pos])) || unicode.IsDigit(rune(p.source[p.pos]))) {
-					p.advance()
-				}
-				break
-			} else {
-				p.advance()
-			}
+		if os.Getenv("DEBUG_PARSER") == "1" {
+			fmt.Fprintf(os.Stderr, "DEBUG: Boolean found at pos=%d, line=%d, col=%d\n", p.pos, p.line, p.column)
 		}
-
-		raw := string(p.source[startPos.Column-1 : p.pos])
+		valStr := p.advanceWord()
+		if os.Getenv("DEBUG_PARSER") == "1" {
+			fmt.Fprintf(os.Stderr, "DEBUG: After advanceWord pos=%d, line=%d, col=%d\n", p.pos, p.line, p.column)
+		}
+		// Convert string to bool
+		boolVal := valStr == "true"
 		return &ast.Literal{
-			Value:    raw,
-			Raw:      raw,
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		}, nil
-	}
-
-	if p.matchString() {
-		startPos := p.currentPos()
-		str := p.advanceStringLiteral()
-		return &ast.Literal{
-			Value:    str[1 : len(str)-1], // Remove quotes
-			Raw:      str,
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		}, nil
-	}
-
-	// Array literal
-	if p.match("[") {
-		return p.parseArrayLiteral()
-	}
-
-	// Object literal
-	if p.match("{") {
-		return p.parseObjectLiteral()
-	}
-
-	// Function expression: function() {} or function name() {}
-	if p.matchKeyword("function") {
-		return p.parseFunctionExpression()
-	}
-
-	// Number literal
-	if p.matchNumber() {
-		startPos := p.currentPos()
-		num := p.advanceNumber()
-		return &ast.Literal{
-			Value:    num,
-			Raw:      num,
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		}, nil
-	}
-
-	// Boolean literal
-	if p.matchKeyword("true", "false") {
-		startPos := p.currentPos()
-		val := p.advanceWord()
-		return &ast.Literal{
-			Value:    val,
-			Raw:      val,
+			Value:    boolVal,
+			Raw:      valStr,
 			Position: startPos,
 			EndPos:   p.currentPos(),
 		}, nil
@@ -2408,16 +2092,6 @@ func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 		val := p.advanceWord()
 		return &ast.Identifier{
 			Name:     val,
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		}, nil
-	}
-
-	// This
-	if p.matchKeyword("this") {
-		startPos := p.currentPos()
-		p.advanceWord()
-		return &ast.ThisExpression{
 			Position: startPos,
 			EndPos:   p.currentPos(),
 		}, nil
@@ -3242,17 +2916,21 @@ func (p *parser) advance() string {
 		return ""
 	}
 
-	char := p.source[p.pos]
-	p.pos++
+	r, width := utf8.DecodeRuneInString(p.source[p.pos:])
+	p.pos += width
 
-	if char == '\n' {
+	if r == '\n' {
 		p.line++
 		p.column = 1
 	} else {
 		p.column++
 	}
 
-	return string(char)
+	if os.Getenv("DEBUG_PARSER") == "1" {
+		fmt.Fprintf(os.Stderr, "ADVANCE: char='%c' pos=%d col=%d\n", r, p.pos, p.column)
+	}
+
+	return string(r)
 }
 
 func (p *parser) peek(offset int) string {
@@ -3340,6 +3018,10 @@ func (p *parser) peekWord() string {
 
 	word := p.source[start:p.pos]
 	p.pos = start // Reset position
+
+	if os.Getenv("DEBUG_PARSER") == "1" {
+		fmt.Fprintf(os.Stderr, "PEEKWORD: start=%d restored=%d word='%s'\n", start, p.pos, word)
+	}
 
 	return word
 }

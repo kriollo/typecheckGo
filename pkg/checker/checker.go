@@ -360,6 +360,15 @@ func (tc *TypeChecker) checkFunctionDeclaration(decl *ast.FunctionDeclaration, f
 					fmt.Sprintf("Parameter '%s' implicitly has an 'any' type.", param.ID.Name),
 					"TS7006", "error")
 			}
+
+			// Store parameter type in varTypeCache if it has a type annotation
+			if param.ParamType != nil {
+				paramType := tc.convertTypeNode(param.ParamType)
+				if paramType != nil {
+					tc.varTypeCache[param.ID.Name] = paramType
+					tc.typeCache[param.ID] = paramType
+				}
+			}
 		}
 	}
 
@@ -850,6 +859,18 @@ func (tc *TypeChecker) checkArrowFunction(arrow *ast.ArrowFunctionExpression, fi
 		}
 	}
 
+	// Store parameter types in varTypeCache so they can be resolved in the function body
+	for _, param := range arrow.Params {
+		if param.ID != nil && param.ParamType != nil {
+			// Convert the TypeNode to a Type
+			paramType := tc.convertTypeNode(param.ParamType)
+			if paramType != nil {
+				tc.varTypeCache[param.ID.Name] = paramType
+				tc.typeCache[param.ID] = paramType
+			}
+		}
+	}
+
 	// Find the scope for the arrow function that was created by the binder
 	arrowScope := tc.findScopeForNode(arrow)
 	if arrowScope != nil {
@@ -1265,7 +1286,7 @@ func isReservedKeyword(name string) bool {
 		"implements", "interface", "package", "private", "protected",
 		"public", "static", "abstract", "as", "async", "await", "constructor",
 		"declare", "from", "get", "is", "module", "namespace", "of",
-		"require", "set", "type", "",
+		"require", "set",
 	}
 
 	for _, keyword := range keywords {
@@ -1616,10 +1637,7 @@ func (tc *TypeChecker) getExpressionType(expr ast.Expression) *types.Type {
 			}
 		}
 
-		// If we can't resolve it, return the object type or Any
-		if objectType.Kind != types.UnknownType {
-			return objectType
-		}
+		// If we can't resolve it, return Any (to avoid false positives)
 		return types.Any
 	}
 
@@ -1641,6 +1659,11 @@ func (tc *TypeChecker) getExpressionType(expr ast.Expression) *types.Type {
 func (tc *TypeChecker) isAssignableTo(sourceType, targetType *types.Type) bool {
 	// Any is assignable to and from anything
 	if targetType.Kind == types.AnyType || sourceType.Kind == types.AnyType {
+		return true
+	}
+
+	// Unknown is the top type: anything is assignable TO unknown
+	if targetType.Kind == types.UnknownType {
 		return true
 	}
 
