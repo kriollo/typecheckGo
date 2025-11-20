@@ -77,10 +77,10 @@ func (b *Binder) bindStatement(stmt ast.Statement) {
 		// We just skip them silently
 		return
 	case *ast.EnumDeclaration:
-		// Enum declarations define both a type and a value
-		// Bind the enum name as a type symbol
+		// Enum declarations define both a type and a value (namespace object in runtime)
+		// In TypeScript, enums are both types and values
 		if s.Name != nil {
-			b.table.DefineSymbol(s.Name.Name, TypeAliasSymbol, s, false)
+			b.table.DefineSymbol(s.Name.Name, EnumSymbol, s, false)
 		}
 	default:
 		// Unknown statement type
@@ -462,6 +462,15 @@ func (b *Binder) bindExportDeclaration(decl *ast.ExportDeclaration) {
 			if d.ID != nil {
 				if symbol, exists := b.table.ResolveSymbol(d.ID.Name); exists {
 					b.table.AddExport("", d.ID.Name, symbol)
+				}
+			}
+		case *ast.EnumDeclaration:
+			// First bind the enum normally (binds via bindStatement)
+			b.bindStatement(d)
+			// Then mark it as exported
+			if d.Name != nil {
+				if symbol, exists := b.table.ResolveSymbol(d.Name.Name); exists {
+					b.table.AddExport("", d.Name.Name, symbol)
 				}
 			}
 		}

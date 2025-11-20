@@ -32,6 +32,7 @@ const (
 	ModuleSymbol
 	InterfaceSymbol
 	TypeAliasSymbol
+	EnumSymbol
 )
 
 func (st SymbolType) String() string {
@@ -48,6 +49,8 @@ func (st SymbolType) String() string {
 		return "interface"
 	case TypeAliasSymbol:
 		return "type alias"
+	case EnumSymbol:
+		return "enum"
 	default:
 		return "unknown"
 	}
