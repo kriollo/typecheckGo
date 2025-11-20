@@ -31,7 +31,7 @@ type TypeCache struct {
 // NewTypeCache creates a new type cache
 func NewTypeCache(rootDir string) *TypeCache {
 	cacheDir := filepath.Join(rootDir, ".tscheck_cache")
-	os.MkdirAll(cacheDir, 0755)
+	_ = os.MkdirAll(cacheDir, 0755) // Best effort, cache is optional
 
 	return &TypeCache{
 		cacheDir: cacheDir,

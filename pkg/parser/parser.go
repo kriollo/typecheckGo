@@ -2,7 +2,7 @@ package parser
 
 import (
 	"fmt"
-	"io/ioutil"
+	"os"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -13,7 +13,7 @@ import (
 // ParseFile parses a TypeScript file and returns our AST representation
 func ParseFile(filename string) (*ast.File, error) {
 	// Read file content
-	content, err := ioutil.ReadFile(filename)
+	content, err := os.ReadFile(filename)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file %s: %w", filename, err)
 	}
@@ -3500,13 +3500,6 @@ func (p *parser) parseStringLiteral() (string, error) {
 	return "", fmt.Errorf("expected string literal")
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 // parseTryStatement parses try-catch-finally statements
 func (p *parser) parseTryStatement() (ast.Statement, error) {
 	startPos := p.currentPos()
@@ -3615,7 +3608,8 @@ func (p *parser) parseTryStatement() (ast.Statement, error) {
 		return nil, fmt.Errorf("missing catch or finally after try at %s", startPos)
 	}
 
-	endPos := p.currentPos()
+	// Determine end position from the last component
+	var endPos ast.Position
 	if finalizer != nil {
 		endPos = finalizer.End()
 	} else if handler != nil {

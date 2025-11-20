@@ -76,6 +76,12 @@ func (b *Binder) bindStatement(stmt ast.Statement) {
 		// These are type-only declarations and don't need symbol binding
 		// We just skip them silently
 		return
+	case *ast.EnumDeclaration:
+		// Enum declarations define both a type and a value
+		// Bind the enum name as a type symbol
+		if s.Name != nil {
+			b.table.DefineSymbol(s.Name.Name, TypeAliasSymbol, s, false)
+		}
 	default:
 		// Unknown statement type
 		fmt.Printf("Warning: Unknown statement type: %T\n", stmt)
@@ -278,11 +284,9 @@ func (b *Binder) bindExpression(expr ast.Expression) {
 
 func (b *Binder) bindIdentifier(id *ast.Identifier) {
 	// Check if the identifier is defined
-	if _, exists := b.table.ResolveSymbol(id.Name); !exists {
-		// This will be reported as an error during type checking
-		// For now, we just note that it's an unresolved reference
-		return
-	}
+	_, ok := b.table.ResolveSymbol(id.Name)
+	_ = ok // Variable kept for potential future use in debugging
+	// Unresolved references will be reported as errors during type checking
 }
 
 func (b *Binder) bindCallExpression(call *ast.CallExpression) {
@@ -425,6 +429,33 @@ func (b *Binder) bindExportDeclaration(decl *ast.ExportDeclaration) {
 					if symbol, exists := b.table.ResolveSymbol(declarator.ID.Name); exists {
 						b.table.AddExport("", declarator.ID.Name, symbol)
 					}
+				}
+			}
+		case *ast.ClassDeclaration:
+			// First bind the class normally
+			b.bindClassDeclaration(d)
+			// Then mark it as exported
+			if d.ID != nil {
+				if symbol, exists := b.table.ResolveSymbol(d.ID.Name); exists {
+					b.table.AddExport("", d.ID.Name, symbol)
+				}
+			}
+		case *ast.TypeAliasDeclaration:
+			// First bind the type alias normally
+			b.bindTypeAliasDeclaration(d)
+			// Then mark it as exported
+			if d.ID != nil {
+				if symbol, exists := b.table.ResolveSymbol(d.ID.Name); exists {
+					b.table.AddExport("", d.ID.Name, symbol)
+				}
+			}
+		case *ast.InterfaceDeclaration:
+			// First bind the interface normally
+			b.bindInterfaceDeclaration(d)
+			// Then mark it as exported
+			if d.ID != nil {
+				if symbol, exists := b.table.ResolveSymbol(d.ID.Name); exists {
+					b.table.AddExport("", d.ID.Name, symbol)
 				}
 			}
 		}

@@ -49,7 +49,8 @@ func GetAST(code, filename string) (string, error) {
 }
 
 func main() {
-	fmt.Println("=== TypeScript Type Checker Examples ===\n")
+	fmt.Println("=== TypeScript Type Checker Examples ===")
+	fmt.Println()
 
 	// Example 1: Valid TypeScript code
 	fmt.Println("1. Checking valid TypeScript code:")

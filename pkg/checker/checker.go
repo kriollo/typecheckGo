@@ -244,6 +244,8 @@ func (tc *TypeChecker) checkStatement(stmt ast.Statement, filename string) {
 		// These are type-only declarations and don't need runtime checking
 		// We just skip them silently
 		return
+	case *ast.EnumDeclaration:
+		tc.checkEnumDeclaration(s, filename)
 	default:
 		// Unknown statement type - just a warning, don't block compilation
 		fmt.Fprintf(os.Stderr, "Warning: Unknown statement type: %T\n", stmt)
@@ -294,9 +296,15 @@ func (tc *TypeChecker) checkVariableDeclaration(decl *ast.VariableDeclaration, f
 
 				// If there's a type annotation, check compatibility with initializer type
 				if declaredType != nil {
-					if !tc.isAssignableTo(inferredType, declaredType) {
+					// Special handling for literal assignments to union types
+					typeToCheck := inferredType
+					if tc.needsLiteralType(declaredType) {
+						typeToCheck = tc.inferLiteralType(declarator.Init)
+					}
+
+					if !tc.isAssignableTo(typeToCheck, declaredType) {
 						tc.addError(filename, declarator.Init.Pos().Line, declarator.Init.Pos().Column,
-							fmt.Sprintf("Type '%s' is not assignable to type '%s'.", inferredType.String(), declaredType.String()),
+							fmt.Sprintf("Type '%s' is not assignable to type '%s'.", typeToCheck.String(), declaredType.String()),
 							"TS2322", "error")
 					}
 					// Store the declared type (not the inferred type) in the cache
@@ -435,7 +443,7 @@ func (tc *TypeChecker) checkReturnStatement(ret *ast.ReturnStatement, filename s
 		if tc.currentFunction != nil {
 			existingReturnType, exists := tc.typeCache[tc.currentFunction]
 			if exists && existingReturnType.Kind != types.VoidType && existingReturnType.Kind != types.AnyType {
-				msg := fmt.Sprintf("A function whose declared type is neither 'void' nor 'any' must return a value.")
+				msg := "A function whose declared type is neither 'void' nor 'any' must return a value."
 				msg += "\n  Sugerencia: Agrega un valor de retorno o cambia el tipo de retorno a 'void'"
 				tc.addError(filename, ret.Pos().Line, ret.Pos().Column, msg, "TS2355", "error")
 			} else if !exists {
@@ -953,6 +961,9 @@ func (tc *TypeChecker) checkMemberExpression(member *ast.MemberExpression, filen
 }
 
 // getObjectName returns a readable name for an expression (for error messages)
+// getObjectName recursively constructs the name of an object from an expression.
+// This is useful for generating descriptive error messages.
+// Currently used in commented code for TS18046 errors, kept for future enhancements.
 func (tc *TypeChecker) getObjectName(expr ast.Expression) string {
 	switch e := expr.(type) {
 	case *ast.Identifier:
@@ -1043,12 +1054,7 @@ func levenshteinDistance(s1, s2 string) int {
 	return matrix[len(s1)][len(s2)]
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
+// Note: Using Go 1.21+ built-in min() function
 
 // Helper functions
 func (tc *TypeChecker) addError(file string, line, column int, message, code, severity string) {
@@ -1078,6 +1084,31 @@ func (tc *TypeChecker) HasErrors() bool {
 // GetSymbolTable returns the symbol table for inspection
 func (tc *TypeChecker) GetSymbolTable() *symbols.SymbolTable {
 	return tc.symbolTable
+}
+
+// Clear releases memory by clearing internal caches.
+// Call this after processing a file to prevent memory leaks in long-running processes.
+func (tc *TypeChecker) Clear() {
+	// Clear type caches
+	for k := range tc.typeCache {
+		delete(tc.typeCache, k)
+	}
+	for k := range tc.varTypeCache {
+		delete(tc.varTypeCache, k)
+	}
+	for k := range tc.typeAliasCache {
+		delete(tc.typeAliasCache, k)
+	}
+	for k := range tc.typeGuards {
+		delete(tc.typeGuards, k)
+	}
+	for k := range tc.loadedLibFiles {
+		delete(tc.loadedLibFiles, k)
+	}
+	// Clear errors
+	tc.errors = tc.errors[:0]
+	// Clear symbol table would require more careful consideration
+	// as it may be shared, so we don't clear it here
 }
 
 // GetLoadStats returns the type loading statistics
@@ -1121,11 +1152,16 @@ func (tc *TypeChecker) findScopeInSubtree(scope *symbols.Scope, targetNode ast.N
 // resolveSymbolFromGlobal searches for a symbol starting from the global scope
 // and recursively through all child scopes. This is more robust than relying
 // on the Current scope pointer being correctly positioned.
+// Note: Currently not used but kept for potential future features requiring exhaustive
+// symbol searches (e.g., code completion, refactoring tools, or debugging utilities).
 func (tc *TypeChecker) resolveSymbolFromGlobal(name string) (*symbols.Symbol, bool) {
 	return tc.resolveSymbolInScopeTree(tc.symbolTable.Global, name)
 }
 
-// resolveSymbolInScopeTree recursively searches for a symbol in a scope and its children
+// resolveSymbolInScopeTree recursively searches for a symbol in a scope and its children.
+// Unlike ResolveSymbol which searches upward through parent scopes, this searches downward
+// through child scopes, making it useful for exhaustive searches.
+// Note: Currently not used but kept for future tooling needs.
 func (tc *TypeChecker) resolveSymbolInScopeTree(scope *symbols.Scope, name string) (*symbols.Symbol, bool) {
 	// Check in current scope
 	if symbol, exists := scope.Symbols[name]; exists {
@@ -1244,13 +1280,13 @@ func (tc *TypeChecker) FormatErrors(format string) string {
 			if i > 0 {
 				result.WriteString(",\n")
 			}
-			result.WriteString(fmt.Sprintf("  {\n"))
-			result.WriteString(fmt.Sprintf("    \"file\": \"%s\",\n", err.File))
-			result.WriteString(fmt.Sprintf("    \"line\": %d,\n", err.Line))
-			result.WriteString(fmt.Sprintf("    \"column\": %d,\n", err.Column))
-			result.WriteString(fmt.Sprintf("    \"message\": \"%s\",\n", err.Message))
-			result.WriteString(fmt.Sprintf("    \"code\": \"%s\",\n", err.Code))
-			result.WriteString(fmt.Sprintf("    \"severity\": \"%s\"\n", err.Severity))
+			result.WriteString("  {\n")
+			fmt.Fprintf(&result, "    \"file\": \"%s\",\n", err.File)
+			fmt.Fprintf(&result, "    \"line\": %d,\n", err.Line)
+			fmt.Fprintf(&result, "    \"column\": %d,\n", err.Column)
+			fmt.Fprintf(&result, "    \"message\": \"%s\",\n", err.Message)
+			fmt.Fprintf(&result, "    \"code\": \"%s\",\n", err.Code)
+			fmt.Fprintf(&result, "    \"severity\": \"%s\"\n", err.Severity)
 			result.WriteString("  }")
 		}
 		result.WriteString("\n]\n")
@@ -1611,8 +1647,7 @@ func (tc *TypeChecker) isAssignableTo(sourceType, targetType *types.Type) bool {
 	if targetType.Kind == types.ObjectType && targetType.Name != "" {
 		// If target has no properties defined, it's likely an unresolved imported type
 		// Accept any object type as compatible
-		hasNoProperties := targetType.Properties == nil || len(targetType.Properties) == 0
-		if hasNoProperties && sourceType.Kind == types.ObjectType {
+		if len(targetType.Properties) == 0 && sourceType.Kind == types.ObjectType {
 			return true
 		}
 	}
@@ -1646,6 +1681,74 @@ func (tc *TypeChecker) isAssignableTo(sourceType, targetType *types.Type) bool {
 		return true
 	}
 
+	// Check union types - source can be assigned to union if it matches any member
+	if targetType.Kind == types.UnionType {
+		for _, member := range targetType.Types {
+			if tc.isAssignableTo(sourceType, member) {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Check literal types
+	if sourceType.Kind == types.LiteralType && targetType.Kind == types.LiteralType {
+		// Literal types are equal if their values are equal
+		return sourceType.Value == targetType.Value
+	}
+
+	// Literal type can be assigned to its base type (e.g., "hello" to string, 42 to number)
+	if sourceType.Kind == types.LiteralType {
+		switch sourceType.Value.(type) {
+		case string:
+			return targetType.Kind == types.StringType
+		case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
+			return targetType.Kind == types.NumberType
+		case bool:
+			return targetType.Kind == types.BooleanType
+		}
+	}
+
+	return false
+}
+
+// needsLiteralType checks if a target type expects literal types (e.g., union of literals)
+func (tc *TypeChecker) needsLiteralType(targetType *types.Type) bool {
+	if targetType.Kind == types.LiteralType {
+		return true
+	}
+	if targetType.Kind == types.UnionType {
+		// Check if any member is a literal type
+		for _, member := range targetType.Types {
+			if member.Kind == types.LiteralType {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// inferLiteralType infers a literal type from an expression if it's a literal
+func (tc *TypeChecker) inferLiteralType(expr ast.Expression) *types.Type {
+	if lit, ok := expr.(*ast.Literal); ok {
+		if lit.Value != nil {
+			return types.NewLiteralType(lit.Value)
+		}
+	}
+	// If not a literal, fall back to normal inference
+	return tc.inferencer.InferType(expr)
+}
+
+// isPropertyOptional checks if a property type is optional (i.e., a union with undefined)
+func (tc *TypeChecker) isPropertyOptional(propType *types.Type) bool {
+	if propType.Kind == types.UnionType {
+		// Check if undefined is one of the union members
+		for _, member := range propType.Types {
+			if member.Kind == types.UndefinedType {
+				return true
+			}
+		}
+	}
 	return false
 }
 
@@ -1654,7 +1757,7 @@ func (tc *TypeChecker) isAssignableTo(sourceType, targetType *types.Type) bool {
 func (tc *TypeChecker) isObjectAssignable(sourceType, targetType *types.Type) bool {
 	// If target has no properties defined (e.g., it's a named type without resolution),
 	// we accept any object type as compatible
-	if targetType.Properties == nil || len(targetType.Properties) == 0 {
+	if len(targetType.Properties) == 0 {
 		return sourceType.Kind == types.ObjectType
 	}
 
@@ -1667,7 +1770,12 @@ func (tc *TypeChecker) isObjectAssignable(sourceType, targetType *types.Type) bo
 	for propName, targetPropType := range targetType.Properties {
 		sourcePropType, exists := sourceType.Properties[propName]
 		if !exists {
-			// Property missing in source
+			// Check if the target property is optional (union with undefined)
+			if tc.isPropertyOptional(targetPropType) {
+				// Optional property can be omitted
+				continue
+			}
+			// Required property missing in source
 			return false
 		}
 
@@ -1683,6 +1791,11 @@ func (tc *TypeChecker) isObjectAssignable(sourceType, targetType *types.Type) bo
 
 // checkExportDeclaration checks export statements
 func (tc *TypeChecker) checkExportDeclaration(exportDecl *ast.ExportDeclaration, filename string) {
+	// First, check the exported declaration itself (e.g., export default class, export class, etc.)
+	if exportDecl.Declaration != nil {
+		tc.checkStatement(exportDecl.Declaration, filename)
+	}
+
 	if tc.moduleResolver == nil {
 		// If we don't have module resolution, just skip export checking
 		return
@@ -2072,7 +2185,10 @@ func (tc *TypeChecker) loadPackageWithCache(pkgDir, pkgName string) {
 
 			// Note: This is a simplified approach. In production, we'd need better tracking
 			// of which types came from which package
-			tc.pkgTypeCache.Save(pkgDir, newTypes, newInterfaces)
+			if err := tc.pkgTypeCache.Save(pkgDir, newTypes, newInterfaces); err != nil {
+				// Log error but don't fail, cache is optional
+				fmt.Fprintf(os.Stderr, "Warning: Failed to save type cache: %v\n", err)
+			}
 			tc.loadStats.LoadedPackages++
 		} else {
 			tc.loadStats.SkippedPackages++
@@ -2118,7 +2234,7 @@ func (tc *TypeChecker) loadDeclarationFiles(dir string) {
 	var declarationFiles []string
 
 	// Collect all .d.ts and .ts files
-	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+	_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil // Skip errors
 		}
@@ -2151,7 +2267,7 @@ func (tc *TypeChecker) loadPackageTypes(pkgDir string) {
 	var dtsFiles []string
 
 	// Collect all .d.ts files
-	filepath.Walk(pkgDir, func(path string, info os.FileInfo, err error) error {
+	_ = filepath.Walk(pkgDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil // Skip errors
 		}
@@ -2544,6 +2660,47 @@ func (tc *TypeChecker) checkClassDeclaration(decl *ast.ClassDeclaration, filenam
 	tc.symbolTable.Current = originalScope
 }
 
+func (tc *TypeChecker) checkEnumDeclaration(decl *ast.EnumDeclaration, filename string) {
+	// Check enum name is valid
+	if decl.Name != nil && !isValidIdentifier(decl.Name.Name) {
+		tc.addError(filename, decl.Name.Pos().Line, decl.Name.Pos().Column,
+			fmt.Sprintf("Invalid enum name: '%s'", decl.Name.Name), "TS1003", "error")
+	}
+
+	// Check enum members
+	enumValues := make(map[string]bool)
+	for _, member := range decl.Members {
+		if member.Name == nil {
+			continue
+		}
+
+		// Check for duplicate member names
+		if enumValues[member.Name.Name] {
+			tc.addError(filename, member.Name.Pos().Line, member.Name.Pos().Column,
+				fmt.Sprintf("Duplicate enum member name: '%s'", member.Name.Name), "TS2300", "error")
+		}
+		enumValues[member.Name.Name] = true
+
+		// If member has an initializer, check it
+		if member.Value != nil {
+			tc.checkExpression(member.Value, filename)
+
+			// Enum members should be initialized with number or string literals
+			initType := tc.inferencer.InferType(member.Value)
+			if initType.Kind != types.NumberType && initType.Kind != types.StringType {
+				tc.addError(filename, member.Value.Pos().Line, member.Value.Pos().Column,
+					"Enum member must have initializer of type string or number", "TS1066", "error")
+			}
+		}
+	}
+
+	// Create enum type and cache it
+	if decl.Name != nil {
+		enumType := types.NewObjectType(decl.Name.Name, nil)
+		tc.typeAliasCache[decl.Name.Name] = enumType
+	}
+}
+
 func (tc *TypeChecker) checkNewExpression(expr *ast.NewExpression, filename string) {
 	// Check the constructor (callee)
 	tc.checkExpression(expr.Callee, filename)
@@ -2627,6 +2784,14 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 			return types.Null
 		case "undefined":
 			return types.Undefined
+		case "Array":
+			// Handle Array<T> generic type
+			if len(t.TypeArguments) == 1 {
+				elementType := tc.convertTypeNode(t.TypeArguments[0])
+				return types.NewArrayType(elementType)
+			}
+			// Array without type argument defaults to any[]
+			return types.NewArrayType(types.Any)
 		default:
 			// Check type alias cache for non-generic aliases
 			if resolvedType, ok := tc.typeAliasCache[t.Name]; ok {

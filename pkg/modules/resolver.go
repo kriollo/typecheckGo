@@ -305,7 +305,7 @@ func (r *ModuleResolver) resolveFromTypeRoots(specifier string) (string, error) 
 // findFileRecursive busca un archivo recursivamente en un directorio
 func (r *ModuleResolver) findFileRecursive(dir string, filename string) string {
 	var result string
-	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+	_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil // Continuar incluso si hay error
 		}

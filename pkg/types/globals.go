@@ -231,6 +231,7 @@ func NewGlobalEnvironmentWithLibs(libs []string) *GlobalEnvironment {
 	if hasDOM {
 		// NOTE: DOM types are now loaded from node_modules/typescript/lib/lib.dom.d.ts
 		// The following code is commented out but kept for reference
+		_ = hasDOM // Variable used for conditional compilation, placeholder for future DOM loading
 		/*
 			// Document type
 			documentType := NewObjectType("Document", map[string]*Type{

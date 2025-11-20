@@ -171,7 +171,7 @@ func (p *parser) parseTypeAnnotationFull() (ast.TypeNode, error) {
 }
 
 func (p *parser) skipTypeAnnotation() {
-	p.parseTypeAnnotationFull()
+	_, _ = p.parseTypeAnnotationFull() // Ignore errors when skipping type annotations
 }
 
 func (p *parser) parseBreakStatement() (ast.Statement, error) {
