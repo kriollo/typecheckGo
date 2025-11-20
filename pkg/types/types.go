@@ -165,6 +165,14 @@ func NewUnionType(types []*Type) *Type {
 	}
 }
 
+// NewIntersectionType crea un tipo intersection
+func NewIntersectionType(types []*Type) *Type {
+	return &Type{
+		Kind:  IntersectionType,
+		Types: types,
+	}
+}
+
 // NewLiteralType crea un tipo literal
 func NewLiteralType(value interface{}) *Type {
 	return &Type{

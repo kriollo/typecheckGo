@@ -2881,6 +2881,13 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 		}
 		return types.NewUnionType(unionTypes)
 
+	case *ast.IntersectionType:
+		var intersectionTypes []*types.Type
+		for _, typ := range t.Types {
+			intersectionTypes = append(intersectionTypes, tc.convertTypeNode(typ))
+		}
+		return types.NewIntersectionType(intersectionTypes)
+
 	case *ast.LiteralType:
 		return types.NewLiteralType(t.Value)
 
