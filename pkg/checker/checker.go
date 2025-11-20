@@ -1809,6 +1809,7 @@ func (tc *TypeChecker) isPropertyOptional(propType *types.Type) bool {
 // isObjectAssignable checks if a source object type is assignable to a target object type
 // This implements structural typing for objects
 func (tc *TypeChecker) isObjectAssignable(sourceType, targetType *types.Type) bool {
+
 	// If target has no properties defined (e.g., it's a named type without resolution),
 	// we accept any object type as compatible
 	if len(targetType.Properties) == 0 {
@@ -1816,7 +1817,7 @@ func (tc *TypeChecker) isObjectAssignable(sourceType, targetType *types.Type) bo
 	}
 
 	// If source has no properties, it can't satisfy a target with required properties
-	if sourceType.Properties == nil {
+	if len(sourceType.Properties) == 0 {
 		return len(targetType.Properties) == 0
 	}
 
@@ -2790,8 +2791,11 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 		}
 
 		// First, check if we have this type cached (for imported types)
-		if resolvedType, ok := tc.typeAliasCache[t.Name]; ok {
-			return resolvedType
+		// Only use cache for non-generic references (no type arguments)
+		if len(t.TypeArguments) == 0 {
+			if resolvedType, ok := tc.typeAliasCache[t.Name]; ok {
+				return resolvedType
+			}
 		}
 
 		// Handle generic type alias instantiation
@@ -2808,7 +2812,11 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 			for i, param := range aliasDecl.TypeParameters {
 				if i < len(t.TypeArguments) {
 					argType := tc.convertTypeNode(t.TypeArguments[i])
-					if typeRef, ok := param.(*ast.TypeReference); ok {
+					// TypeParameters have a Name field of type *Identifier
+					if typeParam, ok := param.(*ast.TypeParameter); ok {
+						substitutions[typeParam.Name.Name] = argType
+					} else if typeRef, ok := param.(*ast.TypeReference); ok {
+						// Fallback for TypeReference (shouldn't happen for type parameters)
 						substitutions[typeRef.Name] = argType
 					}
 				}
@@ -2969,6 +2977,14 @@ func (tc *TypeChecker) substituteType(t *types.Type, substitutions map[string]*t
 		}
 	}
 
+	// Handle ObjectType that might be a type parameter placeholder
+	// convertTypeNode converts unresolved references to ObjectType with the name
+	if t.Kind == types.ObjectType && len(t.Properties) == 0 {
+		if substitution, ok := substitutions[t.Name]; ok {
+			return substitution
+		}
+	}
+
 	switch t.Kind {
 	case types.ArrayType:
 		return types.NewArrayType(tc.substituteType(t.ElementType, substitutions))
@@ -2990,8 +3006,17 @@ func (tc *TypeChecker) substituteType(t *types.Type, substitutions map[string]*t
 		for i, it := range t.Types {
 			intersectionTypes[i] = tc.substituteType(it, substitutions)
 		}
-		// HACK: NewIntersectionType does not exist, using NewUnionType as a placeholder.
-		return types.NewUnionType(intersectionTypes)
+		return types.NewIntersectionType(intersectionTypes)
+	case types.ObjectType:
+		// For object types, substitute type parameters in properties
+		if t.Properties != nil {
+			newProperties := make(map[string]*types.Type)
+			for propName, propType := range t.Properties {
+				newProperties[propName] = tc.substituteType(propType, substitutions)
+			}
+			return types.NewObjectType(t.Name, newProperties)
+		}
+		return t
 	case types.ConditionalType:
 		checkType := tc.substituteType(t.CheckType, substitutions)
 		extendsType := tc.substituteType(t.ExtendsType, substitutions)

@@ -301,18 +301,68 @@ func (p *parser) parseTypeAliasDeclaration() (ast.Declaration, error) {
 	p.skipWhitespaceAndComments()
 
 	// Generics
+	// Generics
+	var typeParams []ast.TypeNode
 	if p.match("<") {
-		// Skip generics for now
-		depth := 1
-		p.advance()
-		for depth > 0 && !p.isAtEnd() {
-			if p.match("<") {
-				depth++
-			} else if p.match(">") {
-				depth--
+		p.advance() // consume <
+		p.skipWhitespaceAndComments()
+
+		for !p.match(">") && !p.isAtEnd() {
+			// Parse type parameter
+			// T extends U = V
+
+			// 1. Name
+			id, err := p.parseIdentifier()
+			if err != nil {
+				return nil, err
 			}
-			p.advance()
+
+			typeParam := &ast.TypeParameter{
+				Name:     id,
+				Position: id.Pos(),
+			}
+
+			p.skipWhitespaceAndComments()
+
+			// 2. Constraint (extends)
+			if p.match("extends") {
+				p.advanceString(7)
+				p.skipWhitespaceAndComments()
+				constraint, err := p.parseTypeAnnotationFull()
+				if err != nil {
+					return nil, err
+				}
+				typeParam.Constraint = constraint
+				p.skipWhitespaceAndComments()
+			}
+
+			// 3. Default ( = )
+			if p.match("=") {
+				p.advance()
+				p.skipWhitespaceAndComments()
+				def, err := p.parseTypeAnnotationFull()
+				if err != nil {
+					return nil, err
+				}
+				typeParam.Default = def
+				p.skipWhitespaceAndComments()
+			}
+
+			typeParam.EndPos = p.currentPos()
+			typeParams = append(typeParams, typeParam)
+
+			if p.match(",") {
+				p.advance()
+				p.skipWhitespaceAndComments()
+			} else {
+				break
+			}
 		}
+
+		if !p.match(">") {
+			return nil, fmt.Errorf("expected '>' to close type parameters")
+		}
+		p.advance() // consume >
 	}
 
 	p.skipWhitespaceAndComments()
@@ -335,6 +385,7 @@ func (p *parser) parseTypeAliasDeclaration() (ast.Declaration, error) {
 	return &ast.TypeAliasDeclaration{
 		ID:             id,
 		TypeAnnotation: typ,
+		TypeParameters: typeParams,
 		Position:       startPos,
 		EndPos:         p.currentPos(),
 	}, nil
