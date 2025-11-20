@@ -757,6 +757,12 @@ func (tc *TypeChecker) checkCallExpression(call *ast.CallExpression, filename st
 			// Check if variable is under a type guard (instanceof Function)
 			isUnderTypeGuard := tc.typeGuards[id.Name]
 
+			// Skip callability check for parameters - they may have function types
+			// that aren't fully inferred without complete type information
+			if symbol.Type == symbols.ParameterSymbol {
+				return
+			}
+
 			if !symbol.IsFunction && !isUnderTypeGuard {
 				msg := fmt.Sprintf("This expression is not callable. Type '%s' has no call signatures.", id.Name)
 				msg += "\n  Sugerencia: Verifica que estés llamando a una función y no a una variable"
@@ -1681,16 +1687,6 @@ func (tc *TypeChecker) isAssignableTo(sourceType, targetType *types.Type) bool {
 		if sourceType.Kind == types.ObjectType {
 			return tc.isObjectAssignable(sourceType, targetType)
 		}
-		if sourceType.Kind == types.TupleType && targetType.Kind == types.ArrayType {
-			if targetType.ElementType != nil && len(sourceType.Types) > 0 {
-				for _, elemType := range sourceType.Types {
-					if !tc.isAssignableTo(elemType, targetType.ElementType) {
-						return false
-					}
-				}
-				return true
-			}
-		}
 		// Para tuplas, comparar elemento a elemento
 		if sourceType.Kind == types.TupleType {
 			if len(sourceType.Types) != len(targetType.Types) {
@@ -1710,6 +1706,19 @@ func (tc *TypeChecker) isAssignableTo(sourceType, targetType *types.Type) bool {
 	if (sourceType.Kind == types.UndefinedType && targetType.Kind == types.NullType) ||
 		(sourceType.Kind == types.NullType && targetType.Kind == types.UndefinedType) {
 		return true
+	}
+
+	// Check if tuple is assignable to array
+	// A tuple [T1, T2, ...] is assignable to U[] if all Ti are assignable to U
+	if sourceType.Kind == types.TupleType && targetType.Kind == types.ArrayType {
+		if targetType.ElementType != nil && len(sourceType.Types) > 0 {
+			for _, elemType := range sourceType.Types {
+				if !tc.isAssignableTo(elemType, targetType.ElementType) {
+					return false
+				}
+			}
+			return true
+		}
 	}
 
 	// Check array types
