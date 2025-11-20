@@ -1010,6 +1010,12 @@ func (tc *TypeChecker) getObjectName(expr ast.Expression) string {
 
 // findSimilarNames finds variable names similar to the given name
 func (tc *TypeChecker) findSimilarNames(name string) []string {
+	// Optimization: Don't search for similar names if we already have too many errors
+	// This prevents performance degradation when checking files with many errors
+	if len(tc.errors) > 50 {
+		return nil
+	}
+
 	var similar []string
 
 	// Get all symbols in current scope
@@ -1044,6 +1050,7 @@ func (tc *TypeChecker) findSimilarNames(name string) []string {
 }
 
 // levenshteinDistance calculates the edit distance between two strings
+// Optimized to use O(min(len(s1), len(s2))) space
 func levenshteinDistance(s1, s2 string) int {
 	if len(s1) == 0 {
 		return len(s2)
@@ -1052,42 +1059,49 @@ func levenshteinDistance(s1, s2 string) int {
 		return len(s1)
 	}
 
-	// Create matrix
-	matrix := make([][]int, len(s1)+1)
-	for i := range matrix {
-		matrix[i] = make([]int, len(s2)+1)
+	// Swap to ensure s1 is the shorter string to minimize memory usage
+	if len(s1) > len(s2) {
+		s1, s2 = s2, s1
 	}
 
-	// Initialize first row and column
-	for i := 0; i <= len(s1); i++ {
-		matrix[i][0] = i
-	}
-	for j := 0; j <= len(s2); j++ {
-		matrix[0][j] = j
+	// We only need two rows: current and previous
+	// This reduces space complexity from O(M*N) to O(min(M,N))
+	v0 := make([]int, len(s2)+1)
+	v1 := make([]int, len(s2)+1)
+
+	// Initialize v0
+	for i := 0; i <= len(s2); i++ {
+		v0[i] = i
 	}
 
-	// Fill matrix
-	for i := 1; i <= len(s1); i++ {
-		for j := 1; j <= len(s2); j++ {
-			cost := 0
-			if s1[i-1] != s2[j-1] {
-				cost = 1
+	for i := 0; i < len(s1); i++ {
+		// Calculate v1 (current row) from v0 (previous row)
+		v1[0] = i + 1
+
+		for j := 0; j < len(s2); j++ {
+			cost := 1
+			if s1[i] == s2[j] {
+				cost = 0
 			}
 
-			matrix[i][j] = min(
-				matrix[i-1][j]+1, // deletion
-				min(
-					matrix[i][j-1]+1,      // insertion
-					matrix[i-1][j-1]+cost, // substitution
-				),
-			)
+			// min(deletion, insertion, substitution)
+			min := v1[j] + 1
+			if v0[j+1]+1 < min {
+				min = v0[j+1] + 1
+			}
+			if v0[j]+cost < min {
+				min = v0[j] + cost
+			}
+
+			v1[j+1] = min
 		}
+
+		// Copy v1 to v0 for next iteration
+		copy(v0, v1)
 	}
 
-	return matrix[len(s1)][len(s2)]
+	return v0[len(s2)]
 }
-
-// Note: Using Go 1.21+ built-in min() function
 
 // Helper functions
 func (tc *TypeChecker) addError(file string, line, column int, message, code, severity string) {

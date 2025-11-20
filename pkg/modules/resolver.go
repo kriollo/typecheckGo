@@ -32,6 +32,12 @@ type ModuleResolver struct {
 
 	// Type roots for .d.ts files (e.g., ["./node_modules/@types", "./types"])
 	typeRoots []string
+
+	// Cache for file existence checks to reduce os.Stat calls
+	fileCache map[string]bool
+
+	// Cache for modules that could not be resolved
+	notFoundCache map[string]bool
 }
 
 // ResolvedModule representa un módulo resuelto
@@ -88,13 +94,15 @@ type ExportInfo struct {
 // NewModuleResolver crea un nuevo resolver de módulos
 func NewModuleResolver(rootDir string, symbolTable *symbols.SymbolTable) *ModuleResolver {
 	return &ModuleResolver{
-		moduleCache: make(map[string]*ResolvedModule),
-		symbolTable: symbolTable,
-		rootDir:     rootDir,
-		extensions:  []string{".ts", ".tsx", ".js", ".jsx", ".mjs", ".d.ts"},
-		baseUrl:     "",
-		paths:       make(map[string][]string),
-		typeRoots:   []string{"./node_modules/@types", "./types"},
+		moduleCache:   make(map[string]*ResolvedModule),
+		symbolTable:   symbolTable,
+		rootDir:       rootDir,
+		extensions:    []string{".ts", ".tsx", ".js", ".jsx", ".mjs", ".d.ts"},
+		baseUrl:       "",
+		paths:         make(map[string][]string),
+		typeRoots:     []string{"./node_modules/@types", "./types"},
+		fileCache:     make(map[string]bool),
+		notFoundCache: make(map[string]bool),
 	}
 }
 
@@ -124,6 +132,11 @@ func (r *ModuleResolver) ResolveModule(specifier string, fromFile string) (*Reso
 		return cached, nil
 	}
 
+	// Check not found cache
+	if r.notFoundCache[cacheKey] {
+		return nil, fmt.Errorf("module not found (cached): %s", specifier)
+	}
+
 	// Determinar la ruta base desde la cual resolver
 	var basePath string
 	if fromFile == "" || fromFile == r.rootDir {
@@ -148,6 +161,7 @@ func (r *ModuleResolver) ResolveModule(specifier string, fromFile string) (*Reso
 	}
 
 	if err != nil {
+		r.notFoundCache[cacheKey] = true
 		return nil, fmt.Errorf("failed to resolve module %s: %w", specifier, err)
 	}
 
@@ -185,7 +199,7 @@ func (r *ModuleResolver) resolveRelativePath(specifier string, basePath string) 
 // resolveAbsolutePath resuelve una ruta absoluta
 func (r *ModuleResolver) resolveAbsolutePath(specifier string) (string, error) {
 	// Para rutas absolutas, verificar si existe directamente
-	if _, err := os.Stat(specifier); err == nil {
+	if r.fileExists(specifier) {
 		return specifier, nil
 	}
 
@@ -293,7 +307,7 @@ func (r *ModuleResolver) resolveFromTypeRoots(specifier string) (string, error) 
 				if found := r.findFileRecursive(baseDir, specifier+".d.ts"); found != "" {
 					return found, nil
 				}
-			} else if _, err := os.Stat(path); err == nil {
+			} else if r.fileExists(path) {
 				return path, nil
 			}
 		}
@@ -321,6 +335,18 @@ func (r *ModuleResolver) findFileRecursive(dir string, filename string) string {
 	return result
 }
 
+// fileExists checks if a file exists, using a cache to avoid repeated os.Stat calls
+func (r *ModuleResolver) fileExists(path string) bool {
+	if exists, ok := r.fileCache[path]; ok {
+		return exists
+	}
+
+	_, err := os.Stat(path)
+	exists := err == nil
+	r.fileCache[path] = exists
+	return exists
+}
+
 // resolveFilePath intenta resolver un archivo probando diferentes extensiones
 func (r *ModuleResolver) resolveFilePath(basePath string) (string, error) {
 	// Si el path tiene extensión .js, .jsx, o .mjs, intentar reemplazarla con .ts/.tsx
@@ -331,26 +357,26 @@ func (r *ModuleResolver) resolveFilePath(basePath string) (string, error) {
 
 		// Probar con .ts primero
 		tsPath := baseWithoutExt + ".ts"
-		if _, err := os.Stat(tsPath); err == nil {
+		if r.fileExists(tsPath) {
 			return tsPath, nil
 		}
 
 		// Probar con .tsx
 		tsxPath := baseWithoutExt + ".tsx"
-		if _, err := os.Stat(tsxPath); err == nil {
+		if r.fileExists(tsxPath) {
 			return tsxPath, nil
 		}
 	}
 
 	// Primero verificar si el archivo existe tal cual
-	if _, err := os.Stat(basePath); err == nil {
+	if r.fileExists(basePath) {
 		return basePath, nil
 	}
 
 	// Intentar con diferentes extensiones
 	for _, extension := range r.extensions {
 		pathWithExt := basePath + extension
-		if _, err := os.Stat(pathWithExt); err == nil {
+		if r.fileExists(pathWithExt) {
 			return pathWithExt, nil
 		}
 	}
@@ -358,7 +384,7 @@ func (r *ModuleResolver) resolveFilePath(basePath string) (string, error) {
 	// Intentar como directorio con index
 	for _, extension := range r.extensions {
 		indexPath := filepath.Join(basePath, "index"+extension)
-		if _, err := os.Stat(indexPath); err == nil {
+		if r.fileExists(indexPath) {
 			return indexPath, nil
 		}
 	}
