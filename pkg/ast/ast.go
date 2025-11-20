@@ -359,12 +359,13 @@ func (b *BinaryExpression) End() Position { return b.EndPos }
 func (b *BinaryExpression) exprNode()     {}
 
 type Parameter struct {
-	ID        *Identifier
-	ParamType TypeNode
-	Optional  bool
-	Rest      bool // true if this is a rest parameter (...args)
-	Position  Position
-	EndPos    Position
+	ID           *Identifier
+	ParamType    TypeNode
+	Optional     bool
+	Rest         bool   // true if this is a rest parameter (...args)
+	OriginalName string // For destructuring: { prop: var } -> OriginalName="prop"
+	Position     Position
+	EndPos       Position
 }
 
 func (p *Parameter) Type() string  { return "Parameter" }
@@ -435,7 +436,7 @@ func (l *LiteralType) End() Position { return l.EndPos }
 func (l *LiteralType) typeNode()     {}
 
 type FunctionType struct {
-	Params   []TypeNode
+	Params   []*Parameter
 	Return   TypeNode
 	Position Position
 	EndPos   Position
@@ -883,3 +884,28 @@ type EnumMember struct {
 func (e *EnumMember) Type() string  { return "EnumMember" }
 func (e *EnumMember) Pos() Position { return e.Position }
 func (e *EnumMember) End() Position { return e.EndPos }
+
+// TypeQuery represents typeof T
+type TypeQuery struct {
+	ExprName Expression
+	Position Position
+	EndPos   Position
+}
+
+func (t *TypeQuery) Type() string  { return "TypeQuery" }
+func (t *TypeQuery) Pos() Position { return t.Position }
+func (t *TypeQuery) End() Position { return t.EndPos }
+func (t *TypeQuery) typeNode()     {}
+
+// TypeOperator represents keyof T, readonly T, etc.
+type TypeOperator struct {
+	Operator string
+	Target   TypeNode
+	Position Position
+	EndPos   Position
+}
+
+func (t *TypeOperator) Type() string  { return "TypeOperator" }
+func (t *TypeOperator) Pos() Position { return t.Position }
+func (t *TypeOperator) End() Position { return t.EndPos }
+func (t *TypeOperator) typeNode()     {}

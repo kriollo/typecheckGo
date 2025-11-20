@@ -220,10 +220,26 @@ func (b *Binder) bindExpression(expr ast.Expression) {
 		for _, prop := range e.Properties {
 			switch p := prop.(type) {
 			case *ast.Property:
+				// Check if this is a Vue setup function
+				isSetup := false
+				if id, ok := p.Key.(*ast.Identifier); ok && id.Name == "setup" {
+					isSetup = true
+				}
+
 				// Check if the property value is a function expression
 				if fnExpr, ok := p.Value.(*ast.FunctionExpression); ok {
-					b.bindFunctionExpression(fnExpr)
+					if isSetup {
+						b.bindSetupFunction(fnExpr)
+					} else {
+						b.bindFunctionExpression(fnExpr)
+					}
 				} else {
+					if isSetup {
+						if arrow, ok := p.Value.(*ast.ArrowFunctionExpression); ok {
+							b.bindSetupArrowFunction(arrow)
+							continue
+						}
+					}
 					b.bindExpression(p.Value)
 				}
 			case *ast.SpreadElement:
@@ -555,10 +571,15 @@ func (b *Binder) bindSetupFunction(fnExpr *ast.FunctionExpression) {
 
 			// Try to infer type for destructured parameters
 			if b.paramTypeInferencer != nil {
+				propertyName := param.ID.Name
+				if param.OriginalName != "" {
+					propertyName = param.OriginalName
+				}
+
 				inferredType := b.paramTypeInferencer.InferDestructuredParamType(
 					"setup", // Vue's setup function
 					paramIdx,
-					param.ID.Name,
+					propertyName,
 				)
 
 				if inferredType != nil && inferredType.IsFunction {
@@ -589,10 +610,15 @@ func (b *Binder) bindSetupArrowFunction(arrow *ast.ArrowFunctionExpression) {
 
 			// Try to infer type for destructured parameters
 			if b.paramTypeInferencer != nil {
+				propertyName := param.ID.Name
+				if param.OriginalName != "" {
+					propertyName = param.OriginalName
+				}
+
 				inferredType := b.paramTypeInferencer.InferDestructuredParamType(
 					"setup", // Vue's setup function
 					paramIdx,
-					param.ID.Name,
+					propertyName,
 				)
 
 				if inferredType != nil && inferredType.IsFunction {
