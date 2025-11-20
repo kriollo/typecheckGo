@@ -2076,6 +2076,43 @@ func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 		}, nil
 	}
 
+	// yield expression (for generator functions)
+	if p.matchKeyword("yield") {
+		startPos := p.currentPos()
+		p.advanceWord()
+		p.skipWhitespaceAndComments()
+
+		// Check for yield* (delegate)
+		delegate := false
+		if p.match("*") {
+			delegate = true
+			p.advance()
+			p.skipWhitespaceAndComments()
+		}
+
+		// Parse the argument (value to yield)
+		// yield can be used without an argument
+		var argument ast.Expression
+
+		// Check if there's an expression following yield
+		// yield is followed by expression if not at statement end (;, }, newline)
+		if !p.match(";") && !p.match("}") && !p.match("\n") && !p.isAtEnd() {
+			// Try to parse an expression
+			arg, err := p.parseAssignmentExpression()
+			if err == nil {
+				argument = arg
+			}
+			// If error, treat as yield without argument (ignore error)
+		}
+
+		return &ast.YieldExpression{
+			Argument: argument,
+			Delegate: delegate,
+			Position: startPos,
+			EndPos:   p.currentPos(),
+		}, nil
+	}
+
 	if p.matchKeyword("true", "false") {
 		startPos := p.currentPos()
 		value := p.advanceWord()
@@ -2942,6 +2979,24 @@ func (p *parser) parseExportDeclaration() (*ast.ExportDeclaration, error) {
 				return nil, err
 			}
 			declaration = funcDecl
+		} else if p.matchKeyword("class") {
+			classDecl, err := p.parseClassDeclaration()
+			if err != nil {
+				return nil, err
+			}
+			declaration = classDecl
+		} else if p.matchKeyword("interface") {
+			interfaceDecl, err := p.parseInterfaceDeclaration()
+			if err != nil {
+				return nil, err
+			}
+			declaration = interfaceDecl
+		} else if p.matchKeyword("type") {
+			typeDecl, err := p.parseTypeAliasDeclaration()
+			if err != nil {
+				return nil, err
+			}
+			declaration = typeDecl
 		} else if p.matchKeyword("var", "let", "const") {
 			varDecl, err := p.parseVariableDeclaration()
 			if err != nil {

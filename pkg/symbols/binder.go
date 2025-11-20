@@ -272,6 +272,12 @@ func (b *Binder) bindExpression(expr ast.Expression) {
 	case *ast.SuperExpression:
 		// 'super' doesn't need binding
 		return
+	case *ast.YieldExpression:
+		// Bind the yielded expression if present
+		if e.Argument != nil {
+			b.bindExpression(e.Argument)
+		}
+		return
 	case *ast.ConditionalExpression:
 		b.bindConditionalExpression(e)
 	case *ast.SpreadElement:

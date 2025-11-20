@@ -591,6 +591,12 @@ func (tc *TypeChecker) checkExpression(expr ast.Expression, filename string) {
 	case *ast.SuperExpression:
 		// 'super' is valid in derived class context
 		return
+	case *ast.YieldExpression:
+		// 'yield' is valid in generator function context
+		if e.Argument != nil {
+			tc.checkExpression(e.Argument, filename)
+		}
+		return
 	case *ast.ConditionalExpression:
 		tc.checkConditionalExpression(e, filename)
 	case *ast.SpreadElement:

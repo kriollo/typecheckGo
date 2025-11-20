@@ -70,6 +70,13 @@ func (ti *TypeInferencer) InferType(expr ast.Expression) *Type {
 		return ti.inferObjectType(e)
 	case *ast.ArrowFunctionExpression:
 		return ti.inferArrowFunctionType(e)
+	case *ast.YieldExpression:
+		// yield expression returns the type of its argument
+		// In a full implementation, this would return the element type of the Generator
+		if e.Argument != nil {
+			return ti.InferType(e.Argument)
+		}
+		return Void
 	default:
 		return Unknown
 	}

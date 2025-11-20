@@ -843,6 +843,19 @@ func (s *SuperExpression) Pos() Position { return s.Position }
 func (s *SuperExpression) End() Position { return s.EndPos }
 func (s *SuperExpression) exprNode()     {}
 
+// YieldExpression represents 'yield' keyword in generator functions
+type YieldExpression struct {
+	Argument Expression // The value to yield (can be nil for yield without value)
+	Delegate bool       // true for yield* (delegate to another generator)
+	Position Position
+	EndPos   Position
+}
+
+func (y *YieldExpression) Type() string  { return "YieldExpression" }
+func (y *YieldExpression) Pos() Position { return y.Position }
+func (y *YieldExpression) End() Position { return y.EndPos }
+func (y *YieldExpression) exprNode()     {}
+
 // TaggedTemplateExpression represents tagged template literals like String.raw`template`
 type TaggedTemplateExpression struct {
 	Tag      Expression
