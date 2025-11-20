@@ -75,7 +75,7 @@ func runParse(cmd *cobra.Command, args []string) error {
 	fmt.Printf("\nParsed %d files in %v\n", fileCount, duration)
 	if errorCount > 0 {
 		fmt.Printf("Found %d parse errors.\n", errorCount)
-		return fmt.Errorf("parsing failed")
+		os.Exit(1)
 	}
 
 	fmt.Println("No parse errors found.")

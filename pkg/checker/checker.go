@@ -149,24 +149,43 @@ func NewWithModuleResolver(rootDir string) *TypeChecker {
 }
 
 // CheckFile checks a single TypeScript file
-func (tc *TypeChecker) CheckFile(filename string, ast *ast.File) []TypeError {
+func (tc *TypeChecker) CheckFile(filename string, file *ast.File) []TypeError {
 	// Clear previous errors
 	tc.errors = []TypeError{}
 	tc.symbolTable.ClearErrors()
 	tc.currentFile = filename
 
+	// Check if file is a module (has imports or exports)
+	isModule := false
+	for _, stmt := range file.Body {
+		if _, ok := stmt.(*ast.ImportDeclaration); ok {
+			isModule = true
+			break
+		}
+		if _, ok := stmt.(*ast.ExportDeclaration); ok {
+			isModule = true
+			break
+		}
+	}
+
+	// If it is a module, create a new scope
+	if isModule {
+		tc.symbolTable.EnterScope(file)
+		defer tc.symbolTable.ExitScope()
+	}
+
 	// Create a binder and bind symbols
 	binder := symbols.NewBinder(tc.symbolTable)
 	binder.SetParameterTypeInferencer(tc.destructuringInfer)
-	binder.BindFile(ast)
+	binder.BindFile(file)
 
 	// Process imports and add imported symbols to the symbol table
 	if tc.moduleResolver != nil {
-		tc.processImports(ast, filename)
+		tc.processImports(file, filename)
 	}
 
 	// Perform additional type checking
-	tc.checkFile(ast, filename)
+	tc.checkFile(file, filename)
 
 	return tc.errors
 }
@@ -561,6 +580,8 @@ func (tc *TypeChecker) checkExpression(expr ast.Expression, filename string) {
 		return
 	case *ast.ConditionalExpression:
 		tc.checkConditionalExpression(e, filename)
+	case *ast.SpreadElement:
+		tc.checkExpression(e.Argument, filename)
 	default:
 		// Unknown expression type - just a warning, don't block compilation
 		fmt.Fprintf(os.Stderr, "Warning: Unknown expression type: %T\n", expr)
@@ -1877,7 +1898,7 @@ func (tc *TypeChecker) loadBundledTypes(nodeModulesDir string) {
 
 		// Handle scoped packages (e.g., @vue, @angular, @types)
 		if strings.HasPrefix(entry.Name(), "@") {
-			// Skip @types as it's handled separately
+			// Skip @types as it's handled separadamente
 			if entry.Name() == "@types" {
 				continue
 			}

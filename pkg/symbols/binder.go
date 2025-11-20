@@ -247,6 +247,8 @@ func (b *Binder) bindExpression(expr ast.Expression) {
 		return
 	case *ast.ConditionalExpression:
 		b.bindConditionalExpression(e)
+	case *ast.SpreadElement:
+		b.bindExpression(e.Argument)
 	default:
 		// Unknown expression type
 		fmt.Printf("Warning: Unknown expression type: %T\n", expr)

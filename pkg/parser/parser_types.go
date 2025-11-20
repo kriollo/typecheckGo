@@ -9,6 +9,12 @@ import (
 func (p *parser) parseTypeAnnotationFull() (ast.TypeNode, error) {
 	startPos := p.currentPos()
 
+	// Skip leading | or & (allowed in TypeScript)
+	if p.match("|") || p.match("&") {
+		p.advance()
+		p.skipWhitespaceAndComments()
+	}
+
 	// Parse first type
 	firstType, err := p.parseTypeAnnotationPrimary()
 	if err != nil {
