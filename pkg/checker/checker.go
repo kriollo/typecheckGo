@@ -239,6 +239,11 @@ func (tc *TypeChecker) checkStatement(stmt ast.Statement, filename string) {
 		tc.checkBreakStatement(s, filename)
 	case *ast.ContinueStatement:
 		tc.checkContinueStatement(s, filename)
+	case *ast.ModuleDeclaration:
+		// Ambient module declarations (declare module 'name' { ... })
+		// These are type-only declarations and don't need runtime checking
+		// We just skip them silently
+		return
 	default:
 		// Unknown statement type - just a warning, don't block compilation
 		fmt.Fprintf(os.Stderr, "Warning: Unknown statement type: %T\n", stmt)

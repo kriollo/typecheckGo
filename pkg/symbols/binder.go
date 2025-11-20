@@ -71,6 +71,11 @@ func (b *Binder) bindStatement(stmt ast.Statement) {
 		b.bindBreakStatement(s)
 	case *ast.ContinueStatement:
 		b.bindContinueStatement(s)
+	case *ast.ModuleDeclaration:
+		// Ambient module declarations (declare module 'name' { ... })
+		// These are type-only declarations and don't need symbol binding
+		// We just skip them silently
+		return
 	default:
 		// Unknown statement type
 		fmt.Printf("Warning: Unknown statement type: %T\n", stmt)
