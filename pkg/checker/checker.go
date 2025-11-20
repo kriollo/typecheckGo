@@ -1664,6 +1664,16 @@ func (tc *TypeChecker) isAssignableTo(sourceType, targetType *types.Type) bool {
 		if sourceType.Kind == types.ObjectType {
 			return tc.isObjectAssignable(sourceType, targetType)
 		}
+		if sourceType.Kind == types.TupleType && targetType.Kind == types.ArrayType {
+			if targetType.ElementType != nil && len(sourceType.Types) > 0 {
+				for _, elemType := range sourceType.Types {
+					if !tc.isAssignableTo(elemType, targetType.ElementType) {
+						return false
+					}
+				}
+				return true
+			}
+		}
 		// Para tuplas, comparar elemento a elemento
 		if sourceType.Kind == types.TupleType {
 			if len(sourceType.Types) != len(targetType.Types) {

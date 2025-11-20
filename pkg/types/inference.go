@@ -169,11 +169,11 @@ func (ti *TypeInferencer) inferArrayType(arr *ast.ArrayExpression) *Type {
 			isHomogeneous = false
 		}
 	}
-	// Si los tipos son heterogéneos o la longitud es fija, infiere TupleType
-	if !isHomogeneous || len(arr.Elements) > 1 {
-		return &Type{Kind: TupleType, Types: elementTypes}
+	// Si los tipos son homogéneos, devuelve ArrayType; si son heterogéneos, TupleType
+	if isHomogeneous {
+		return NewArrayType(firstType)
 	}
-	return NewArrayType(firstType)
+	return &Type{Kind: TupleType, Types: elementTypes}
 }
 
 // inferArrowFunctionType infiere el tipo de una arrow function
