@@ -385,18 +385,43 @@ func (p *parser) parseInterfaceDeclaration() (ast.Declaration, error) {
 		return nil, fmt.Errorf("expected '{' in interface declaration")
 	}
 
-	// Skip body for now or parse it?
-	// We should parse it to be correct.
-	// But for now, let's just skip to }
+	// Skip body - handle nested braces and potential union types (invalid syntax but we should recover)
 	depth := 1
 	p.advance()
 	for depth > 0 && !p.isAtEnd() {
 		if p.match("{") {
 			depth++
+			p.advance()
 		} else if p.match("}") {
 			depth--
+			p.advance()
+			// Check if there's a union type after the closing brace (invalid syntax, but handle it)
+			if depth == 0 {
+				p.skipWhitespaceAndComments()
+				if p.match("|") || p.match("&") {
+					// Skip union/intersection type continuation (invalid for interfaces)
+					// Continue until we hit a semicolon or newline
+					for !p.isAtEnd() && !p.match(";") && !p.match("\n") {
+						if p.match("{") {
+							depth++
+						} else if p.match("}") {
+							depth--
+							if depth < 0 {
+								depth = 0
+								break
+							}
+						}
+						p.advance()
+					}
+					// Skip final semicolon if present
+					if p.match(";") {
+						p.advance()
+					}
+				}
+			}
+		} else {
+			p.advance()
 		}
-		p.advance()
 	}
 
 	return &ast.InterfaceDeclaration{

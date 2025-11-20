@@ -1263,6 +1263,43 @@ func (p *parser) parseCallExpression() (ast.Expression, error) {
 		iterations++
 		p.skipWhitespaceAndComments()
 
+		// Check for generic type arguments before call expression: func<Type>(args)
+		var typeArgs []ast.TypeNode
+		if p.match("<") {
+			// Try to parse as type arguments - if it fails, it might be a comparison
+			savedPos := p.pos
+			p.advance()
+			p.skipWhitespaceAndComments()
+
+			// Try parsing type arguments
+			parseSuccess := true
+			for {
+				typeArg, err := p.parseTypeAnnotation()
+				if err != nil {
+					parseSuccess = false
+					break
+				}
+				typeArgs = append(typeArgs, typeArg)
+
+				p.skipWhitespaceAndComments()
+				if p.match(",") {
+					p.advance()
+					p.skipWhitespaceAndComments()
+				} else {
+					break
+				}
+			}
+
+			p.skipWhitespaceAndComments()
+			if parseSuccess && p.match(">") {
+				p.advance()
+			} else {
+				// Not type arguments, restore position
+				p.pos = savedPos
+				typeArgs = nil
+			}
+		}
+
 		if p.match("(") {
 			// Call expression
 			startPos := left.Pos()
@@ -1290,10 +1327,11 @@ func (p *parser) parseCallExpression() (ast.Expression, error) {
 			p.expect(")")
 
 			left = &ast.CallExpression{
-				Callee:    left,
-				Arguments: args,
-				Position:  startPos,
-				EndPos:    p.currentPos(),
+				Callee:        left,
+				TypeArguments: typeArgs,
+				Arguments:     args,
+				Position:      startPos,
+				EndPos:        p.currentPos(),
 			}
 			// Continuar el loop para parsear .prop o () siguiente
 			continue
@@ -1314,10 +1352,11 @@ func (p *parser) parseCallExpression() (ast.Expression, error) {
 			}
 
 			left = &ast.CallExpression{
-				Callee:    left,
-				Arguments: []ast.Expression{templateArg},
-				Position:  startPos,
-				EndPos:    p.currentPos(),
+				Callee:        left,
+				TypeArguments: nil,
+				Arguments:     []ast.Expression{templateArg},
+				Position:      startPos,
+				EndPos:        p.currentPos(),
 			}
 			// Continuar el loop
 			continue

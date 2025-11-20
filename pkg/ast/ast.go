@@ -295,10 +295,11 @@ func (l *Literal) End() Position { return l.EndPos }
 func (l *Literal) exprNode()     {}
 
 type CallExpression struct {
-	Callee    Expression
-	Arguments []Expression
-	Position  Position
-	EndPos    Position
+	Callee        Expression
+	TypeArguments []TypeNode
+	Arguments     []Expression
+	Position      Position
+	EndPos        Position
 }
 
 func (c *CallExpression) Type() string  { return "CallExpression" }
