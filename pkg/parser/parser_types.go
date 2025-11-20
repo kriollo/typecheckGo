@@ -227,11 +227,64 @@ func (p *parser) parseContinueStatement() (ast.Statement, error) {
 }
 
 func (p *parser) parseDeclareStatement() (ast.Statement, error) {
+	startPos := p.currentPos()
 	// Skip declare keyword
 	p.advanceString(7)
 	p.skipWhitespaceAndComments()
 
-	// Parse the actual statement
+	// Check if this is a module declaration: declare module 'name' { ... }
+	if p.matchKeyword("module") {
+		p.advanceWord() // consume 'module'
+		p.skipWhitespaceAndComments()
+
+		// Parse module name (string literal)
+		var moduleName string
+		if p.match("'") || p.match("\"") {
+			quote := p.source[p.pos]
+			p.advance() // consume opening quote
+
+			nameStart := p.pos
+			for !p.isAtEnd() && p.source[p.pos] != quote {
+				p.advance()
+			}
+			moduleName = p.source[nameStart:p.pos]
+
+			if !p.match(string(quote)) {
+				return nil, fmt.Errorf("expected closing quote for module name")
+			}
+			p.advance() // consume closing quote
+		} else {
+			return nil, fmt.Errorf("expected string literal for module name")
+		}
+
+		p.skipWhitespaceAndComments()
+
+		// Parse module body
+		if !p.match("{") {
+			return nil, fmt.Errorf("expected '{' in module declaration")
+		}
+
+		// Skip the entire module body
+		depth := 1
+		p.advance() // consume '{'
+		for depth > 0 && !p.isAtEnd() {
+			if p.match("{") {
+				depth++
+			} else if p.match("}") {
+				depth--
+			}
+			p.advance()
+		}
+
+		return &ast.ModuleDeclaration{
+			Name:     moduleName,
+			Body:     []ast.Statement{}, // For now, we just skip the body
+			Position: startPos,
+			EndPos:   p.currentPos(),
+		}, nil
+	}
+
+	// Parse the actual statement (for other declare statements)
 	return p.parseStatement()
 }
 

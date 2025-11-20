@@ -254,6 +254,20 @@ func (i InterfaceProperty) Type() string  { return "InterfaceProperty" }
 func (i InterfaceProperty) Pos() Position { return i.Position }
 func (i InterfaceProperty) End() Position { return i.EndPos }
 
+// ModuleDeclaration represents an ambient module declaration (declare module 'name' { ... })
+type ModuleDeclaration struct {
+	Name     string // Module name (from string literal)
+	Body     []Statement
+	Position Position
+	EndPos   Position
+}
+
+func (m *ModuleDeclaration) Type() string  { return "ModuleDeclaration" }
+func (m *ModuleDeclaration) Pos() Position { return m.Position }
+func (m *ModuleDeclaration) End() Position { return m.EndPos }
+func (m *ModuleDeclaration) stmtNode()     {}
+func (m *ModuleDeclaration) declNode()     {}
+
 // Common expressions
 type Identifier struct {
 	Name     string
