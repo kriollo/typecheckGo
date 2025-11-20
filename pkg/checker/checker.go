@@ -1311,6 +1311,16 @@ func (tc *TypeChecker) processImport(importDecl *ast.ImportDeclaration, filename
 		newSymbol := tc.symbolTable.DefineSymbol(name, symbol.Type, symbol.Node, false)
 		newSymbol.IsFunction = symbol.IsFunction
 		newSymbol.Params = symbol.Params
+
+		// If this is a type alias, resolve its definition and cache it
+		if symbol.Type == symbols.TypeAliasSymbol && symbol.Node != nil {
+			if typeAliasDecl, ok := symbol.Node.(*ast.TypeAliasDeclaration); ok {
+				// Resolve the type annotation
+				resolvedType := tc.convertTypeNode(typeAliasDecl.TypeAnnotation)
+				// Cache the resolved type so it can be found when referenced
+				tc.typeAliasCache[name] = resolvedType
+			}
+		}
 	}
 }
 
@@ -1592,8 +1602,23 @@ func (tc *TypeChecker) isAssignableTo(sourceType, targetType *types.Type) bool {
 		return sourceType.Kind == types.NeverType
 	}
 
+	// Special case: if target is an unresolved named object type (imported type without properties),
+	// accept any object type as compatible
+	if targetType.Kind == types.ObjectType && targetType.Name != "" {
+		// If target has no properties defined, it's likely an unresolved imported type
+		// Accept any object type as compatible
+		hasNoProperties := targetType.Properties == nil || len(targetType.Properties) == 0
+		if hasNoProperties && sourceType.Kind == types.ObjectType {
+			return true
+		}
+	}
+
 	// Exact type match
 	if sourceType.Kind == targetType.Kind {
+		// For object types, check structural compatibility
+		if sourceType.Kind == types.ObjectType {
+			return tc.isObjectAssignable(sourceType, targetType)
+		}
 		return true
 	}
 
@@ -1618,6 +1643,38 @@ func (tc *TypeChecker) isAssignableTo(sourceType, targetType *types.Type) bool {
 	}
 
 	return false
+}
+
+// isObjectAssignable checks if a source object type is assignable to a target object type
+// This implements structural typing for objects
+func (tc *TypeChecker) isObjectAssignable(sourceType, targetType *types.Type) bool {
+	// If target has no properties defined (e.g., it's a named type without resolution),
+	// we accept any object type as compatible
+	if targetType.Properties == nil || len(targetType.Properties) == 0 {
+		return sourceType.Kind == types.ObjectType
+	}
+
+	// If source has no properties, it can't satisfy a target with required properties
+	if sourceType.Properties == nil {
+		return len(targetType.Properties) == 0
+	}
+
+	// Check that source has all required properties of target
+	for propName, targetPropType := range targetType.Properties {
+		sourcePropType, exists := sourceType.Properties[propName]
+		if !exists {
+			// Property missing in source
+			return false
+		}
+
+		// Check if the property types are compatible
+		if !tc.isAssignableTo(sourcePropType, targetPropType) {
+			return false
+		}
+	}
+
+	// All required properties are present and compatible
+	return true
 }
 
 // checkExportDeclaration checks export statements
@@ -2504,6 +2561,11 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 
 	switch t := typeNode.(type) {
 	case *ast.TypeReference:
+		// First, check if we have this type cached (for imported types)
+		if resolvedType, ok := tc.typeAliasCache[t.Name]; ok {
+			return resolvedType
+		}
+
 		// Handle generic type alias instantiation
 		if symbol, exists := tc.symbolTable.ResolveSymbol(t.Name); exists && symbol.Type == symbols.TypeAliasSymbol {
 			if symbol.Node == nil {

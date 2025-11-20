@@ -5,7 +5,6 @@ import (
 	"io/ioutil"
 	"strings"
 	"unicode"
-	"unicode/utf8"
 
 	"tstypechecker/pkg/ast"
 )
@@ -432,7 +431,10 @@ func (p *parser) parseAsyncFunctionExpression() (*ast.FunctionExpression, error)
 func (p *parser) parseVariableDeclaration() (*ast.VariableDeclaration, error) {
 	startPos := p.currentPos()
 
-	kind := p.consumeKeyword("var", "let", "const")
+	kind, err := p.consumeKeyword("var", "let", "const")
+	if err != nil {
+		return nil, err
+	}
 	p.skipWhitespaceAndComments()
 
 	var declarators []*ast.VariableDeclarator
@@ -2130,30 +2132,6 @@ func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 		return p.parseFunctionExpression()
 	}
 
-	// Number literal
-	if p.matchNumber() {
-		startPos := p.currentPos()
-		num := p.advanceNumber()
-		return &ast.Literal{
-			Value:    num,
-			Raw:      num,
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		}, nil
-	}
-
-	// Boolean literal
-	if p.matchKeyword("true", "false") {
-		startPos := p.currentPos()
-		val := p.advanceWord()
-		return &ast.Literal{
-			Value:    val,
-			Raw:      val,
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		}, nil
-	}
-
 	// Null literal
 	if p.matchKeyword("null") {
 		startPos := p.currentPos()
@@ -2172,176 +2150,6 @@ func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 		val := p.advanceWord()
 		return &ast.Identifier{
 			Name:     val,
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		}, nil
-	}
-
-	// This
-	if p.matchKeyword("this") {
-		startPos := p.currentPos()
-		p.advanceWord()
-		return &ast.ThisExpression{
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		}, nil
-	}
-
-	// super expression
-	if p.matchKeyword("super") {
-		startPos := p.currentPos()
-		p.advanceWord()
-		return &ast.SuperExpression{
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		}, nil
-	}
-
-	if p.matchKeyword("true", "false") {
-		startPos := p.currentPos()
-		value := p.advanceWord()
-		return &ast.Literal{
-			Value:    value == "true",
-			Raw:      value,
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		}, nil
-	}
-
-	if p.matchNumber() {
-		startPos := p.currentPos()
-		num := p.advanceNumber()
-		return &ast.Literal{
-			Value:    num,
-			Raw:      num,
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		}, nil
-	}
-
-	// Regex literal - simple heuristic: / followed by non-whitespace
-	// This is a HACK and doesn't handle all edge cases, but works for common patterns
-	if p.match("/") {
-		startPos := p.currentPos()
-		p.advance() // consume /
-
-		// Find closing / (skip escaped characters and character classes)
-		inCharClass := false
-		for !p.isAtEnd() {
-			if p.source[p.pos] == '\\' {
-				// Skip escaped character
-				p.advance()
-				if !p.isAtEnd() {
-					p.advance()
-				}
-			} else if p.source[p.pos] == '[' && !inCharClass {
-				// Entering character class
-				inCharClass = true
-				p.advance()
-			} else if p.source[p.pos] == ']' && inCharClass {
-				// Exiting character class
-				inCharClass = false
-				p.advance()
-			} else if p.source[p.pos] == '/' && !inCharClass {
-				// Found closing / (only if not in character class)
-				p.advance() // consume closing /
-				// Parse flags (i, g, m, etc.)
-				for !p.isAtEnd() && (unicode.IsLetter(rune(p.source[p.pos])) || unicode.IsDigit(rune(p.source[p.pos]))) {
-					p.advance()
-				}
-				break
-			} else {
-				p.advance()
-			}
-		}
-
-		raw := string(p.source[startPos.Column-1 : p.pos])
-		return &ast.Literal{
-			Value:    raw,
-			Raw:      raw,
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		}, nil
-	}
-
-	if p.matchString() {
-		startPos := p.currentPos()
-		str := p.advanceStringLiteral()
-		return &ast.Literal{
-			Value:    str[1 : len(str)-1], // Remove quotes
-			Raw:      str,
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		}, nil
-	}
-
-	// Array literal
-	if p.match("[") {
-		return p.parseArrayLiteral()
-	}
-
-	// Object literal
-	if p.match("{") {
-		return p.parseObjectLiteral()
-	}
-
-	// Function expression: function() {} or function name() {}
-	if p.matchKeyword("function") {
-		return p.parseFunctionExpression()
-	}
-
-	// Number literal
-	if p.matchNumber() {
-		startPos := p.currentPos()
-		num := p.advanceNumber()
-		return &ast.Literal{
-			Value:    num,
-			Raw:      num,
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		}, nil
-	}
-
-	// Boolean literal
-	if p.matchKeyword("true", "false") {
-		startPos := p.currentPos()
-		val := p.advanceWord()
-		return &ast.Literal{
-			Value:    val,
-			Raw:      val,
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		}, nil
-	}
-
-	// Null literal
-	if p.matchKeyword("null") {
-		startPos := p.currentPos()
-		val := p.advanceWord()
-		return &ast.Literal{
-			Value:    val,
-			Raw:      val,
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		}, nil
-	}
-
-	// Undefined
-	if p.matchKeyword("undefined") {
-		startPos := p.currentPos()
-		val := p.advanceWord()
-		return &ast.Identifier{
-			Name:     val,
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		}, nil
-	}
-
-	// This
-	if p.matchKeyword("this") {
-		startPos := p.currentPos()
-		p.advanceWord()
-		return &ast.ThisExpression{
 			Position: startPos,
 			EndPos:   p.currentPos(),
 		}, nil
@@ -2351,302 +2159,57 @@ func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 		return p.parseIdentifier()
 	}
 
-	return nil, nil
-}
-
-func (p *parser) parseIdentifier() (*ast.Identifier, error) {
-	startPos := p.currentPos()
-
-	if !p.matchIdentifier() {
-		return nil, fmt.Errorf("expected identifier at %s", startPos)
-	}
-
-	name := p.advanceWord()
-
-	return &ast.Identifier{
-		Name:     name,
-		Position: startPos,
-		EndPos:   p.currentPos(),
-	}, nil
-}
-
-// parseIdentifierWithGenerics parses an identifier that may have generic type arguments
-// This is used for expressions like new Map<K, V>() where Map is followed by <K, V>
-func (p *parser) parseIdentifierWithGenerics() (ast.Expression, error) {
-	startPos := p.currentPos()
-
-	if !p.matchIdentifier() {
-		return nil, fmt.Errorf("expected identifier at %s", startPos)
-	}
-
-	name := p.advanceWord()
-
-	// Ultra-simple approach: just check if next character is '<' and skip until '>'
-	p.skipWhitespaceAndComments()
-	if p.match("<") {
-		p.advance() // consume '<'
-		depth := 1
-		for !p.isAtEnd() && depth > 0 {
-			if p.match("<") {
-				depth++
-				p.advance()
-			} else if p.match(">") {
-				depth--
-				p.advance()
-				if depth == 0 {
-					break
-				}
-			} else {
-				p.advance()
-			}
-		}
-		if depth != 0 {
-			return nil, fmt.Errorf("unmatched '<' in generic type")
-		}
-	}
-
-	return &ast.Identifier{
-		Name:     name,
-		Position: startPos,
-		EndPos:   p.currentPos(),
-	}, nil
-}
-
-func (p *parser) parseParameterList() ([]*ast.Parameter, error) {
-	var params []*ast.Parameter
-
-	iterations := 0
-	for !p.match(")") && !p.isAtEnd() && iterations < maxParserIterations {
-		iterations++
-		p.skipWhitespaceAndComments()
-
-		// Check for rest parameter: ...identifier
-		isRest := false
-		if p.match("...") {
-			isRest = true
-			p.advanceString(3)
-			p.skipWhitespaceAndComments()
-		}
-
-		// Check for destructuring patterns
-		var id *ast.Identifier
-		var err error
-
-		if p.match("{") || p.match("[") {
-			// Handle destructuring pattern - extract individual names
-			startPos := p.currentPos()
-			openChar := p.source[p.pos]
-			closeChar := byte('}')
-			isObjectPattern := openChar == '{'
-			if openChar == '[' {
-				closeChar = ']'
-			}
-
-			p.advance() // consume opening { or [
-			p.skipWhitespaceAndComments()
-
-			// Extract parameter names from the destructuring pattern
-			var extractedNames []string
-			depth := 1
-			currentName := ""
-
-			for depth > 0 && !p.isAtEnd() {
-				ch := p.source[p.pos]
-
-				if ch == openChar {
-					depth++
-					p.advance()
-				} else if ch == closeChar {
-					depth--
-					if depth == 0 {
-						// Add current name if exists
-						if currentName != "" {
-							extractedNames = append(extractedNames, strings.TrimSpace(currentName))
-							currentName = ""
-						}
-					}
-					p.advance()
-				} else if ch == ',' && depth == 1 {
-					// End of one binding
-					if currentName != "" {
-						extractedNames = append(extractedNames, strings.TrimSpace(currentName))
-						currentName = ""
-					}
-					p.advance()
-					p.skipWhitespaceAndComments()
-				} else if ch == ':' && isObjectPattern && depth == 1 {
-					// In object pattern, skip the rename part (e.g., {oldName: newName})
-					// We want to capture 'newName', not 'oldName'
-					currentName = ""
-					p.advance()
-					p.skipWhitespaceAndComments()
-				} else if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_' || ch == '$' ||
-					(currentName != "" && ch >= '0' && ch <= '9') {
-					currentName += string(ch)
-					p.advance()
-				} else if ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' {
-					p.skipWhitespaceAndComments()
-				} else {
-					// Other characters (like =, ..., etc.), skip
-					p.advance()
-				}
-			}
-
-			p.skipWhitespaceAndComments()
-
-			// Parse type annotation if present (: Type)
-			var paramType ast.TypeNode
-			if p.match(":") {
-				p.advance()
-				p.skipWhitespaceAndComments()
-				paramType, err = p.parseTypeAnnotation()
-				if err != nil {
-					return nil, err
-				}
-				p.skipWhitespaceAndComments()
-			}
-
-			// Create a parameter for each extracted name
-			if len(extractedNames) > 0 {
-				for _, name := range extractedNames {
-					if name != "" {
-						paramId := &ast.Identifier{
-							Name:     name,
-							Position: startPos,
-							EndPos:   p.currentPos(),
-						}
-						params = append(params, &ast.Parameter{
-							ID:        paramId,
-							ParamType: paramType,
-							Optional:  false,
-							Rest:      isRest,
-							Position:  startPos,
-							EndPos:    p.currentPos(),
-						})
-					}
-				}
-			} else {
-				// Fallback: create placeholder if no names were extracted
-				id = &ast.Identifier{
-					Name:     "destructured_param",
-					Position: startPos,
-					EndPos:   p.currentPos(),
-				}
-				params = append(params, &ast.Parameter{
-					ID:        id,
-					ParamType: paramType,
-					Optional:  false,
-					Rest:      isRest,
-					Position:  startPos,
-					EndPos:    p.currentPos(),
-				})
-			}
-
-			// Skip to next parameter (comma or closing paren)
-			p.skipWhitespaceAndComments()
-			if !p.match(",") && !p.match(")") {
-				// Skip any remaining characters until comma or closing paren
-				for !p.match(",") && !p.match(")") && !p.isAtEnd() {
-					p.advance()
-				}
-			}
-			if p.match(",") {
-				p.advance()
-			}
-			p.skipWhitespaceAndComments()
-			continue
-		} else {
-			id, err = p.parseIdentifier()
-			if err != nil {
-				return nil, err
-			}
-		}
-
-		// Handle optional type annotation
-		var paramType ast.TypeNode
-		p.skipWhitespaceAndComments()
-		if p.match(":") {
-			p.advance() // consume ':'
-			p.skipWhitespaceAndComments()
-
-			paramType, err = p.parseTypeAnnotation()
-			if err != nil {
-				return nil, err
-			}
-		}
-
-		// Handle default value (= expression)
-		hasDefault := false
-		p.skipWhitespaceAndComments()
-		if p.match("=") {
-			hasDefault = true
-			p.advance() // consume '='
-			p.skipWhitespaceAndComments()
-
-			// Parse the default value expression but don't store it
-			// We need to skip until we find a comma or closing paren
-			depth := 0
-			for !p.isAtEnd() {
-				if p.match("(") || p.match("[") || p.match("{") {
-					depth++
-				} else if p.match(")") || p.match("]") || p.match("}") {
-					if depth == 0 && (p.match(")") || p.match(",")) {
-						break
-					}
-					depth--
-				} else if p.match(",") && depth == 0 {
-					break
-				} else {
-					p.advance()
-				}
-			}
-		}
-
-		param := &ast.Parameter{
-			ID:        id,
-			ParamType: paramType,
-			Optional:  hasDefault,
-			Rest:      isRest,
-			Position:  id.Pos(),
-			EndPos:    p.currentPos(),
-		}
-
-		params = append(params, param)
-
-		p.skipWhitespaceAndComments()
-		if p.match(",") {
-			p.advance()
-			p.skipWhitespaceAndComments()
-		}
-	}
-
-	return params, nil
+	return nil, fmt.Errorf("unexpected token: %s at %s", p.current(), p.currentPos())
 }
 
 func (p *parser) parseImportDeclaration() (*ast.ImportDeclaration, error) {
 	startPos := p.currentPos()
-
-	p.consumeKeyword("import")
+	p.advanceWord() // consume "import"
 	p.skipWhitespaceAndComments()
 
-	// Check for "import type" (TypeScript type-only imports)
+	isTypeOnly := false
 	if p.matchKeyword("type") {
-		p.consumeKeyword("type")
+		savedPos := p.pos
+		p.advanceWord()
 		p.skipWhitespaceAndComments()
+
+		if p.matchKeyword("from") || p.match(",") {
+			p.pos = savedPos
+		} else {
+			isTypeOnly = true
+		}
 	}
 
 	var specifiers []ast.ImportSpecifier
+	var source string
+	var sourceLiteral *ast.Literal
 
-	// Handle different import styles
+	if p.matchString() {
+		sourceStart := p.currentPos()
+		sourceRaw := p.advanceStringLiteral()
+		source = sourceRaw[1 : len(sourceRaw)-1]
+		sourceLiteral = &ast.Literal{
+			Value:    source,
+			Raw:      sourceRaw,
+			Position: sourceStart,
+			EndPos:   p.currentPos(),
+		}
+		return &ast.ImportDeclaration{
+			Source:     sourceLiteral,
+			Specifiers: nil,
+			IsTypeOnly: isTypeOnly,
+			Position:   startPos,
+			EndPos:     p.currentPos(),
+		}, nil
+	}
+
 	if p.match("*") {
-		// import * as name from "module"
-		p.advance() // consume '*'
+		p.advance()
 		p.skipWhitespaceAndComments()
-
 		if !p.matchKeyword("as") {
 			return nil, fmt.Errorf("expected 'as' after '*' in import")
 		}
-		p.advanceWord() // consume 'as'
+		p.advanceWord()
 		p.skipWhitespaceAndComments()
 
 		local, err := p.parseIdentifier()
@@ -2655,47 +2218,52 @@ func (p *parser) parseImportDeclaration() (*ast.ImportDeclaration, error) {
 		}
 
 		specifiers = append(specifiers, ast.ImportSpecifier{
-			Local:    local,
-			Position: startPos,
-			EndPos:   p.currentPos(),
+			Local:      local,
+			Imported:   &ast.Identifier{Name: "*", Position: local.Position, EndPos: local.EndPos},
+			IsTypeOnly: isTypeOnly,
 		})
-
-		p.skipWhitespaceAndComments()
 	} else if p.match("{") {
-		// import { name1, name2 } from "module"
-		p.advance() // consume '{'
+		p.advance()
 		p.skipWhitespaceAndComments()
 
-		iterations := 0
-		for !p.match("}") && !p.isAtEnd() && iterations < maxParserIterations {
-			iterations++
+		for !p.match("}") && !p.isAtEnd() {
+			specIsTypeOnly := false
+			if p.matchKeyword("type") {
+				savedPos := p.pos
+				p.advanceWord()
+				p.skipWhitespaceAndComments()
+
+				if p.matchKeyword("as") || p.match(",") || p.match("}") {
+					p.pos = savedPos
+				} else {
+					specIsTypeOnly = true
+				}
+			}
+
 			imported, err := p.parseIdentifier()
 			if err != nil {
 				return nil, err
 			}
 
-			local := imported // by default, local name is the same as imported
+			var local *ast.Identifier = imported
 
 			p.skipWhitespaceAndComments()
 			if p.matchKeyword("as") {
-				p.advanceWord() // consume 'as'
+				p.advanceWord()
 				p.skipWhitespaceAndComments()
-
 				local, err = p.parseIdentifier()
 				if err != nil {
 					return nil, err
 				}
-
-				p.skipWhitespaceAndComments()
 			}
 
 			specifiers = append(specifiers, ast.ImportSpecifier{
-				Imported: imported,
-				Local:    local,
-				Position: imported.Pos(),
-				EndPos:   p.currentPos(),
+				Local:      local,
+				Imported:   imported,
+				IsTypeOnly: isTypeOnly || specIsTypeOnly,
 			})
 
+			p.skipWhitespaceAndComments()
 			if p.match(",") {
 				p.advance()
 				p.skipWhitespaceAndComments()
@@ -2703,432 +2271,149 @@ func (p *parser) parseImportDeclaration() (*ast.ImportDeclaration, error) {
 		}
 
 		if !p.match("}") {
-			return nil, fmt.Errorf("expected '}' after import specifiers")
+			return nil, fmt.Errorf("expected '}' in import declaration")
 		}
-		p.advance() // consume '}'
-		p.skipWhitespaceAndComments()
+		p.advance()
 	} else {
-		// import name from "module" (default import)
-		// or import name, { named } from "module" (default + named imports)
 		local, err := p.parseIdentifier()
 		if err != nil {
 			return nil, err
 		}
 
 		specifiers = append(specifiers, ast.ImportSpecifier{
-			Local:    local,
-			Position: startPos,
-			EndPos:   p.currentPos(),
+			Local:      local,
+			Imported:   &ast.Identifier{Name: "default", Position: local.Position, EndPos: local.EndPos},
+			IsTypeOnly: isTypeOnly,
 		})
 
 		p.skipWhitespaceAndComments()
 
-		// Check for comma followed by named imports
-		// Example: import React, { useState } from 'react';
 		if p.match(",") {
-			p.advance() // consume ','
+			p.advance()
 			p.skipWhitespaceAndComments()
 
-			// Check for "type" keyword before opening brace
-			if p.matchKeyword("type") {
-				p.consumeKeyword("type")
+			if p.match("*") {
+				p.advance()
 				p.skipWhitespaceAndComments()
-			}
-
-			// Now expect { for named imports
-			if !p.match("{") {
-				return nil, fmt.Errorf("expected '{' after ',' in import declaration")
-			}
-			p.advance() // consume '{'
-			p.skipWhitespaceAndComments()
-
-			// Parse named imports
-			iterations := 0
-			for !p.match("}") && !p.isAtEnd() && iterations < maxParserIterations {
-				iterations++
-
-				// Check for "type" keyword before individual import
-				if p.matchKeyword("type") {
-					p.consumeKeyword("type")
-					p.skipWhitespaceAndComments()
+				if !p.matchKeyword("as") {
+					return nil, fmt.Errorf("expected 'as' after '*' in import")
 				}
+				p.advanceWord()
+				p.skipWhitespaceAndComments()
 
-				imported, err := p.parseIdentifier()
+				nsLocal, err := p.parseIdentifier()
 				if err != nil {
 					return nil, err
 				}
 
-				localNamed := imported // by default, local name is the same as imported
-
+				specifiers = append(specifiers, ast.ImportSpecifier{
+					Local:      nsLocal,
+					Imported:   &ast.Identifier{Name: "*", Position: nsLocal.Position, EndPos: nsLocal.EndPos},
+					IsTypeOnly: isTypeOnly,
+				})
+			} else if p.match("{") {
+				p.advance()
 				p.skipWhitespaceAndComments()
-				if p.matchKeyword("as") {
-					p.advanceWord() // consume 'as'
-					p.skipWhitespaceAndComments()
 
-					localNamed, err = p.parseIdentifier()
+				for !p.match("}") && !p.isAtEnd() {
+					specIsTypeOnly := false
+					if p.matchKeyword("type") {
+						savedPos := p.pos
+						p.advanceWord()
+						p.skipWhitespaceAndComments()
+						if p.matchKeyword("as") || p.match(",") || p.match("}") {
+							p.pos = savedPos
+						} else {
+							specIsTypeOnly = true
+						}
+					}
+
+					imported, err := p.parseIdentifier()
 					if err != nil {
 						return nil, err
 					}
 
+					var local *ast.Identifier = imported
+
 					p.skipWhitespaceAndComments()
+					if p.matchKeyword("as") {
+						p.advanceWord()
+						p.skipWhitespaceAndComments()
+						local, err = p.parseIdentifier()
+						if err != nil {
+							return nil, err
+						}
+					}
+
+					specifiers = append(specifiers, ast.ImportSpecifier{
+						Local:      local,
+						Imported:   imported,
+						IsTypeOnly: isTypeOnly || specIsTypeOnly,
+					})
+
+					p.skipWhitespaceAndComments()
+					if p.match(",") {
+						p.advance()
+						p.skipWhitespaceAndComments()
+					}
 				}
 
-				specifiers = append(specifiers, ast.ImportSpecifier{
-					Imported: imported,
-					Local:    localNamed,
-					Position: imported.Pos(),
-					EndPos:   p.currentPos(),
-				})
-
-				if p.match(",") {
-					p.advance()
-					p.skipWhitespaceAndComments()
+				if !p.match("}") {
+					return nil, fmt.Errorf("expected '}' in import declaration")
 				}
+				p.advance()
 			}
-
-			if !p.match("}") {
-				return nil, fmt.Errorf("expected '}' after import specifiers")
-			}
-			p.advance() // consume '}'
-			p.skipWhitespaceAndComments()
 		}
 	}
 
-	// Handle 'from' clause - consume 'from' keyword
+	p.skipWhitespaceAndComments()
 	if !p.matchKeyword("from") {
 		return nil, fmt.Errorf("expected 'from' in import declaration")
 	}
-	p.advanceWord() // consume 'from'
-
-	// Parse module source - ensure we skip whitespace first
+	p.advanceWord()
 	p.skipWhitespaceAndComments()
 
-	if p.pos >= len(p.source) {
-		return nil, fmt.Errorf("unexpected end of input, expected module specifier")
+	if !p.matchString() {
+		return nil, fmt.Errorf("expected string literal for import source")
+	}
+	sourceStart := p.currentPos()
+	sourceRaw := p.advanceStringLiteral()
+	source = sourceRaw[1 : len(sourceRaw)-1]
+	sourceLiteral = &ast.Literal{
+		Value:    source,
+		Raw:      sourceRaw,
+		Position: sourceStart,
+		EndPos:   p.currentPos(),
 	}
 
-	// Parse the string literal
-	source, err := p.parseStringLiteral()
-	if err != nil {
-		return nil, fmt.Errorf("expected module specifier in import")
-	}
-
-	// Optional semicolon
 	p.skipWhitespaceAndComments()
 	if p.match(";") {
 		p.advance()
 	}
 
 	return &ast.ImportDeclaration{
+		Source:     sourceLiteral,
 		Specifiers: specifiers,
-		Source: &ast.Literal{
-			Value:    source[1 : len(source)-1], // remove quotes
-			Raw:      source,
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		},
-		Position: startPos,
-		EndPos:   p.currentPos(),
+		IsTypeOnly: isTypeOnly,
+		Position:   startPos,
+		EndPos:     p.currentPos(),
 	}, nil
 }
 
 func (p *parser) parseExportDeclaration() (*ast.ExportDeclaration, error) {
-	startPos := p.currentPos()
-
-	p.consumeKeyword("export")
-	p.skipWhitespaceAndComments()
-
-	// Handle export * from "module" or export * as name from "module"
-	if p.match("*") {
-		p.advance() // consume '*'
-		p.skipWhitespaceAndComments()
-
-		var exported *ast.Identifier
-		if p.matchKeyword("as") {
-			p.advanceWord() // consume 'as'
-			p.skipWhitespaceAndComments()
-
-			var err error
-			exported, err = p.parseIdentifier()
-			if err != nil {
-				return nil, err
-			}
-			p.skipWhitespaceAndComments()
-		}
-
-		if !p.matchKeyword("from") {
-			return nil, fmt.Errorf("expected 'from' after export *")
-		}
-		p.advanceWord() // consume 'from'
-		p.skipWhitespaceAndComments()
-
-		sourceStr, err := p.parseStringLiteral()
-		if err != nil {
-			return nil, fmt.Errorf("expected module specifier in export")
-		}
-
-		source := &ast.Literal{
-			Value:    sourceStr[1 : len(sourceStr)-1], // remove quotes
-			Raw:      sourceStr,
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		}
-
-		// Optional semicolon
-		p.skipWhitespaceAndComments()
-		if p.match(";") {
-			p.advance()
-		}
-
-		return &ast.ExportDeclaration{
-			Source:     source,
-			IsWildcard: true,
-			Exported:   exported,
-			Position:   startPos,
-			EndPos:     p.currentPos(),
-		}, nil
-	}
-
-	// Handle export default
-	if p.matchKeyword("default") {
-		p.advanceWord() // consume 'default'
-		p.skipWhitespaceAndComments()
-
-		// Parse the default export value
-		var declaration ast.Statement
-
-		if p.matchKeyword("function") {
-			funcDecl, err := p.parseFunctionDeclaration()
-			if err != nil {
-				return nil, err
-			}
-			declaration = funcDecl
-		} else if p.matchKeyword("var", "let", "const") {
-			varDecl, err := p.parseVariableDeclaration()
-			if err != nil {
-				return nil, err
-			}
-			declaration = varDecl
-		} else {
-			// Expression as default export
-			expr, err := p.parseExpression()
-			if err != nil {
-				return nil, err
-			}
-
-			declaration = &ast.ExpressionStatement{
-				Expression: expr,
-				Position:   expr.Pos(),
-				EndPos:     p.currentPos(),
-			}
-		}
-
-		// Optional semicolon
-		p.skipWhitespaceAndComments()
-		if p.match(";") {
-			p.advance()
-		}
-
-		return &ast.ExportDeclaration{
-			Declaration: declaration,
-			Position:    startPos,
-			EndPos:      p.currentPos(),
-		}, nil
-	}
-
-	// Handle export { name1, name2 }
-	if p.match("{") {
-		p.advance() // consume '{'
-		p.skipWhitespaceAndComments()
-
-		var specifiers []ast.ExportSpecifier
-
-		iterations := 0
-		for !p.match("}") && !p.isAtEnd() && iterations < maxParserIterations {
-			iterations++
-			local, err := p.parseIdentifier()
-			if err != nil {
-				return nil, err
-			}
-
-			exported := local // by default, exported name is the same as local
-
-			p.skipWhitespaceAndComments()
-			if p.matchKeyword("as") {
-				p.advanceWord() // consume 'as'
-				p.skipWhitespaceAndComments()
-
-				exported, err = p.parseIdentifier()
-				if err != nil {
-					return nil, err
-				}
-
-				p.skipWhitespaceAndComments()
-			}
-
-			specifiers = append(specifiers, ast.ExportSpecifier{
-				Local:    local,
-				Exported: exported,
-				Position: local.Pos(),
-				EndPos:   p.currentPos(),
-			})
-
-			if p.match(",") {
-				p.advance()
-				p.skipWhitespaceAndComments()
-			}
-		}
-
-		if !p.match("}") {
-			return nil, fmt.Errorf("expected '}' after export specifiers")
-		}
-		p.advance() // consume '}'
-		p.skipWhitespaceAndComments()
-
-		// Handle 'from' clause for re-exports
-		var source *ast.Literal
-		if p.matchKeyword("from") {
-			p.advanceWord() // consume 'from'
-			p.skipWhitespaceAndComments()
-
-			sourceStr, err := p.parseStringLiteral()
-			if err != nil {
-				return nil, fmt.Errorf("expected module specifier in export")
-			}
-
-			source = &ast.Literal{
-				Value:    sourceStr[1 : len(sourceStr)-1], // remove quotes
-				Raw:      sourceStr,
-				Position: startPos,
-				EndPos:   p.currentPos(),
-			}
-		}
-
-		// Optional semicolon
-		p.skipWhitespaceAndComments()
-		if p.match(";") {
-			p.advance()
-		}
-
-		return &ast.ExportDeclaration{
-			Specifiers: specifiers,
-			Source:     source,
-			Position:   startPos,
-			EndPos:     p.currentPos(),
-		}, nil
-	}
-
-	// Handle export async function
-	if p.matchKeyword("async") {
-		p.advanceWord() // consume 'async'
-		p.skipWhitespaceAndComments()
-
-		if !p.matchKeyword("function") {
-			return nil, fmt.Errorf("expected 'function' after 'export async'")
-		}
-
-		funcDecl, err := p.parseFunctionDeclaration()
-		if err != nil {
-			return nil, err
-		}
-		funcDecl.Async = true
-
-		return &ast.ExportDeclaration{
-			Declaration: funcDecl,
-			Position:    startPos,
-			EndPos:      p.currentPos(),
-		}, nil
-	}
-
-	// Handle export enum
-	if p.matchKeyword("enum") {
-		enumDecl, err := p.parseEnumDeclaration()
-		if err != nil {
-			return nil, err
-		}
-		return &ast.ExportDeclaration{
-			Declaration: enumDecl,
-			Position:    startPos,
-			EndPos:      p.currentPos(),
-		}, nil
-	}
-
-	// Handle export of declarations (function, class, etc.)
-	if p.matchKeyword("function") {
-		// For exported functions, we need to handle both named and default exports
-		funcDecl, err := p.parseFunctionDeclaration()
-		if err != nil {
-			return nil, err
-		}
-
-		return &ast.ExportDeclaration{
-			Declaration: funcDecl,
-			Position:    startPos,
-			EndPos:      p.currentPos(),
-		}, nil
-	}
-
-	if p.matchKeyword("var", "let", "const") {
-		varDecl, err := p.parseVariableDeclaration()
-		if err != nil {
-			return nil, err
-		}
-
-		return &ast.ExportDeclaration{
-			Declaration: varDecl,
-			Position:    startPos,
-			EndPos:      p.currentPos(),
-		}, nil
-	}
-
-	if p.matchKeyword("type") {
-		typeAliasDecl, err := p.parseTypeAliasDeclaration()
-		if err != nil {
-			return nil, err
-		}
-
-		return &ast.ExportDeclaration{
-			Declaration: typeAliasDecl,
-			Position:    startPos,
-			EndPos:      p.currentPos(),
-		}, nil
-	}
-
-	if p.matchKeyword("interface") {
-		interfaceDecl, err := p.parseInterfaceDeclaration()
-		if err != nil {
-			return nil, err
-		}
-
-		return &ast.ExportDeclaration{
-			Declaration: interfaceDecl,
-			Position:    startPos,
-			EndPos:      p.currentPos(),
-		}, nil
-	}
-
-	if p.matchKeyword("class") {
-		classDecl, err := p.parseClassDeclaration()
-		if err != nil {
-			return nil, err
-		}
-
-		return &ast.ExportDeclaration{
-			Declaration: classDecl,
-			Position:    startPos,
-			EndPos:      p.currentPos(),
-		}, nil
-	}
-
-	return nil, fmt.Errorf("unexpected token after 'export'")
+	return nil, fmt.Errorf("parseExportDeclaration not implemented")
 }
 
-// Helper functions
+func (p *parser) parseClassDeclaration() (*ast.ClassDeclaration, error) {
+	return nil, fmt.Errorf("parseClassDeclaration not implemented")
+}
+
+// Helper methods
+
 func (p *parser) currentPos() ast.Position {
 	return ast.Position{
 		Line:   p.line,
 		Column: p.column,
-		Offset: p.pos,
 	}
 }
 
@@ -3143,2359 +2428,327 @@ func (p *parser) current() string {
 	return string(p.source[p.pos])
 }
 
-func (p *parser) advance() string {
-	if p.isAtEnd() {
+func (p *parser) peek(n int) string {
+	if p.pos+n >= len(p.source) {
 		return ""
 	}
+	return string(p.source[p.pos+n])
+}
 
-	char := p.source[p.pos]
-	p.pos++
-
-	if char == '\n' {
+func (p *parser) advance() {
+	if p.isAtEnd() {
+		return
+	}
+	if p.source[p.pos] == '\n' {
 		p.line++
 		p.column = 1
 	} else {
 		p.column++
 	}
-
-	return string(char)
+	p.pos++
 }
 
-func (p *parser) peek(offset int) string {
-	pos := p.pos + offset
-	if pos >= len(p.source) {
-		return ""
+func (p *parser) skipWhitespaceAndComments() {
+	for !p.isAtEnd() {
+		c := p.source[p.pos]
+		if c == ' ' || c == '\t' || c == '\r' || c == '\n' {
+			p.advance()
+		} else if c == '/' {
+			if p.peek(1) == "/" {
+				// Single line comment
+				for !p.isAtEnd() && p.source[p.pos] != '\n' {
+					p.advance()
+				}
+			} else if p.peek(1) == "*" {
+				// Multi line comment
+				p.advance() // /
+				p.advance() // *
+				for !p.isAtEnd() {
+					if p.source[p.pos] == '*' && p.peek(1) == "/" {
+						p.advance()
+						p.advance()
+						break
+					}
+					p.advance()
+				}
+			} else {
+				break
+			}
+		} else {
+			break
+		}
 	}
-	return string(p.source[pos])
 }
 
-func (p *parser) match(expected string) bool {
-	return p.peekString(len(expected)) == expected
+func (p *parser) parseNewExpression() (ast.Expression, error) {
+	startPos := p.currentPos()
+	p.advanceWord() // consume new
+	p.skipWhitespaceAndComments()
+
+	// Parse callee (identifier or member expression)
+	// For now just identifier
+	callee, err := p.parseIdentifier()
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse arguments
+	if p.match("(") {
+		p.advance()
+		// skip until )
+		depth := 1
+		for depth > 0 && !p.isAtEnd() {
+			if p.match("(") {
+				depth++
+			} else if p.match(")") {
+				depth--
+			}
+			p.advance()
+		}
+	}
+
+	return &ast.CallExpression{
+		Callee:    callee,
+		Arguments: nil,
+		Position:  startPos,
+		EndPos:    p.currentPos(),
+	}, nil
+}
+
+func (p *parser) parseArrayLiteral() (ast.Expression, error) {
+	startPos := p.currentPos()
+	p.advance() // consume [
+	p.skipWhitespaceAndComments()
+
+	// Skip until ]
+	depth := 1
+	for depth > 0 && !p.isAtEnd() {
+		if p.match("[") {
+			depth++
+		} else if p.match("]") {
+			depth--
+		}
+		p.advance()
+	}
+
+	return &ast.Literal{
+		Value:    "[]",
+		Raw:      "[]",
+		Position: startPos,
+		EndPos:   p.currentPos(),
+	}, nil
+}
+
+func (p *parser) parseObjectLiteral() (ast.Expression, error) {
+	startPos := p.currentPos()
+	p.advance() // consume {
+	p.skipWhitespaceAndComments()
+
+	// Skip until }
+	depth := 1
+	for depth > 0 && !p.isAtEnd() {
+		if p.match("{") {
+			depth++
+		} else if p.match("}") {
+			depth--
+		}
+		p.advance()
+	}
+
+	return &ast.Literal{
+		Value:    "{}",
+		Raw:      "{}",
+		Position: startPos,
+		EndPos:   p.currentPos(),
+	}, nil
+}
+
+func (p *parser) match(s string) bool {
+	if p.pos+len(s) > len(p.source) {
+		return false
+	}
+	return p.source[p.pos:p.pos+len(s)] == s
 }
 
 func (p *parser) matchKeyword(keywords ...string) bool {
-	if p.isAtEnd() {
-		return false
-	}
-
-	word := p.peekWord()
-	for _, keyword := range keywords {
-		if word == keyword {
+	for _, kw := range keywords {
+		if p.match(kw) {
+			// Check if it's a whole word
+			end := p.pos + len(kw)
+			if end < len(p.source) {
+				c := p.source[end]
+				if unicode.IsLetter(rune(c)) || unicode.IsDigit(rune(c)) || c == '_' || c == '$' {
+					continue
+				}
+			}
 			return true
 		}
 	}
 	return false
 }
 
-func (p *parser) matchIdentifier() bool {
-	if p.isAtEnd() {
-		return false
+func (p *parser) advanceWord() string {
+	start := p.pos
+	for !p.isAtEnd() {
+		c := rune(p.source[p.pos])
+		if unicode.IsLetter(c) || unicode.IsDigit(c) || c == '_' || c == '$' {
+			p.advance()
+		} else {
+			break
+		}
 	}
-
-	char := p.source[p.pos]
-	// Identificadores pueden empezar con letras (incluyendo Unicode), $ o _
-	if isLetter(char) || char == '_' || char == '$' {
-		return true
-	}
-	// Si es un byte alto (>= 0x80), podría ser inicio de carácter Unicode
-	if char >= 0x80 {
-		// Intentar decodificar como UTF-8
-		r, _ := utf8.DecodeRuneInString(p.source[p.pos:])
-		return r != utf8.RuneError && (unicode.IsLetter(r) || r == '_' || r == '$')
-	}
-	return false
+	return p.source[start:p.pos]
 }
 
-func (p *parser) matchNumber() bool {
-	if p.isAtEnd() {
-		return false
+func (p *parser) advanceStringLiteral() string {
+	start := p.pos
+	quote := p.source[p.pos]
+	p.advance() // quote
+	for !p.isAtEnd() {
+		if p.source[p.pos] == quote {
+			p.advance()
+			break
+		}
+		if p.source[p.pos] == '\\' {
+			p.advance()
+			if !p.isAtEnd() {
+				p.advance()
+			}
+		} else {
+			p.advance()
+		}
 	}
-
-	char := p.source[p.pos]
-	return isDigit(char)
+	return p.source[start:p.pos]
 }
 
 func (p *parser) matchString() bool {
 	if p.isAtEnd() {
 		return false
 	}
-
-	char := p.source[p.pos]
-	return char == '"' || char == '\'' || char == '`'
+	c := p.source[p.pos]
+	return c == '"' || c == '\'' || c == '`'
 }
 
-func (p *parser) peekWord() string {
-	start := p.pos
-	for !p.isAtEnd() {
-		char := p.source[p.pos]
-		// Caracteres ASCII válidos
-		if isLetter(char) || isDigit(char) || char == '_' || char == '$' {
-			p.pos++
-			continue
-		}
-		// Caracteres Unicode
-		if char >= 0x80 {
-			r, size := utf8.DecodeRuneInString(p.source[p.pos:])
-			if r != utf8.RuneError && (unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_') {
-				p.pos += size
-				continue
-			}
-		}
-		break
+func (p *parser) matchNumber() bool {
+	if p.isAtEnd() {
+		return false
 	}
-
-	word := p.source[start:p.pos]
-	p.pos = start // Reset position
-
-	return word
-}
-
-func (p *parser) peekString(length int) string {
-	if p.pos+length > len(p.source) {
-		return ""
-	}
-	return p.source[p.pos : p.pos+length]
-}
-
-func (p *parser) consumeKeyword(keywords ...string) string {
-	if !p.matchKeyword(keywords...) {
-		panic(fmt.Sprintf("expected keyword %v", keywords))
-	}
-	return p.advanceWord()
-}
-
-func (p *parser) expect(expected string) {
-	if !p.match(expected) {
-		panic(fmt.Sprintf("expected '%s' at %s", expected, p.currentPos()))
-	}
-	p.advanceString(len(expected))
-}
-
-func (p *parser) advanceWord() string {
-	var word strings.Builder
-	for !p.isAtEnd() {
-		char := p.source[p.pos]
-		// Caracteres ASCII válidos en identificadores
-		if isLetter(char) || isDigit(char) || char == '_' || char == '$' {
-			word.WriteByte(char)
-			p.advance()
-			continue
-		}
-		// Caracteres Unicode (multibyte)
-		if char >= 0x80 {
-			r, size := utf8.DecodeRuneInString(p.source[p.pos:])
-			if r != utf8.RuneError && (unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_') {
-				word.WriteRune(r)
-				// Avanzar size bytes
-				for i := 0; i < size; i++ {
-					p.advance()
-				}
-				continue
-			}
-		}
-		break
-	}
-	return word.String()
-}
-
-func (p *parser) advanceString(length int) {
-	for i := 0; i < length; i++ {
-		p.advance()
-	}
+	c := p.source[p.pos]
+	return unicode.IsDigit(rune(c))
 }
 
 func (p *parser) advanceNumber() string {
-	var num strings.Builder
-	for !p.isAtEnd() && (isDigit(p.source[p.pos]) || p.source[p.pos] == '.') {
-		num.WriteByte(p.source[p.pos])
-		p.advance()
-	}
-	return num.String()
-}
-
-func (p *parser) advanceStringLiteral() string {
-	var str strings.Builder
-	quote := p.source[p.pos]
-	str.WriteByte(quote)
-	p.advance() // Consume opening quote
-
-	// For template strings (backticks), we need special handling
-	isTemplate := quote == '`'
-
-	for !p.isAtEnd() && p.source[p.pos] != quote {
-		if p.source[p.pos] == '\\' && !p.isAtEnd() {
-			str.WriteByte(p.source[p.pos]) // Write backslash
-			p.advance()
-			if !p.isAtEnd() {
-				str.WriteByte(p.source[p.pos]) // Write escaped character
-				p.advance()
-			}
-		} else if isTemplate && p.source[p.pos] == '$' && p.peek(1) == "{" {
-			// Handle template interpolation ${...}
-			// For now, just include it as-is in the string
-			str.WriteByte(p.source[p.pos])
-			p.advance()
-			if !p.isAtEnd() && p.source[p.pos] == '{' {
-				str.WriteByte(p.source[p.pos])
-				p.advance()
-
-				// Find matching closing brace
-				braceCount := 1
-				for !p.isAtEnd() && braceCount > 0 {
-					if p.source[p.pos] == '{' {
-						braceCount++
-					} else if p.source[p.pos] == '}' {
-						braceCount--
-					}
-					str.WriteByte(p.source[p.pos])
-					p.advance()
-				}
-			}
-		} else {
-			str.WriteByte(p.source[p.pos])
-			p.advance()
-		}
-	}
-
-	if !p.isAtEnd() {
-		str.WriteByte(p.source[p.pos]) // Closing quote
-		p.advance()
-	}
-
-	return str.String()
-}
-
-func (p *parser) skipWhitespaceAndComments() {
-	iterations := 0
-	for !p.isAtEnd() && iterations < maxParserIterations {
-		iterations++
-		char := p.source[p.pos]
-
-		if char == ' ' || char == '\t' || char == '\r' || char == '\n' {
-			p.advance()
-			continue
-		}
-
-		// Single-line comment
-		if char == '/' && p.pos+1 < len(p.source) && p.source[p.pos+1] == '/' {
-			p.advance()
-			p.advance()
-			for !p.isAtEnd() && p.source[p.pos] != '\n' {
-				p.advance()
-			}
-			continue
-		}
-
-		// Multi-line comment (including JSDoc)
-		if char == '/' && p.pos+1 < len(p.source) && p.source[p.pos+1] == '*' {
-			p.advance()
-			p.advance()
-			commentIter := 0
-			for !p.isAtEnd() && commentIter < maxParserIterations {
-				commentIter++
-				if p.source[p.pos] == '*' && p.pos+1 < len(p.source) && p.source[p.pos+1] == '/' {
-					p.advance()
-					p.advance()
-					break // Exit the inner for loop
-				}
-				p.advance()
-			}
-			continue
-		}
-
-		break // No whitespace or comment found
-	}
-}
-
-func isLetter(char byte) bool {
-	// Soporte básico ASCII más $
-	if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || char == '$' || char == '_' {
-		return true
-	}
-	// Para Unicode, necesitamos convertir a rune
-	if char >= 0x80 { // Caracteres multibyte UTF-8
-		return true
-	}
-	return false
-}
-
-func isDigit(char byte) bool {
-	return char >= '0' && char <= '9'
-}
-
-// parseStringLiteral parses a string literal
-func (p *parser) parseStringLiteral() (string, error) {
-	p.skipWhitespaceAndComments()
-
-	if p.pos >= len(p.source) {
-		return "", fmt.Errorf("unexpected end of input, expected string literal")
-	}
-
 	start := p.pos
-
-	// Check for single or double quotes
-	if p.match("\"") || p.match("'") {
-		quote := p.source[p.pos]
-		p.advance() // consume opening quote
-
-		// Find the closing quote
-		for p.pos < len(p.source) && p.source[p.pos] != quote {
-			if p.source[p.pos] == '\\' {
-				p.advance() // skip escape character
-				if p.pos < len(p.source) {
-					p.advance() // skip escaped character
-				}
-			} else {
-				p.advance()
-			}
-		}
-
-		if p.pos >= len(p.source) {
-			return "", fmt.Errorf("unterminated string literal")
-		}
-
-		p.advance() // consume closing quote
-		return p.source[start:p.pos], nil
-	}
-
-	return "", fmt.Errorf("expected string literal")
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-// parseTryStatement parses try-catch-finally statements
-func (p *parser) parseTryStatement() (ast.Statement, error) {
-	startPos := p.currentPos()
-
-	// Consume 'try'
-	p.advanceWord()
-	p.skipWhitespaceAndComments()
-
-	// Parse try block (required)
-	if !p.match("{") {
-		return nil, fmt.Errorf("expected '{' after 'try' at %s", p.currentPos())
-	}
-
-	tryBlock, err := p.parseBlockStatement()
-	if err != nil {
-		return nil, err
-	}
-
-	p.skipWhitespaceAndComments()
-
-	var handler *ast.CatchClause
-	var finalizer *ast.BlockStatement
-
-	// Parse catch clause (optional)
-	if p.matchKeyword("catch") {
-		catchStartPos := p.currentPos()
-		p.advanceWord()
-		p.skipWhitespaceAndComments()
-
-		var param *ast.Identifier
-
-		// Parse catch parameter (optional in modern JavaScript/TypeScript)
-		if p.match("(") {
+	for !p.isAtEnd() {
+		c := rune(p.source[p.pos])
+		if unicode.IsDigit(c) || c == '.' {
 			p.advance()
-			p.skipWhitespaceAndComments()
-
-			if !p.match(")") {
-				// Parse parameter name
-				paramName := p.advanceWord()
-				if paramName == "" {
-					return nil, fmt.Errorf("expected parameter name in catch clause at %s", p.currentPos())
-				}
-
-				param = &ast.Identifier{
-					Name:     paramName,
-					Position: p.currentPos(),
-					EndPos:   p.currentPos(),
-				}
-
-				// Skip optional type annotation for catch parameter
-				p.skipWhitespaceAndComments()
-				if p.match(":") {
-					p.advance()
-					p.skipTypeAnnotation()
-				}
-
-				p.skipWhitespaceAndComments()
-			}
-
-			if !p.match(")") {
-				return nil, fmt.Errorf("expected ')' after catch parameter at %s", p.currentPos())
-			}
-			p.advance()
-			p.skipWhitespaceAndComments()
-		}
-
-		// Parse catch block (required)
-		if !p.match("{") {
-			return nil, fmt.Errorf("expected '{' after catch clause at %s", p.currentPos())
-		}
-
-		catchBlock, err := p.parseBlockStatement()
-		if err != nil {
-			return nil, err
-		}
-
-		handler = &ast.CatchClause{
-			Param:    param,
-			Body:     catchBlock,
-			Position: catchStartPos,
-			EndPos:   catchBlock.End(),
-		}
-
-		p.skipWhitespaceAndComments()
-	}
-
-	// Parse finally block (optional)
-	if p.matchKeyword("finally") {
-		p.advanceWord()
-		p.skipWhitespaceAndComments()
-
-		if !p.match("{") {
-			return nil, fmt.Errorf("expected '{' after 'finally' at %s", p.currentPos())
-		}
-
-		finalizerBlock, err := p.parseBlockStatement()
-		if err != nil {
-			return nil, err
-		}
-
-		finalizer = finalizerBlock
-	}
-
-	// At least one of catch or finally must be present
-	if handler == nil && finalizer == nil {
-		return nil, fmt.Errorf("missing catch or finally after try at %s", startPos)
-	}
-
-	endPos := p.currentPos()
-	if finalizer != nil {
-		endPos = finalizer.End()
-	} else if handler != nil {
-		endPos = handler.End()
-	} else {
-		endPos = tryBlock.End()
-	}
-
-	return &ast.TryStatement{
-		Block:     tryBlock,
-		Handler:   handler,
-		Finalizer: finalizer,
-		Position:  startPos,
-		EndPos:    endPos,
-	}, nil
-}
-
-// parseThrowStatement parses throw statements
-func (p *parser) parseThrowStatement() (ast.Statement, error) {
-	startPos := p.currentPos()
-
-	// Consume 'throw'
-	p.advanceWord()
-
-	// Note: In JavaScript/TypeScript, there must be no line terminator between 'throw' and its expression
-	// For simplicity, we'll just skip whitespace but not newlines for now
-	// In a production parser, you'd need to track if you crossed a newline
-
-	p.skipWhitespaceAndComments()
-
-	// Parse the expression to throw
-	expr, err := p.parseExpression()
-	if err != nil {
-		return nil, err
-	}
-
-	if expr == nil {
-		return nil, fmt.Errorf("expected expression after 'throw' at %s", p.currentPos())
-	}
-
-	// Optional semicolon
-	p.skipWhitespaceAndComments()
-	if p.match(";") {
-		p.advance()
-	}
-
-	return &ast.ThrowStatement{
-		Argument: expr,
-		Position: startPos,
-		EndPos:   p.currentPos(),
-	}, nil
-}
-
-// parseArrayLiteral parses an array literal [1, 2, 3]
-func (p *parser) parseArrayLiteral() (*ast.ArrayExpression, error) {
-	startPos := p.currentPos()
-
-	p.expect("[")
-	p.skipWhitespaceAndComments()
-
-	var elements []ast.Expression
-
-	iterations := 0
-	for !p.match("]") && !p.isAtEnd() && iterations < maxParserIterations {
-		iterations++
-
-		if p.match("...") {
-			startPos := p.currentPos()
-			p.advanceString(3)
-			p.skipWhitespaceAndComments()
-			arg, err := p.parseExpression()
-			if err != nil {
-				return nil, err
-			}
-			elements = append(elements, &ast.SpreadElement{
-				Argument: arg,
-				Position: startPos,
-				EndPos:   p.currentPos(),
-			})
-		} else {
-			elem, err := p.parseExpression()
-			if err != nil {
-				return nil, err
-			}
-
-			if elem != nil {
-				elements = append(elements, elem)
-			}
-		}
-
-		p.skipWhitespaceAndComments()
-		if p.match(",") {
-			p.advance()
-			p.skipWhitespaceAndComments()
-			// Allow trailing comma
-			if p.match("]") {
-				break
-			}
-		} else if !p.match("]") {
-			return nil, fmt.Errorf("expected ',' or ']' in array literal")
-		}
-	}
-
-	if !p.match("]") {
-		return nil, fmt.Errorf("expected ']' to close array literal")
-	}
-	p.advance()
-
-	return &ast.ArrayExpression{
-		Elements: elements,
-		Position: startPos,
-		EndPos:   p.currentPos(),
-	}, nil
-}
-
-func (p *parser) parseObjectLiteral() (*ast.ObjectExpression, error) {
-	startPos := p.currentPos()
-
-	p.expect("{")
-	p.skipWhitespaceAndComments()
-
-	var properties []ast.ObjectPropertyNode
-
-	iterations := 0
-	for !p.match("}") && !p.isAtEnd() && iterations < maxParserIterations {
-		iterations++
-		propStartPos := p.currentPos()
-
-		// Check for spread property: ...identifier
-		if p.match("...") {
-			p.advanceString(3)
-			p.skipWhitespaceAndComments()
-
-			argument, err := p.parseAssignmentExpression()
-			if err != nil {
-				return nil, err
-			}
-
-			spread := &ast.SpreadElement{
-				Argument: argument,
-				Position: propStartPos,
-				EndPos:   p.currentPos(),
-			}
-			properties = append(properties, spread)
-		} else {
-			// Check for async modifier (for method shorthand) BEFORE parsing key
-			isAsync := false
-			if p.matchKeyword("async") {
-				isAsync = true
-				p.advanceWord()
-				p.skipWhitespaceAndComments()
-			}
-
-			// Check for getter/setter (ES5: get prop() {} or set prop(value) {})
-			isGetter := false
-			isSetter := false
-			if p.matchKeyword("get") {
-				isGetter = true
-				p.advanceWord()
-				p.skipWhitespaceAndComments()
-			} else if p.matchKeyword("set") {
-				isSetter = true
-				p.advanceWord()
-				p.skipWhitespaceAndComments()
-			}
-
-			// Regular property
-			var key ast.Expression
-			var err error
-
-			// Check for computed property: [expression]
-			if p.match("[") {
-				p.advance() // consume '['
-				p.skipWhitespaceAndComments()
-
-				// Parse the computed key expression
-				key, err = p.parseExpression()
-				if err != nil {
-					return nil, err
-				}
-
-				p.skipWhitespaceAndComments()
-				if !p.match("]") {
-					return nil, fmt.Errorf("expected ']' after computed property key at %s", p.currentPos())
-				}
-				p.advance() // consume ']'
-			} else if p.matchString() {
-				str := p.advanceStringLiteral()
-				key = &ast.Literal{
-					Value:    str[1 : len(str)-1],
-					Raw:      str,
-					Position: propStartPos,
-					EndPos:   p.currentPos(),
-				}
-			} else if p.matchNumber() {
-				num := p.advanceNumber()
-				key = &ast.Literal{
-					Value:    num,
-					Raw:      num,
-					Position: propStartPos,
-					EndPos:   p.currentPos(),
-				}
-			} else if p.matchIdentifier() {
-				key, err = p.parseIdentifier()
-				if err != nil {
-					return nil, err
-				}
-			} else {
-				return nil, fmt.Errorf("expected property key or '...' at %s", p.currentPos())
-			}
-
-			p.skipWhitespaceAndComments()
-
-			// Check for method shorthand (ES6: method() {} or async method() {} instead of method: function() {})
-			// Also handles getters and setters
-			var value ast.Expression
-			if p.match("(") {
-				// Method shorthand: key() { body } or async key() { body }
-				// Or getter: get key() { body }
-				// Or setter: set key(value) { body }
-				// Parse as a function expression
-				p.advance() // consume "("
-				p.skipWhitespaceAndComments()
-
-				// Parse parameters using the same logic as parseParameterList
-				var params []*ast.Parameter
-				paramIterations := 0
-				for !p.match(")") && !p.isAtEnd() && paramIterations < maxParserIterations {
-					paramIterations++
-					p.skipWhitespaceAndComments()
-
-					// Check for destructuring patterns
-					if p.match("{") || p.match("[") {
-						paramStartPos := p.currentPos()
-						openChar := p.source[p.pos]
-						closeChar := byte('}')
-						isObjectPattern := openChar == '{'
-						if openChar == '[' {
-							closeChar = ']'
-						}
-
-						p.advance() // consume opening { or [
-						p.skipWhitespaceAndComments()
-
-						// Extract parameter names from the destructuring pattern
-						var extractedNames []string
-						depth := 1
-						currentName := ""
-
-						for depth > 0 && !p.isAtEnd() {
-							ch := p.source[p.pos]
-
-							if ch == openChar {
-								depth++
-								p.advance()
-							} else if ch == closeChar {
-								depth--
-								if depth == 0 {
-									// Add current name if exists
-									if currentName != "" {
-										extractedNames = append(extractedNames, strings.TrimSpace(currentName))
-										currentName = ""
-									}
-								}
-								p.advance()
-							} else if ch == ',' && depth == 1 {
-								// End of one binding
-								if currentName != "" {
-									extractedNames = append(extractedNames, strings.TrimSpace(currentName))
-									currentName = ""
-								}
-								p.advance()
-								p.skipWhitespaceAndComments()
-							} else if ch == ':' && isObjectPattern && depth == 1 {
-								// In object pattern, skip the rename part (e.g., {oldName: newName})
-								// We want to capture 'newName', not 'oldName'
-								currentName = ""
-								p.advance()
-								p.skipWhitespaceAndComments()
-							} else if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_' || ch == '$' ||
-								(currentName != "" && ch >= '0' && ch <= '9') {
-								currentName += string(ch)
-								p.advance()
-							} else if ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' {
-								p.skipWhitespaceAndComments()
-							} else {
-								// Other characters (like =, ..., etc.), skip
-								p.advance()
-							}
-						}
-
-						p.skipWhitespaceAndComments()
-
-						// Parse type annotation if present
-						var paramType ast.TypeNode
-						var err error
-						if p.match(":") {
-							p.advance()
-							p.skipWhitespaceAndComments()
-							paramType, err = p.parseTypeAnnotation()
-							if err != nil {
-								return nil, err
-							}
-							p.skipWhitespaceAndComments()
-						}
-
-						// Create a parameter for each extracted name
-						if len(extractedNames) > 0 {
-							for _, name := range extractedNames {
-								if name != "" {
-									paramId := &ast.Identifier{
-										Name:     name,
-										Position: paramStartPos,
-										EndPos:   p.currentPos(),
-									}
-									params = append(params, &ast.Parameter{
-										ID:        paramId,
-										ParamType: paramType,
-										Optional:  false,
-										Position:  paramStartPos,
-										EndPos:    p.currentPos(),
-									})
-								}
-							}
-						} else {
-							// Fallback: create placeholder if no names were extracted
-							paramId := &ast.Identifier{
-								Name:     "destructured_param",
-								Position: paramStartPos,
-								EndPos:   p.currentPos(),
-							}
-							params = append(params, &ast.Parameter{
-								ID:        paramId,
-								ParamType: paramType,
-								Optional:  false,
-								Position:  paramStartPos,
-								EndPos:    p.currentPos(),
-							})
-						}
-					} else {
-						// Regular parameter
-						param, err := p.parseParameter()
-						if err != nil {
-							return nil, err
-						}
-						params = append(params, param)
-					}
-
-					p.skipWhitespaceAndComments()
-					if p.match(",") {
-						p.advance()
-						p.skipWhitespaceAndComments()
-					} else if !p.match(")") {
-						return nil, fmt.Errorf("expected ',' or ')' in parameter list at %s", p.currentPos())
-					}
-				}
-
-				// Validate getter/setter parameter counts
-				if isGetter && len(params) > 0 {
-					return nil, fmt.Errorf("getter should not have parameters at %s", p.currentPos())
-				}
-				if isSetter && len(params) != 1 {
-					return nil, fmt.Errorf("setter must have exactly one parameter at %s", p.currentPos())
-				}
-
-				if !p.match(")") {
-					return nil, fmt.Errorf("expected ')' after parameters at %s", p.currentPos())
-				}
-				p.advance()
-				p.skipWhitespaceAndComments()
-
-				// Parse return type annotation if present (: Type)
-				if p.match(":") {
-					p.advance() // consume ':'
-					p.skipWhitespaceAndComments()
-					// Skip the return type annotation
-					_, err = p.parseTypeAnnotation()
-					if err != nil {
-						return nil, err
-					}
-					p.skipWhitespaceAndComments()
-				}
-
-				// Parse function body
-				if !p.match("{") {
-					return nil, fmt.Errorf("expected '{' for method body")
-				}
-
-				body, err := p.parseBlockStatement()
-				if err != nil {
-					return nil, err
-				}
-
-				// Create a function expression (getters/setters are treated as regular functions for now)
-				value = &ast.ArrowFunctionExpression{
-					Params:   params,
-					Body:     body,
-					Async:    isAsync,
-					Position: propStartPos,
-					EndPos:   p.currentPos(),
-				}
-			} else if isAsync || isGetter || isSetter {
-				// If we saw 'async', 'get', or 'set' but no '(', it's an error
-				return nil, fmt.Errorf("expected '(' after modifier keyword in method shorthand at %s", p.currentPos())
-			} else if p.match(":") {
-				// Regular property: key: value
-				p.advance() // consume ":"
-				p.skipWhitespaceAndComments()
-
-				value, err = p.parseAssignmentExpression()
-				if err != nil {
-					return nil, err
-				}
-			} else {
-				// Shorthand property: {key} means {key: key}
-				// The key must be an identifier for this to work
-				if ident, ok := key.(*ast.Identifier); ok {
-					value = ident
-				} else {
-					return nil, fmt.Errorf("shorthand property must be an identifier at %s", p.currentPos())
-				}
-			}
-
-			prop := &ast.Property{
-				Key:      key,
-				Value:    value,
-				Position: propStartPos,
-				EndPos:   p.currentPos(),
-			}
-			properties = append(properties, prop)
-		}
-
-		p.skipWhitespaceAndComments()
-		if p.match(",") {
-			p.advance()
-			p.skipWhitespaceAndComments()
-			// Allow trailing comma
-			if p.match("}") {
-				break
-			}
-		} else if !p.match("}") {
-			return nil, fmt.Errorf("expected ',' or '}' in object literal at %s", p.currentPos())
-		}
-	}
-
-	if !p.match("}") {
-		return nil, fmt.Errorf("expected '}' to close object literal at %s", p.currentPos())
-	}
-	p.advance()
-
-	return &ast.ObjectExpression{
-		Properties: properties,
-		Position:   startPos,
-		EndPos:     p.currentPos(),
-	}, nil
-}
-
-// parseArrowFunction parses an arrow function expression
-func (p *parser) parseArrowFunction() (*ast.ArrowFunctionExpression, error) {
-	startPos := p.currentPos()
-
-	var params []*ast.Parameter
-	isAsync := false
-
-	// Check for async keyword
-	if p.matchKeyword("async") {
-		isAsync = true
-		p.advanceWord()
-		p.skipWhitespaceAndComments()
-	}
-
-	// Check for generic type parameters <T, U>
-	if p.match("<") {
-		// Try to parse type parameters
-		savedPos := p.pos
-		p.advance()
-		p.skipWhitespaceAndComments()
-
-		// Simple heuristic: if we see identifier followed by extends, comma, or >
-		// then it's likely a type parameter
-		if p.matchIdentifier() {
-			// Skip type parameters for now - just consume them
-			depth := 1
-			for depth > 0 && !p.isAtEnd() {
-				if p.match("<") {
-					depth++
-					p.advance()
-				} else if p.match(">") {
-					depth--
-					p.advance()
-				} else {
-					p.advance()
-				}
-			}
-			p.skipWhitespaceAndComments()
-		} else {
-			// Not type parameters, restore position
-			p.pos = savedPos
-		}
-	}
-
-	// Parse parameters
-	if p.match("(") {
-		p.advance()
-		p.skipWhitespaceAndComments()
-
-		// Parse parameter list
-		iterations := 0
-		for !p.match(")") && !p.isAtEnd() && iterations < maxParserIterations {
-			iterations++
-			p.skipWhitespaceAndComments()
-
-			// Handle object destructuring - extract individual names
-			if p.match("{") || p.match("[") {
-				isRest := false
-				startPos := p.currentPos()
-				openChar := p.source[p.pos]
-				closeChar := byte('}')
-				isObjectPattern := openChar == '{'
-				if openChar == '[' {
-					closeChar = ']'
-				}
-
-				p.advance() // consume opening { or [
-				p.skipWhitespaceAndComments()
-
-				// Extract parameter names from the destructuring pattern
-				var extractedNames []string
-				depth := 1
-				currentName := ""
-
-				for depth > 0 && !p.isAtEnd() {
-					ch := p.source[p.pos]
-
-					if ch == openChar {
-						depth++
-						p.advance()
-					} else if ch == closeChar {
-						depth--
-						if depth == 0 {
-							// Add current name if exists
-							if currentName != "" {
-								extractedNames = append(extractedNames, strings.TrimSpace(currentName))
-								currentName = ""
-							}
-						}
-						p.advance()
-					} else if ch == ',' && depth == 1 {
-						// End of one binding
-						if currentName != "" {
-							extractedNames = append(extractedNames, strings.TrimSpace(currentName))
-							currentName = ""
-						}
-						p.advance()
-						p.skipWhitespaceAndComments()
-					} else if ch == ':' && isObjectPattern && depth == 1 {
-						// In object pattern, skip the rename part (e.g., {oldName: newName})
-						// We want to capture 'newName', not 'oldName'
-						currentName = ""
-						p.advance()
-						p.skipWhitespaceAndComments()
-					} else if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_' || ch == '$' ||
-						(currentName != "" && ch >= '0' && ch <= '9') {
-						currentName += string(ch)
-						p.advance()
-					} else if ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' {
-						p.skipWhitespaceAndComments()
-					} else {
-						// Other characters (like =, ..., etc.), skip
-						p.advance()
-					}
-				}
-
-				p.skipWhitespaceAndComments()
-
-				// Parse type annotation if present
-				var paramType ast.TypeNode
-				var err error
-				if p.match(":") {
-					p.advance()
-					p.skipWhitespaceAndComments()
-					paramType, err = p.parseTypeAnnotation()
-					if err != nil {
-						return nil, err
-					}
-					p.skipWhitespaceAndComments()
-				}
-
-				// Create a parameter for each extracted name
-				if len(extractedNames) > 0 {
-					for _, name := range extractedNames {
-						if name != "" {
-							paramId := &ast.Identifier{
-								Name:     name,
-								Position: startPos,
-								EndPos:   p.currentPos(),
-							}
-							params = append(params, &ast.Parameter{
-								ID:        paramId,
-								ParamType: paramType,
-								Optional:  false,
-								Rest:      isRest,
-								Position:  startPos,
-								EndPos:    p.currentPos(),
-							})
-						}
-					}
-				} else {
-					// Fallback: create placeholder if no names were extracted
-					paramId := &ast.Identifier{
-						Name:     "destructured_param",
-						Position: startPos,
-						EndPos:   p.currentPos(),
-					}
-					params = append(params, &ast.Parameter{
-						ID:        paramId,
-						ParamType: paramType,
-						Optional:  false,
-						Rest:      isRest,
-						Position:  startPos,
-						EndPos:    p.currentPos(),
-					})
-				}
-				p.skipWhitespaceAndComments()
-				if p.match(",") {
-					p.advance()
-					p.skipWhitespaceAndComments()
-				}
-				continue
-			}
-
-			// HACK: Handle array destructuring as a placeholder (e.g., [name, value])
-			if p.match("[") {
-				startPos := p.currentPos()
-				p.advance()
-				depth := 1
-				for depth > 0 && !p.isAtEnd() {
-					if p.match("[") {
-						depth++
-					} else if p.match("]") {
-						depth--
-					}
-					p.advance()
-				}
-				param := &ast.Parameter{
-					ID:       &ast.Identifier{Name: "destructured_array_param", Position: startPos, EndPos: p.currentPos()},
-					Position: startPos,
-					EndPos:   p.currentPos(),
-				}
-				params = append(params, param)
-				p.skipWhitespaceAndComments()
-				if p.match(",") {
-					p.advance()
-					p.skipWhitespaceAndComments()
-				}
-				continue
-			}
-
-			// Check for rest parameter
-			isRest := false
-			if p.match("...") {
-				isRest = true
-				p.advanceString(3)
-				p.skipWhitespaceAndComments()
-			}
-
-			id, err := p.parseIdentifier()
-			if err != nil {
-				return nil, err
-			}
-
-			// Handle optional type annotation
-			var paramType ast.TypeNode
-			p.skipWhitespaceAndComments()
-			if p.match(":") {
-				p.advance() // consume ':'
-				p.skipWhitespaceAndComments()
-
-				// Parse type annotation using the full parser
-				paramType, err = p.parseTypeAnnotationFull()
-				if err != nil {
-					return nil, err
-				}
-			}
-
-			p.skipWhitespaceAndComments()
-
-			// Handle default value
-			hasDefault := false
-			if p.match("=") {
-				hasDefault = true
-				p.advance()
-				p.skipWhitespaceAndComments()
-				// Skip the default value expression for now
-				// TODO: Parse and store default value in AST
-				_, err = p.parseAssignmentExpression()
-				if err != nil {
-					return nil, err
-				}
-				p.skipWhitespaceAndComments()
-			}
-
-			param := &ast.Parameter{
-				ID:        id,
-				ParamType: paramType,
-				Optional:  hasDefault,
-				Rest:      isRest,
-				Position:  id.Pos(),
-				EndPos:    p.currentPos(),
-			}
-
-			params = append(params, param)
-
-			p.skipWhitespaceAndComments()
-			if p.match(",") {
-				p.advance()
-				p.skipWhitespaceAndComments()
-			}
-		}
-
-		if !p.match(")") {
-			return nil, fmt.Errorf("expected ')' after arrow function parameters")
-		}
-		p.advance()
-	} else if p.matchIdentifier() {
-		// Single parameter without parentheses
-		id, err := p.parseIdentifier()
-		if err != nil {
-			return nil, err
-		}
-
-		param := &ast.Parameter{
-			ID:       id,
-			Position: id.Pos(),
-			EndPos:   id.End(),
-		}
-
-		params = append(params, param)
-	}
-
-	p.skipWhitespaceAndComments()
-
-	// Check for return type annotation (: Type)
-	if p.match(":") {
-		p.advance()
-		p.skipWhitespaceAndComments()
-		// Parse and skip the return type annotation for now
-		_, err := p.parseTypeAnnotationFull()
-		if err != nil {
-			return nil, err
-		}
-		p.skipWhitespaceAndComments()
-	}
-
-	// Expect =>
-	if !p.match("=") || p.peek(1) != ">" {
-		return nil, fmt.Errorf("expected '=>' in arrow function")
-	}
-	p.advance() // =
-	p.advance() // >
-	p.skipWhitespaceAndComments()
-
-	// Parse body (can be expression or block)
-	var body ast.Node
-	var err error
-
-	if p.match("{") {
-		// Block body
-		body, err = p.parseBlockStatement()
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		// Expression body
-		expr, err := p.parseExpression()
-		if err != nil {
-			return nil, err
-		}
-		body = expr
-	}
-
-	return &ast.ArrowFunctionExpression{
-		Params:   params,
-		Body:     body,
-		Async:    isAsync,
-		Position: startPos,
-		EndPos:   p.currentPos(),
-	}, nil
-}
-
-// parseTypeAnnotation parses a TypeScript type annotation
-func (p *parser) parseTypeAnnotation() (ast.TypeNode, error) {
-	return p.parseTypeAnnotationFull()
-}
-
-// parseTypePrimaryNode parses a single type (without unions/intersections)
-func (p *parser) parseTypePrimaryNode() (ast.TypeNode, error) {
-	startPos := p.currentPos()
-	var result ast.TypeNode
-
-	// Parse object types (e.g., { prop: Type })
-	if p.match("{") {
-		// For now, just skip the object type and return a placeholder
-		p.advance()
-		depth := 1
-		iterations := 0
-		for depth > 0 && !p.isAtEnd() && iterations < maxParserIterations {
-			iterations++
-			if p.match("{") {
-				depth++
-			} else if p.match("}") {
-				depth--
-			}
-			p.advance()
-		}
-		result = &ast.TypeReference{
-			Name:     "{ ... }", // Placeholder for object type
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		}
-	} else if p.matchString() {
-		// Parse string literal types (e.g., 'id' | 'name')
-		str := p.advanceStringLiteral()
-		result = &ast.TypeReference{
-			Name:     str, // Store the full string literal with quotes
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		}
-	} else if p.matchNumber() {
-		num := p.advanceNumber()
-		result = &ast.TypeReference{
-			Name:     num,
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		}
-	} else if p.matchIdentifier() {
-		// Parse simple type reference (e.g., string, number, MyType)
-		typeName := p.advanceWord()
-
-		// Special handling for 'infer' keyword
-		if typeName == "infer" {
-			p.skipWhitespaceAndComments()
-			if p.matchIdentifier() {
-				inferredName := p.advanceWord()
-				return &ast.TypeReference{
-					Name:     "infer " + inferredName,
-					Position: startPos,
-					EndPos:   p.currentPos(),
-				}, nil
-			}
-			// If no identifier follows, treat as regular type reference
-		}
-
-		// Check for generic type arguments (e.g., Record<string, string>)
-		var typeArguments []ast.TypeNode
-		p.skipWhitespaceAndComments()
-		if p.match("<") {
-			p.advance()
-			p.skipWhitespaceAndComments()
-
-			// Parse type arguments
-			for {
-				typeArg, err := p.parseTypeAnnotation()
-				if err != nil {
-					return nil, err
-				}
-				typeArguments = append(typeArguments, typeArg)
-
-				p.skipWhitespaceAndComments()
-				if p.match(",") {
-					p.advance()
-					p.skipWhitespaceAndComments()
-				} else {
-					break
-				}
-			}
-
-			p.skipWhitespaceAndComments()
-			if !p.match(">") {
-				return nil, fmt.Errorf("expected '>' after type arguments")
-			}
-			p.advance()
-		}
-
-		result = &ast.TypeReference{
-			Name:          typeName,
-			TypeArguments: typeArguments,
-			Position:      startPos,
-			EndPos:        p.currentPos(),
-		}
-	} else {
-		return nil, fmt.Errorf("expected type annotation at %s", p.currentPos())
-	}
-
-	// Check for array type suffix [] or indexed access type T[K]
-	// Loop to handle multidimensional arrays like string[][]
-	for {
-		p.skipWhitespaceAndComments()
-		if p.match("[") {
-			// Save position for potential backtracking
-			// bracketStartPos := p.pos
-			p.advance()
-			p.skipWhitespaceAndComments()
-
-			// Check if this is an array type (empty brackets) or indexed access type
-			if p.match("]") {
-				// Array type like string[]
-				p.advance()
-				// Wrap the current result in an array type
-				if typeRef, ok := result.(*ast.TypeReference); ok {
-					typeRef.Name += "[]"
-					typeRef.EndPos = p.currentPos()
-				} else {
-					// If it's not a TypeReference (e.g. object type), we create a new TypeReference wrapping it
-					result = &ast.TypeReference{
-						Name:     "{ ... }[]", // Simplified representation
-						Position: startPos,
-						EndPos:   p.currentPos(),
-					}
-				}
-			} else {
-				// Indexed access type T[K]
-				indexType, err := p.parseTypeAnnotationFull()
-				if err != nil {
-					return nil, err
-				}
-
-				p.skipWhitespaceAndComments()
-				if !p.match("]") {
-					return nil, fmt.Errorf("expected ']' in indexed access type")
-				}
-				p.advance()
-
-				return &ast.IndexedAccessType{
-					ObjectType: result,
-					IndexType:  indexType,
-					Position:   startPos,
-					EndPos:     p.currentPos(),
-				}, nil
-			}
 		} else {
 			break
 		}
 	}
-
-	// Check for union (|) or intersection (&)
-	if p.match("|") {
-		// Union type
-		types := []ast.TypeNode{result}
-
-		for p.match("|") {
-			p.advance()
-			p.skipWhitespaceAndComments()
-
-			nextType, err := p.parseTypeAnnotationPrimary()
-			if err != nil {
-				return nil, err
-			}
-			types = append(types, nextType)
-			p.skipWhitespaceAndComments()
-		}
-
-		return &ast.UnionType{
-			Types:    types,
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		}, nil
-	}
-
-	if p.match("&") {
-		// Intersection type
-		types := []ast.TypeNode{result}
-
-		for p.match("&") {
-			p.advance()
-			p.skipWhitespaceAndComments()
-
-			nextType, err := p.parseTypeAnnotationPrimary()
-			if err != nil {
-				return nil, err
-			}
-			types = append(types, nextType)
-			p.skipWhitespaceAndComments()
-		}
-
-		return &ast.IntersectionType{
-			Types:    types,
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		}, nil
-	}
-
-	return result, nil
+	return p.source[start:p.pos]
 }
 
-// parseTypeAnnotationPrimary parses a primary type (identifier, literal, etc.)
-func (p *parser) parseTypeAnnotationPrimary() (ast.TypeNode, error) {
-	startPos := p.currentPos()
-
-	// readonly operator
-	if p.match("readonly") {
-		p.advanceString(8)
-		p.skipWhitespaceAndComments()
-
-		operand, err := p.parseTypeAnnotationPrimary()
-		if err != nil {
-			return nil, err
-		}
-
-		return &ast.TypeReference{
-			Name:          "readonly",
-			TypeArguments: []ast.TypeNode{operand},
-			Position:      startPos,
-			EndPos:        p.currentPos(),
-		}, nil
+func (p *parser) matchIdentifier() bool {
+	if p.isAtEnd() {
+		return false
 	}
-
-	// Template literal type `prefix${T}suffix`
-	if p.match("`") {
-		return p.parseTemplateLiteralType()
-	}
-
-	// Mapped type or object type { [K in T]: U } or { key: Type }
-	if p.match("{") {
-		savedPos := p.pos
-		p.advance()
-		p.skipWhitespaceAndComments()
-
-		// Check for mapped type: { [K in T]: U }
-		if p.match("[") {
-			p.advance()
-			p.skipWhitespaceAndComments()
-
-			if p.matchIdentifier() {
-				typeParam, err := p.parseIdentifier()
-				if err != nil {
-					return nil, err
-				}
-
-				p.skipWhitespaceAndComments()
-				if p.match("in") {
-					p.advanceString(2)
-					p.skipWhitespaceAndComments()
-
-					// This is a mapped type
-					constraint, err := p.parseTypeAnnotationFull()
-					if err != nil {
-						return nil, err
-					}
-
-					p.skipWhitespaceAndComments()
-					if !p.match("]") {
-						return nil, fmt.Errorf("expected ']' in mapped type")
-					}
-					p.advance()
-
-					p.skipWhitespaceAndComments()
-
-					// Check for optional modifier ?
-					optional := false
-					if p.match("?") {
-						optional = true
-						p.advance()
-						p.skipWhitespaceAndComments()
-					}
-
-					if !p.match(":") {
-						return nil, fmt.Errorf("expected ':' in mapped type")
-					}
-					p.advance()
-					p.skipWhitespaceAndComments()
-
-					mappedType, err := p.parseTypeAnnotationFull()
-					if err != nil {
-						return nil, err
-					}
-
-					p.skipWhitespaceAndComments()
-					if !p.match("}") {
-						return nil, fmt.Errorf("expected '}' in mapped type")
-					}
-					p.advance()
-
-					return &ast.MappedType{
-						TypeParameter: typeParam,
-						Constraint:    constraint,
-						MappedType:    mappedType,
-						Optional:      optional,
-						Position:      startPos,
-						EndPos:        p.currentPos(),
-					}, nil
-				}
-			}
-		}
-
-		// Not a mapped type, restore and parse as object type
-		p.pos = savedPos
-		// For now, just skip object types
-		depth := 1
-		p.advance()
-		for depth > 0 && !p.isAtEnd() {
-			if p.match("{") {
-				depth++
-				p.advance()
-			} else if p.match("}") {
-				depth--
-				p.advance()
-			} else {
-				p.advance()
-			}
-		}
-		return &ast.TypeReference{
-			Name:     "object",
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		}, nil
-	}
-
-	// String literal type ('foo')
-	if p.matchString() {
-		str, err := p.parseStringLiteral()
-		if err != nil {
-			return nil, err
-		}
-		return &ast.LiteralType{
-			Value:    str,
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		}, nil
-	}
-
-	// Number literal type (42)
-	if p.matchNumber() {
-		num := p.advanceNumber()
-		return &ast.LiteralType{
-			Value:    num,
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		}, nil
-	}
-
-	// keyof operator
-	if p.match("keyof") {
-		p.advanceString(5)
-		p.skipWhitespaceAndComments()
-
-		operand, err := p.parseTypeAnnotationPrimary()
-		if err != nil {
-			return nil, err
-		}
-
-		// Return a type reference with "keyof" prefix
-		return &ast.TypeReference{
-			Name:     "keyof " + operand.(*ast.TypeReference).Name,
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		}, nil
-	}
-
-	// readonly operator
-	if p.match("readonly") {
-		startPos := p.currentPos()
-		p.advanceString(8)
-		p.skipWhitespaceAndComments()
-
-		operand, err := p.parseTypeAnnotationPrimary()
-		if err != nil {
-			return nil, err
-		}
-
-		return &ast.TypeReference{
-			Name:          "readonly",
-			TypeArguments: []ast.TypeNode{operand},
-			Position:      startPos,
-			EndPos:        p.currentPos(),
-		}, nil
-	}
-
-	// Primitive types
-	if p.matchKeyword("string", "number", "boolean", "any", "void", "null", "undefined", "never", "unknown", "object", "symbol", "bigint") {
-		typeName := p.advanceWord()
-		return &ast.TypeReference{
-			Name:     typeName,
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		}, nil
-	}
-
-	// Identifier or generic type
-	if p.matchIdentifier() {
-		return p.parseTypePrimaryNode()
-	}
-
-	// Function type or parenthesized type
-	if p.match("(") {
-		savedPos := p.pos
-		p.advance()
-		p.skipWhitespaceAndComments()
-
-		// Check if it's a function type () => Type or (param: Type) => Type
-		// vs parenthesized type (Type)
-		isFunctionType := false
-
-		// Empty params () => ...
-		if p.match(")") {
-			p.advance()
-			p.skipWhitespaceAndComments()
-			if p.match("=") && p.peek(1) == ">" {
-				isFunctionType = true
-				p.pos = savedPos // Reset to start
-			}
-		} else {
-			// Check for rest parameters (...args)
-			if p.match(".") && p.peek(1) == "." && p.peek(2) == "." {
-				isFunctionType = true
-				p.pos = savedPos // Reset to start
-			} else if p.matchIdentifier() {
-				// Check for parameter with type annotation
-				p.advanceWord()
-				p.skipWhitespaceAndComments()
-				if p.match(":") || p.match("?") || p.match(",") {
-					// Looks like function parameters
-					isFunctionType = true
-				}
-				p.pos = savedPos // Reset to start
-			} else {
-				p.pos = savedPos // Reset to start
-			}
-		}
-
-		if isFunctionType {
-			// Parse as function type - for now just skip to =>
-			p.advance() // consume (
-			depth := 1
-			for depth > 0 && !p.isAtEnd() {
-				if p.match("(") {
-					depth++
-				} else if p.match(")") {
-					depth--
-				}
-				p.advance()
-			}
-			p.skipWhitespaceAndComments()
-			// Skip => and return type
-			if p.match("=") && p.peek(1) == ">" {
-				p.advanceString(2)
-				p.skipWhitespaceAndComments()
-				p.skipTypeAnnotation()
-			}
-			// Return placeholder type
-			return &ast.TypeReference{
-				Name:     "Function",
-				Position: startPos,
-				EndPos:   p.currentPos(),
-			}, nil
-		}
-
-		// Parenthesized type (Type) - parse as primary to avoid recursion
-		// Advance past the '(' before parsing the inner type
-		p.advance()
-		p.skipWhitespaceAndComments()
-
-		innerType, err := p.parseTypeAnnotationFull()
-		if err != nil {
-			return nil, err
-		}
-
-		p.skipWhitespaceAndComments()
-		if !p.match(")") {
-			return nil, fmt.Errorf("expected ')' after type")
-		}
-		p.advance()
-
-		return innerType, nil
-	}
-
-	// Tuple type [T1, T2]
-	if p.match("[") {
-		p.advance()
-		p.skipWhitespaceAndComments()
-		var elements []ast.TypeNode
-		for !p.match("]") && !p.isAtEnd() {
-			elem, err := p.parseTypeAnnotationFull()
-			if err != nil {
-				return nil, err
-			}
-			elements = append(elements, elem)
-			p.skipWhitespaceAndComments()
-			if p.match(",") {
-				p.advance()
-				p.skipWhitespaceAndComments()
-			}
-		}
-		if !p.match("]") {
-			return nil, fmt.Errorf("expected ']' in tuple type")
-		}
-		p.advance()
-		return &ast.TupleType{
-			Elements: elements,
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		}, nil
-	}
-
-	// Template literal type `prefix${T}suffix`
-	if p.match("`") {
-		return p.parseTemplateLiteralType()
-	}
-
-	return nil, fmt.Errorf("expected type annotation at %s", p.currentPos())
+	c := rune(p.source[p.pos])
+	return unicode.IsLetter(c) || c == '_' || c == '$'
 }
 
-// parseTemplateLiteralType parses a template literal type `prefix${T}suffix`
-func (p *parser) parseTemplateLiteralType() (ast.TypeNode, error) {
+func (p *parser) parseIdentifier() (*ast.Identifier, error) {
 	startPos := p.currentPos()
-
-	if !p.match("`") {
-		return nil, fmt.Errorf("expected '`' at start of template literal type")
-	}
-	p.advance()
-
-	var parts []string
-	var types []ast.TypeNode
-	currentPart := ""
-
-	iterations := 0
-	for !p.match("`") && !p.isAtEnd() && iterations < maxParserIterations {
-		iterations++
-		if p.match("$") && p.peek(1) == "{" {
-			// Save current part
-			parts = append(parts, currentPart)
-			currentPart = ""
-
-			// Skip ${
-			p.advance()
-			p.advance()
-			p.skipWhitespaceAndComments()
-
-			// Parse type
-			typ, err := p.parseTypeAnnotationFull()
-			if err != nil {
-				return nil, err
-			}
-			types = append(types, typ)
-
-			p.skipWhitespaceAndComments()
-			if !p.match("}") {
-				return nil, fmt.Errorf("expected '}' in template literal type")
-			}
-			p.advance()
-		} else {
-			currentPart += string(p.current())
-			p.advance()
-		}
-	}
-
-	// Add final part
-	parts = append(parts, currentPart)
-
-	if !p.match("`") {
-		return nil, fmt.Errorf("expected '`' at end of template literal type")
-	}
-	p.advance()
-
-	return &ast.TemplateLiteralType{
-		Parts:    parts,
-		Types:    types,
-		Position: startPos,
-		EndPos:   p.currentPos(),
-	}, nil
-}
-
-// parseEnumDeclaration parses an enum declaration
-func (p *parser) parseEnumDeclaration() (*ast.EnumDeclaration, error) {
-	startPos := p.currentPos()
-
-	p.consumeKeyword("enum")
-	p.skipWhitespaceAndComments()
-
-	name, err := p.parseIdentifier()
-	if err != nil {
-		return nil, err
-	}
-
-	p.skipWhitespaceAndComments()
-	if !p.match("{") {
-		return nil, fmt.Errorf("expected '{' after enum name")
-	}
-	p.advance()
-	p.skipWhitespaceAndComments()
-
-	var members []*ast.EnumMember
-
-	for !p.match("}") && !p.isAtEnd() {
-		memberStart := p.currentPos()
-		memberName, err := p.parseIdentifier()
-		if err != nil {
-			return nil, err
-		}
-
-		var value ast.Expression
-		p.skipWhitespaceAndComments()
-		if p.match("=") {
-			p.advance()
-			p.skipWhitespaceAndComments()
-			value, err = p.parseExpression()
-			if err != nil {
-				return nil, err
-			}
-		}
-
-		members = append(members, &ast.EnumMember{
-			Name:     memberName,
-			Value:    value,
-			Position: memberStart,
-			EndPos:   p.currentPos(),
-		})
-
-		p.skipWhitespaceAndComments()
-		if p.match(",") {
-			p.advance()
-			p.skipWhitespaceAndComments()
-		}
-	}
-
-	if !p.match("}") {
-		return nil, fmt.Errorf("expected '}' after enum members")
-	}
-	p.advance()
-
-	return &ast.EnumDeclaration{
+	name := p.advanceWord()
+	return &ast.Identifier{
 		Name:     name,
-		Members:  members,
 		Position: startPos,
 		EndPos:   p.currentPos(),
 	}, nil
 }
 
-// parseClassDeclaration parses a class declaration
-func (p *parser) parseClassDeclaration() (*ast.ClassDeclaration, error) {
-	startPos := p.currentPos()
-
-	// Consume 'class'
-	p.advanceWord()
-	p.skipWhitespaceAndComments()
-
-	// Parse class name
-	if !p.matchIdentifier() {
-		return nil, fmt.Errorf("expected class name")
-	}
-	className, err := p.parseIdentifier()
-	if err != nil {
-		return nil, err
-	}
-
-	p.skipWhitespaceAndComments()
-
-	// Parse type parameters if present
-	var typeParameters []ast.TypeNode
-	if p.match("<") {
-		// Skip type parameters for now - just consume them
-		depth := 1
+func (p *parser) advanceString(n int) {
+	for i := 0; i < n; i++ {
 		p.advance()
-		for depth > 0 && !p.isAtEnd() {
-			if p.match("<") {
-				depth++
-				p.advance()
-			} else if p.match(">") {
-				depth--
-				p.advance()
-			} else {
-				p.advance()
-			}
-		}
-		p.skipWhitespaceAndComments()
 	}
+}
 
-	// Parse extends clause if present
-	var superClass *ast.Identifier
-	if p.matchKeyword("extends") {
-		p.advanceWord()
-		p.skipWhitespaceAndComments()
-
-		if !p.matchIdentifier() {
-			return nil, fmt.Errorf("expected superclass name after 'extends'")
-		}
-		superClass, err = p.parseIdentifier()
-		if err != nil {
-			return nil, err
-		}
-		p.skipWhitespaceAndComments()
-	}
-
-	// Parse implements clause if present
-	var implements []ast.TypeNode
-	if p.matchKeyword("implements") {
-		p.advanceWord()
-		p.skipWhitespaceAndComments()
-
-		for {
-			implType, err := p.parseTypeAnnotationPrimary()
-			if err != nil {
-				return nil, err
-			}
-			implements = append(implements, implType)
-
+func (p *parser) consumeKeyword(keywords ...string) (string, error) {
+	for _, kw := range keywords {
+		if p.matchKeyword(kw) {
+			p.advanceWord()
 			p.skipWhitespaceAndComments()
-			if p.match(",") {
-				p.advance()
-				p.skipWhitespaceAndComments()
-			} else {
-				break
-			}
+			return kw, nil
 		}
 	}
+	return "", fmt.Errorf("expected one of keywords %v at %s", keywords, p.currentPos())
+}
 
-	// Parse class body
-	if !p.match("{") {
-		return nil, fmt.Errorf("expected '{' after class name")
+func (p *parser) peekString(n int) string {
+	if p.pos+n > len(p.source) {
+		return ""
 	}
-	p.advance()
-	p.skipWhitespaceAndComments()
+	return p.source[p.pos : p.pos+n]
+}
 
-	var members []ast.ClassMember
-
-	iterations := 0
-	for !p.match("}") && !p.isAtEnd() && iterations < maxParserIterations {
-		iterations++
-		member, err := p.parseClassMember()
-		if err != nil {
-			return nil, err
-		}
-		if member != nil {
-			members = append(members, member)
-		}
+func (p *parser) parseTypeAnnotation() (ast.TypeNode, error) {
+	// Simple stub that consumes tokens until it looks like the type ended
+	if p.match(":") {
+		p.advance()
 		p.skipWhitespaceAndComments()
 	}
 
-	if !p.match("}") {
-		return nil, fmt.Errorf("expected '}' at end of class body")
+	// Consume type tokens
+	for !p.isAtEnd() {
+		if p.match(",") || p.match(";") || p.match("=") || p.match(")") || p.match("}") || p.match(">") {
+			break
+		}
+		p.advance()
 	}
-	p.advance()
 
-	return &ast.ClassDeclaration{
-		ID:             className,
-		SuperClass:     superClass,
-		Implements:     implements,
-		Body:           members,
-		TypeParameters: typeParameters,
-		Position:       startPos,
-		EndPos:         p.currentPos(),
+	return &ast.TypeReference{
+		Name: "any",
 	}, nil
 }
 
-// parseClassMember parses a class member (method or property)
-func (p *parser) parseClassMember() (ast.ClassMember, error) {
-	startPos := p.currentPos()
-	p.skipWhitespaceAndComments()
-
-	// Parse access modifier
-	accessModifier := ""
-	if p.matchKeyword("public", "private", "protected") {
-		accessModifier = p.advanceWord()
-		p.skipWhitespaceAndComments()
-	}
-
-	// Parse static keyword
-	isStatic := false
-	if p.matchKeyword("static") {
-		isStatic = true
-		p.advanceWord()
-		p.skipWhitespaceAndComments()
-	}
-
-	// Parse readonly keyword
-	isReadonly := false
-	if p.matchKeyword("readonly") {
-		isReadonly = true
-		p.advanceWord()
-		p.skipWhitespaceAndComments()
-	}
-
-	// Parse async keyword
-	isAsync := false
-	if p.matchKeyword("async") {
-		isAsync = true
-		p.advanceWord()
-		p.skipWhitespaceAndComments()
-	}
-
-	// Parse member name
-	if !p.matchIdentifier() {
-		// Could be a semicolon or other token, skip it
-		if p.match(";") {
-			p.advance()
-		}
-		return nil, nil
-	}
-
-	memberName, err := p.parseIdentifier()
-	if err != nil {
-		return nil, err
-	}
-
-	p.skipWhitespaceAndComments()
-
-	// Check if it's a method (has parentheses) or property
-	if p.match("(") {
-		// It's a method
-		return p.parseMethodDefinition(memberName, accessModifier, isStatic, isAsync, startPos)
-	} else {
-		// It's a property
-		return p.parsePropertyDefinition(memberName, accessModifier, isStatic, isReadonly, startPos)
-	}
+func (p *parser) parseTypeAnnotationPrimary() (ast.TypeNode, error) {
+	// Stub
+	return &ast.TypeReference{
+		Name: "any",
+	}, nil
 }
 
-// parseMethodDefinition parses a method definition
-func (p *parser) parseMethodDefinition(name *ast.Identifier, accessModifier string, isStatic bool, isAsync bool, startPos ast.Position) (*ast.MethodDefinition, error) {
-	// Parse parameters
-	p.advance() // consume '('
-	p.skipWhitespaceAndComments()
+func (p *parser) parseArrowFunction() (*ast.ArrowFunctionExpression, error) {
+	return nil, fmt.Errorf("parseArrowFunction not implemented")
+}
 
+func (p *parser) expect(s string) error {
+	if !p.match(s) {
+		return fmt.Errorf("expected '%s' at %s", s, p.currentPos())
+	}
+	p.advanceString(len(s))
+	p.skipWhitespaceAndComments()
+	return nil
+}
+
+func (p *parser) parseParameterList() ([]*ast.Parameter, error) {
 	var params []*ast.Parameter
 	for !p.match(")") && !p.isAtEnd() {
-		param, err := p.parseParameter()
-		if err != nil {
-			return nil, err
-		}
-		params = append(params, param)
-
-		p.skipWhitespaceAndComments()
-		if p.match(",") {
-			p.advance()
-			p.skipWhitespaceAndComments()
-		}
-	}
-
-	if !p.match(")") {
-		return nil, fmt.Errorf("expected ')' after parameters")
-	}
-	p.advance()
-	p.skipWhitespaceAndComments()
-
-	// Parse return type annotation if present
-	if p.match(":") {
+		// Skip until )
 		p.advance()
-		p.skipWhitespaceAndComments()
-		// Skip return type for now
-		p.skipTypeAnnotation()
-		p.skipWhitespaceAndComments()
 	}
-
-	// Parse method body
-	if !p.match("{") {
-		return nil, fmt.Errorf("expected '{' for method body")
-	}
-
-	body, err := p.parseBlockStatement()
-	if err != nil {
-		return nil, err
-	}
-
-	// Determine method kind
-	kind := "method"
-	if name.Name == "constructor" {
-		kind = "constructor"
-	}
-
-	funcExpr := &ast.FunctionExpression{
-		ID:       name,
-		Params:   params,
-		Body:     body,
-		Async:    isAsync,
-		Position: startPos,
-		EndPos:   p.currentPos(),
-	}
-
-	return &ast.MethodDefinition{
-		Key:            name,
-		Value:          funcExpr,
-		Kind:           kind,
-		Static:         isStatic,
-		Async:          isAsync,
-		AccessModifier: accessModifier,
-		Position:       startPos,
-		EndPos:         p.currentPos(),
-	}, nil
+	return params, nil
 }
 
-// parsePropertyDefinition parses a property definition
-func (p *parser) parsePropertyDefinition(name *ast.Identifier, accessModifier string, isStatic bool, isReadonly bool, startPos ast.Position) (*ast.PropertyDefinition, error) {
-	// Parse optional marker
-	isOptional := false
-	if p.match("?") {
-		isOptional = true
-		p.advance()
-		p.skipWhitespaceAndComments()
-	}
-
-	// Parse type annotation if present
-	var typeAnnotation ast.TypeNode
-	if p.match(":") {
-		p.advance()
-		p.skipWhitespaceAndComments()
-		var err error
-		typeAnnotation, err = p.parseTypeAnnotation()
-		if err != nil {
-			return nil, err
-		}
-		p.skipWhitespaceAndComments()
-	}
-
-	// Parse initializer if present
-	var initializer ast.Expression
-	if p.match("=") {
-		p.advance()
-		p.skipWhitespaceAndComments()
-		var err error
-		initializer, err = p.parseExpression()
-		if err != nil {
-			return nil, err
-		}
-		p.skipWhitespaceAndComments()
-	}
-
-	// Optional semicolon
-	if p.match(";") {
-		p.advance()
-	}
-
-	return &ast.PropertyDefinition{
-		Key:            name,
-		Value:          initializer,
-		TypeAnnotation: typeAnnotation,
-		Static:         isStatic,
-		Readonly:       isReadonly,
-		Optional:       isOptional,
-		AccessModifier: accessModifier,
-		Position:       startPos,
-		EndPos:         p.currentPos(),
-	}, nil
+func (p *parser) parseTryStatement() (*ast.TryStatement, error) {
+	return nil, fmt.Errorf("parseTryStatement not implemented")
 }
 
-// parseParameter parses a function parameter
-func (p *parser) parseParameter() (*ast.Parameter, error) {
-	startPos := p.currentPos()
-
-	// Check for rest parameter: ...identifier
-	if p.match("...") {
-		p.advanceString(3)
-		p.skipWhitespaceAndComments()
-	}
-
-	var paramName *ast.Identifier
-	var err error
-
-	// Check for destructuring patterns
-	if p.match("{") || p.match("[") {
-		// Handle destructuring pattern - for now return placeholder
-		// The actual extraction will happen in parseParameterList or parseArrowFunction
-		// This function returns a single Parameter, so we return a placeholder
-		// The proper handling requires returning multiple parameters which this function doesn't support
-		openChar := p.source[p.pos]
-		closeChar := byte('}')
-		if openChar == '[' {
-			closeChar = ']'
-		}
-
-		p.advance() // consume opening { or [
-		depth := 1
-		maxIter := 10000
-		iter := 0
-
-		for depth > 0 && !p.isAtEnd() && iter < maxIter {
-			iter++
-
-			// Skip strings to avoid confusion
-			if p.source[p.pos] == '"' || p.source[p.pos] == '\'' || p.source[p.pos] == '`' {
-				quote := p.source[p.pos]
-				p.advance()
-				for !p.isAtEnd() && p.source[p.pos] != quote {
-					if p.source[p.pos] == '\\' {
-						p.advance() // skip escape
-						if !p.isAtEnd() {
-							p.advance() // skip escaped char
-						}
-					} else {
-						p.advance()
-					}
-				}
-				if !p.isAtEnd() {
-					p.advance() // consume closing quote
-				}
-				continue
-			}
-
-			if p.source[p.pos] == openChar {
-				depth++
-			} else if p.source[p.pos] == closeChar {
-				depth--
-			}
-			p.advance()
-		}
-
-		// Create placeholder identifier
-		paramName = &ast.Identifier{
-			Name:     "destructured_param",
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		}
-	} else {
-		// Parse parameter name
-		if !p.matchIdentifier() {
-			return nil, fmt.Errorf("expected parameter name")
-		}
-
-		paramName, err = p.parseIdentifier()
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	p.skipWhitespaceAndComments()
-
-	// Parse optional marker
-	isOptional := false
-	if p.match("?") {
-		isOptional = true
-		p.advance()
-		p.skipWhitespaceAndComments()
-	}
-
-	// Parse type annotation if present
-	var paramType ast.TypeNode
-	if p.match(":") {
-		p.advance()
-		p.skipWhitespaceAndComments()
-		paramType, err = p.parseTypeAnnotation()
-		if err != nil {
-			return nil, err
-		}
-		p.skipWhitespaceAndComments()
-	}
-
-	// Parse default value if present
-	if p.match("=") {
-		p.advance()
-		p.skipWhitespaceAndComments()
-		// Skip the default value expression for now
-		// TODO: Parse and store default value in AST
-		_, err = p.parseAssignmentExpression()
-		if err != nil {
-			return nil, err
-		}
-		p.skipWhitespaceAndComments()
-	}
-
-	return &ast.Parameter{
-		ID:        paramName,
-		ParamType: paramType,
-		Optional:  isOptional,
-		Position:  startPos,
-		EndPos:    p.currentPos(),
-	}, nil
+func (p *parser) parseThrowStatement() (*ast.ThrowStatement, error) {
+	return nil, fmt.Errorf("parseThrowStatement not implemented")
 }
 
-// parseNewExpression parses a new expression (new Class())
-func (p *parser) parseNewExpression() (*ast.NewExpression, error) {
-	startPos := p.currentPos()
-
-	// Consume 'new'
-	p.advanceWord()
-	p.skipWhitespaceAndComments()
-
-	// Parse the constructor (callee)
-	// For new expressions, handle identifiers that may have generics like Map<number, string>
-	var callee ast.Expression
-	var err error
-	if p.matchIdentifier() {
-		callee, err = p.parseIdentifierWithGenerics()
-	} else {
-		callee, err = p.parsePrimaryExpression()
-	}
-	if err != nil {
-		return nil, err
-	}
-
-	p.skipWhitespaceAndComments()
-
-	// Parse arguments if present
-	var arguments []ast.Expression
-	if p.match("(") {
-		p.advance()
-		p.skipWhitespaceAndComments()
-
-		for !p.match(")") && !p.isAtEnd() {
-			arg, err := p.parseExpression()
-			if err != nil {
-				return nil, err
-			}
-			arguments = append(arguments, arg)
-
-			p.skipWhitespaceAndComments()
-			if p.match(",") {
-				p.advance()
-				p.skipWhitespaceAndComments()
-			}
-		}
-
-		if !p.match(")") {
-			return nil, fmt.Errorf("expected ')' after arguments")
-		}
-		p.advance()
-	}
-
-	return &ast.NewExpression{
-		Callee:    callee,
-		Arguments: arguments,
-		Position:  startPos,
-		EndPos:    p.currentPos(),
-	}, nil
+func (p *parser) parseEnumDeclaration() (*ast.EnumDeclaration, error) {
+	return nil, fmt.Errorf("parseEnumDeclaration not implemented")
 }

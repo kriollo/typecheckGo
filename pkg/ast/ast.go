@@ -164,6 +164,7 @@ func (s *SwitchCase) stmtNode()     {}
 type ImportDeclaration struct {
 	Specifiers []ImportSpecifier
 	Source     *Literal
+	IsTypeOnly bool // import type ...
 	Position   Position
 	EndPos     Position
 }
@@ -174,10 +175,11 @@ func (i *ImportDeclaration) End() Position { return i.EndPos }
 func (i *ImportDeclaration) stmtNode()     {}
 
 type ImportSpecifier struct {
-	Imported *Identifier // the name being imported
-	Local    *Identifier // the local binding name
-	Position Position
-	EndPos   Position
+	Imported   *Identifier // the name being imported
+	Local      *Identifier // the local binding name
+	IsTypeOnly bool        // import { type Foo }
+	Position   Position
+	EndPos     Position
 }
 
 func (i *ImportSpecifier) Type() string  { return "ImportSpecifier" }

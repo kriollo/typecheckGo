@@ -193,6 +193,10 @@ func (ir *ImportResolver) determineSymbolType(node ast.Node) symbols.SymbolType 
 		return symbols.FunctionSymbol
 	case *ast.VariableDeclaration:
 		return symbols.VariableSymbol
+	case *ast.TypeAliasDeclaration:
+		return symbols.TypeAliasSymbol
+	case *ast.InterfaceDeclaration:
+		return symbols.InterfaceSymbol
 	default:
 		return symbols.VariableSymbol
 	}

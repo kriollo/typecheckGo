@@ -66,6 +66,8 @@ func (ti *TypeInferencer) InferType(expr ast.Expression) *Type {
 		return Unknown
 	case *ast.ArrayExpression:
 		return ti.inferArrayType(e)
+	case *ast.ObjectExpression:
+		return ti.inferObjectType(e)
 	case *ast.ArrowFunctionExpression:
 		return ti.inferArrowFunctionType(e)
 	default:
@@ -163,4 +165,37 @@ func (ti *TypeInferencer) inferArrowFunctionType(arrow *ast.ArrowFunctionExpress
 	}
 
 	return NewFunctionType(params, Any)
+}
+
+// inferObjectType infiere el tipo de un objeto literal
+func (ti *TypeInferencer) inferObjectType(obj *ast.ObjectExpression) *Type {
+	properties := make(map[string]*Type)
+
+	for _, prop := range obj.Properties {
+		switch p := prop.(type) {
+		case *ast.Property:
+			// Get property name
+			var propName string
+			if key, ok := p.Key.(*ast.Identifier); ok {
+				propName = key.Name
+			} else if lit, ok := p.Key.(*ast.Literal); ok {
+				if str, ok := lit.Value.(string); ok {
+					propName = str
+				}
+			}
+
+			if propName != "" {
+				// Infer the type of the property value
+				propType := ti.InferType(p.Value)
+				properties[propName] = propType
+			}
+		case *ast.SpreadElement:
+			// For spread elements, we would need to resolve the type of the argument
+			// For now, we skip them
+			continue
+		}
+	}
+
+	// Create an anonymous object type with the inferred properties
+	return NewObjectType("", properties)
 }
