@@ -330,7 +330,8 @@ func (b *Binder) bindDefineComponentArgument(arg ast.Expression) {
 		return
 	}
 
-	// Look for the 'setup' property
+	// Process ALL properties, not just 'setup'
+	// This handles cases like: defineComponent({ methods: { async myMethod() {} } })
 	for _, prop := range objExpr.Properties {
 		property, ok := prop.(*ast.Property)
 		if !ok {
@@ -343,19 +344,19 @@ func (b *Binder) bindDefineComponentArgument(arg ast.Expression) {
 			continue
 		}
 
-		if key.Name != "setup" {
-			// Bind non-setup properties normally
-			b.bindExpression(property.Value)
-			continue
-		}
-
-		// Found setup function - bind with special context
-		switch fnValue := property.Value.(type) {
-		case *ast.FunctionExpression:
-			b.bindSetupFunction(fnValue)
-		case *ast.ArrowFunctionExpression:
-			b.bindSetupArrowFunction(fnValue)
-		default:
+		// Special handling for 'setup' property
+		if key.Name == "setup" {
+			switch fnValue := property.Value.(type) {
+			case *ast.FunctionExpression:
+				b.bindSetupFunction(fnValue)
+			case *ast.ArrowFunctionExpression:
+				b.bindSetupArrowFunction(fnValue)
+			default:
+				b.bindExpression(property.Value)
+			}
+		} else {
+			// For all other properties (including 'methods', 'computed', etc.),
+			// bind them normally - this will recursively process nested objects and functions
 			b.bindExpression(property.Value)
 		}
 	}
@@ -473,6 +474,10 @@ func (b *Binder) bindExportDeclaration(decl *ast.ExportDeclaration) {
 					b.table.AddExport("", d.Name.Name, symbol)
 				}
 			}
+		case *ast.ExpressionStatement:
+			// Handle export default <expression>
+			// This is the case for: export default defineComponent(...)
+			b.bindExpression(d.Expression)
 		}
 	} else if len(decl.Specifiers) > 0 && decl.Source != nil {
 		// Handle re-exports: export { name } from "module"
