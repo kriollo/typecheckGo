@@ -448,6 +448,32 @@ func (f *FunctionType) Pos() Position { return f.Position }
 func (f *FunctionType) End() Position { return f.EndPos }
 func (f *FunctionType) typeNode()     {}
 
+// ObjectType represents an object type literal like { name: string; age: number }
+type ObjectTypeLiteral struct {
+	Members  []TypeMember
+	Position Position
+	EndPos   Position
+}
+
+func (o *ObjectTypeLiteral) Type() string  { return "ObjectTypeLiteral" }
+func (o *ObjectTypeLiteral) Pos() Position { return o.Position }
+func (o *ObjectTypeLiteral) End() Position { return o.EndPos }
+func (o *ObjectTypeLiteral) typeNode()     {}
+
+// TypeMember represents a member in an object type literal
+type TypeMember struct {
+	Key       *Identifier
+	ValueType TypeNode
+	Optional  bool
+	Readonly  bool
+	Position  Position
+	EndPos    Position
+}
+
+func (tm *TypeMember) Type() string  { return "TypeMember" }
+func (tm *TypeMember) Pos() Position { return tm.Position }
+func (tm *TypeMember) End() Position { return tm.EndPos }
+
 // ArrayExpression represents an array literal [1, 2, 3]
 type ArrayExpression struct {
 	Elements []Expression

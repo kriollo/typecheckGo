@@ -1312,13 +1312,17 @@ func (tc *TypeChecker) processImport(importDecl *ast.ImportDeclaration, filename
 		newSymbol.IsFunction = symbol.IsFunction
 		newSymbol.Params = symbol.Params
 
-		// If this is a type alias, resolve its definition and cache it
-		if symbol.Type == symbols.TypeAliasSymbol && symbol.Node != nil {
+		// If this is a type alias or interface, resolve its definition and cache it
+		if (symbol.Type == symbols.TypeAliasSymbol || symbol.Type == symbols.InterfaceSymbol) && symbol.Node != nil {
 			if typeAliasDecl, ok := symbol.Node.(*ast.TypeAliasDeclaration); ok {
 				// Resolve the type annotation
 				resolvedType := tc.convertTypeNode(typeAliasDecl.TypeAnnotation)
 				// Cache the resolved type so it can be found when referenced
 				tc.typeAliasCache[name] = resolvedType
+			} else if _, ok := symbol.Node.(*ast.InterfaceDeclaration); ok {
+				// For interfaces, create an object type placeholder
+				// In a full implementation, we would parse the interface body
+				tc.typeAliasCache[name] = types.NewObjectType(name, nil)
 			}
 		}
 	}
@@ -2561,6 +2565,12 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 
 	switch t := typeNode.(type) {
 	case *ast.TypeReference:
+		// Handle array types: Breadcrumb[] is parsed as TypeReference{Name: "(array)", TypeArguments: [Breadcrumb]}
+		if t.Name == "(array)" && len(t.TypeArguments) == 1 {
+			elementType := tc.convertTypeNode(t.TypeArguments[0])
+			return types.NewArrayType(elementType)
+		}
+
 		// First, check if we have this type cached (for imported types)
 		if resolvedType, ok := tc.typeAliasCache[t.Name]; ok {
 			return resolvedType
@@ -2659,6 +2669,19 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 
 	case *ast.TypeParameter:
 		return types.NewTypeParameter(t.Name.Name, nil, nil)
+
+	case *ast.ObjectTypeLiteral:
+		// Convert object type literal to Type
+		properties := make(map[string]*types.Type)
+		for _, member := range t.Members {
+			propType := tc.convertTypeNode(member.ValueType)
+			// If the member is optional, wrap it in a union with undefined
+			if member.Optional {
+				propType = types.NewUnionType([]*types.Type{propType, types.Undefined})
+			}
+			properties[member.Key.Name] = propType
+		}
+		return types.NewObjectType("", properties)
 
 	default:
 		return types.Unknown

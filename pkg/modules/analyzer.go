@@ -114,6 +114,20 @@ func (a *ModuleAnalyzer) analyzeExportDeclaration(module *ResolvedModule, export
 					Position: decl.Pos(),
 				}
 			}
+		case *ast.TypeAliasDeclaration:
+			module.Exports[decl.ID.Name] = &ExportInfo{
+				Name:     decl.ID.Name,
+				Type:     "named",
+				Node:     decl,
+				Position: decl.Pos(),
+			}
+		case *ast.InterfaceDeclaration:
+			module.Exports[decl.ID.Name] = &ExportInfo{
+				Name:     decl.ID.Name,
+				Type:     "named",
+				Node:     decl,
+				Position: decl.Pos(),
+			}
 		default:
 			// This might be a default export (e.g., export default expression)
 			module.DefaultExport = &ExportInfo{

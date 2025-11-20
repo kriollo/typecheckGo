@@ -4522,19 +4522,14 @@ func (p *parser) parseTypePrimaryNode() (ast.TypeNode, error) {
 
 			// Check if this is an array type (empty brackets) or indexed access type
 			if p.match("]") {
-				// Array type like string[]
+				// Array type like string[] or MyType[]
 				p.advance()
-				// Wrap the current result in an array type
-				if typeRef, ok := result.(*ast.TypeReference); ok {
-					typeRef.Name += "[]"
-					typeRef.EndPos = p.currentPos()
-				} else {
-					// If it's not a TypeReference (e.g. object type), we create a new TypeReference wrapping it
-					result = &ast.TypeReference{
-						Name:     "{ ... }[]", // Simplified representation
-						Position: startPos,
-						EndPos:   p.currentPos(),
-					}
+				// Wrap the current result in an array type using (array) convention
+				result = &ast.TypeReference{
+					Name:          "(array)",
+					TypeArguments: []ast.TypeNode{result},
+					Position:      startPos,
+					EndPos:        p.currentPos(),
 				}
 			} else {
 				// Indexed access type T[K]
@@ -4713,25 +4708,7 @@ func (p *parser) parseTypeAnnotationPrimary() (ast.TypeNode, error) {
 
 		// Not a mapped type, restore and parse as object type
 		p.pos = savedPos
-		// For now, just skip object types
-		depth := 1
-		p.advance()
-		for depth > 0 && !p.isAtEnd() {
-			if p.match("{") {
-				depth++
-				p.advance()
-			} else if p.match("}") {
-				depth--
-				p.advance()
-			} else {
-				p.advance()
-			}
-		}
-		return &ast.TypeReference{
-			Name:     "object",
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		}, nil
+		return p.parseObjectTypeLiteral()
 	}
 
 	// String literal type ('foo')
@@ -5536,5 +5513,111 @@ func (p *parser) parseNewExpression() (*ast.NewExpression, error) {
 		Arguments: arguments,
 		Position:  startPos,
 		EndPos:    p.currentPos(),
+	}, nil
+}
+
+// parseObjectTypeLiteral parses an object type literal like { name: string; age?: number }
+func (p *parser) parseObjectTypeLiteral() (ast.TypeNode, error) {
+	startPos := p.currentPos()
+
+	if !p.match("{") {
+		return nil, fmt.Errorf("expected '{' for object type literal")
+	}
+	p.advance()
+	p.skipWhitespaceAndComments()
+
+	var members []ast.TypeMember
+
+	for !p.match("}") && !p.isAtEnd() {
+		memberStart := p.currentPos()
+
+		// Check for readonly modifier
+		readonly := false
+		if p.matchKeyword("readonly") {
+			readonly = true
+			p.advanceWord()
+			p.skipWhitespaceAndComments()
+		}
+
+		// Parse property name
+		if !p.matchIdentifier() && !p.matchString() {
+			// Empty object type or trailing comma/semicolon
+			if p.match(";") || p.match(",") {
+				p.advance()
+				p.skipWhitespaceAndComments()
+				continue
+			}
+			break
+		}
+
+		var key *ast.Identifier
+		if p.matchString() {
+			str, err := p.parseStringLiteral()
+			if err != nil {
+				return nil, err
+			}
+			key = &ast.Identifier{
+				Name:     str,
+				Position: memberStart,
+				EndPos:   p.currentPos(),
+			}
+		} else {
+			var err error
+			key, err = p.parseIdentifier()
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		p.skipWhitespaceAndComments()
+
+		// Check for optional marker
+		optional := false
+		if p.match("?") {
+			optional = true
+			p.advance()
+			p.skipWhitespaceAndComments()
+		}
+
+		// Expect colon
+		if !p.match(":") {
+			return nil, fmt.Errorf("expected ':' after property name in object type")
+		}
+		p.advance()
+		p.skipWhitespaceAndComments()
+
+		// Parse property type
+		valueType, err := p.parseTypeAnnotationFull()
+		if err != nil {
+			return nil, err
+		}
+
+		members = append(members, ast.TypeMember{
+			Key:       key,
+			ValueType: valueType,
+			Optional:  optional,
+			Readonly:  readonly,
+			Position:  memberStart,
+			EndPos:    p.currentPos(),
+		})
+
+		p.skipWhitespaceAndComments()
+
+		// Optional semicolon or comma separator
+		if p.match(";") || p.match(",") {
+			p.advance()
+			p.skipWhitespaceAndComments()
+		}
+	}
+
+	if !p.match("}") {
+		return nil, fmt.Errorf("expected '}' to close object type literal")
+	}
+	p.advance()
+
+	return &ast.ObjectTypeLiteral{
+		Members:  members,
+		Position: startPos,
+		EndPos:   p.currentPos(),
 	}, nil
 }
