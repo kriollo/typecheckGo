@@ -1638,6 +1638,23 @@ func (tc *TypeChecker) isAssignableTo(sourceType, targetType *types.Type) bool {
 		return true
 	}
 
+	// IntersectionType: source debe ser asignable a todos los miembros
+	if targetType.Kind == types.IntersectionType {
+		for _, member := range targetType.Types {
+			// Si ambos son objetos, usar comprobación estructural
+			if sourceType.Kind == types.ObjectType && member.Kind == types.ObjectType {
+				if !tc.isObjectAssignable(sourceType, member) {
+					return false
+				}
+			} else {
+				if !tc.isAssignableTo(sourceType, member) {
+					return false
+				}
+			}
+		}
+		return true
+	}
+
 	// Unknown is assignable to anything except never
 	if sourceType.Kind == types.UnknownType {
 		return targetType.Kind != types.NeverType
