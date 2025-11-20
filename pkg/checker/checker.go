@@ -1664,6 +1664,18 @@ func (tc *TypeChecker) isAssignableTo(sourceType, targetType *types.Type) bool {
 		if sourceType.Kind == types.ObjectType {
 			return tc.isObjectAssignable(sourceType, targetType)
 		}
+		// Para tuplas, comparar elemento a elemento
+		if sourceType.Kind == types.TupleType {
+			if len(sourceType.Types) != len(targetType.Types) {
+				return false
+			}
+			for i := range sourceType.Types {
+				if !tc.isAssignableTo(sourceType.Types[i], targetType.Types[i]) {
+					return false
+				}
+			}
+			return true
+		}
 		return true
 	}
 
@@ -2727,6 +2739,13 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 	}
 
 	switch t := typeNode.(type) {
+	case *ast.TupleType:
+		// Convierte cada elemento en su tipo correspondiente
+		elementTypes := make([]*types.Type, len(t.Elements))
+		for i, elem := range t.Elements {
+			elementTypes[i] = tc.convertTypeNode(elem)
+		}
+		return &types.Type{Kind: types.TupleType, Types: elementTypes}
 	case *ast.TypeReference:
 		// Handle array types: Breadcrumb[] is parsed as TypeReference{Name: "(array)", TypeArguments: [Breadcrumb]}
 		if t.Name == "(array)" && len(t.TypeArguments) == 1 {

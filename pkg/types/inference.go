@@ -156,9 +156,23 @@ func (ti *TypeInferencer) inferArrayType(arr *ast.ArrayExpression) *Type {
 		return NewArrayType(Any)
 	}
 
-	// Inferir el tipo del primer elemento
-	// En una implementación completa, haríamos union de todos los tipos
+	// Si el contexto espera una tupla, infiere TupleType
+	// (esto requiere que el checker pase el tipo esperado, pero aquí lo forzamos si la longitud es fija y los tipos son heterogéneos)
+	elementTypes := make([]*Type, len(arr.Elements))
+	isHomogeneous := true
 	firstType := ti.InferType(arr.Elements[0])
+	elementTypes[0] = firstType
+	for i := 1; i < len(arr.Elements); i++ {
+		t := ti.InferType(arr.Elements[i])
+		elementTypes[i] = t
+		if t.Kind != firstType.Kind {
+			isHomogeneous = false
+		}
+	}
+	// Si los tipos son heterogéneos o la longitud es fija, infiere TupleType
+	if !isHomogeneous || len(arr.Elements) > 1 {
+		return &Type{Kind: TupleType, Types: elementTypes}
+	}
 	return NewArrayType(firstType)
 }
 
