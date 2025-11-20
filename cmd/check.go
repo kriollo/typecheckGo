@@ -182,6 +182,10 @@ func checkDirectory(tc *checker.TypeChecker, dir string, tsConfig *config.TSConf
 				filesWithErrors++
 				allErrors = append(allErrors, errors...)
 			}
+
+			// Clear caches after each file to prevent memory accumulation
+			// Use ClearFileCache to preserve loaded libraries across files
+			tc.ClearFileCache()
 		}
 
 		return nil

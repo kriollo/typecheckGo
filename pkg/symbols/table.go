@@ -364,3 +364,19 @@ func (st *SymbolTable) AddImport(moduleName, localName, exportName string, isDef
 
 	module.Imports[localName] = importInfo
 }
+
+// ResetFileScope clears all child scopes from the global scope and resets to global.
+// This is used to clean up after processing a file while preserving the global scope.
+func (st *SymbolTable) ResetFileScope() {
+	// Clear all children from global scope
+	st.Global.Children = nil
+
+	// Reset current to global
+	st.Current = st.Global
+
+	// Clear module-specific data (but keep global modules if needed)
+	// For now, we clear all modules as they are file-specific
+	for k := range st.Modules {
+		delete(st.Modules, k)
+	}
+}

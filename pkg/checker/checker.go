@@ -1144,6 +1144,29 @@ func (tc *TypeChecker) Clear() {
 	// as it may be shared, so we don't clear it here
 }
 
+// ClearFileCache clears file-specific caches but preserves loaded libraries.
+// This is more efficient when checking multiple files in a batch.
+func (tc *TypeChecker) ClearFileCache() {
+	// Clear type caches (file-specific)
+	for k := range tc.typeCache {
+		delete(tc.typeCache, k)
+	}
+	for k := range tc.varTypeCache {
+		delete(tc.varTypeCache, k)
+	}
+	for k := range tc.typeAliasCache {
+		delete(tc.typeAliasCache, k)
+	}
+	for k := range tc.typeGuards {
+		delete(tc.typeGuards, k)
+	}
+	// Don't clear loadedLibFiles - these can be reused across files
+	// Clear errors
+	tc.errors = tc.errors[:0]
+	// Reset symbol table to clear file-specific scopes
+	tc.symbolTable.ResetFileScope()
+}
+
 // GetLoadStats returns the type loading statistics
 func (tc *TypeChecker) GetLoadStats() *LoadStats {
 	if tc.loadStats != nil {
