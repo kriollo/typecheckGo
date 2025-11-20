@@ -199,6 +199,11 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 		return p.parseClassDeclaration()
 	}
 
+	// Enum declaration
+	if p.matchKeyword("enum") {
+		return p.parseEnumDeclaration()
+	}
+
 	// Handle block statements
 	if p.match("{") {
 		return p.parseBlockStatement()
@@ -1838,6 +1843,9 @@ func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 
 			// Restore position
 			p.pos = tempPos
+		} else if p.match("...") {
+			// Rest parameter (...args) => ...
+			isArrowFunc = true
 		} else if p.matchIdentifier() {
 			// Could be (x) => ... or (x, y) => ...
 			// Save position and try to parse params
@@ -2010,6 +2018,166 @@ func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 	}
 
 	// this expression
+	if p.matchKeyword("this") {
+		startPos := p.currentPos()
+		p.advanceWord()
+		return &ast.ThisExpression{
+			Position: startPos,
+			EndPos:   p.currentPos(),
+		}, nil
+	}
+
+	// super expression
+	if p.matchKeyword("super") {
+		startPos := p.currentPos()
+		p.advanceWord()
+		return &ast.SuperExpression{
+			Position: startPos,
+			EndPos:   p.currentPos(),
+		}, nil
+	}
+
+	if p.matchKeyword("true", "false") {
+		startPos := p.currentPos()
+		value := p.advanceWord()
+		return &ast.Literal{
+			Value:    value == "true",
+			Raw:      value,
+			Position: startPos,
+			EndPos:   p.currentPos(),
+		}, nil
+	}
+
+	if p.matchNumber() {
+		startPos := p.currentPos()
+		num := p.advanceNumber()
+		return &ast.Literal{
+			Value:    num,
+			Raw:      num,
+			Position: startPos,
+			EndPos:   p.currentPos(),
+		}, nil
+	}
+
+	// Regex literal - simple heuristic: / followed by non-whitespace
+	// This is a HACK and doesn't handle all edge cases, but works for common patterns
+	if p.match("/") {
+		startPos := p.currentPos()
+		p.advance() // consume /
+
+		// Find closing / (skip escaped characters and character classes)
+		inCharClass := false
+		for !p.isAtEnd() {
+			if p.source[p.pos] == '\\' {
+				// Skip escaped character
+				p.advance()
+				if !p.isAtEnd() {
+					p.advance()
+				}
+			} else if p.source[p.pos] == '[' && !inCharClass {
+				// Entering character class
+				inCharClass = true
+				p.advance()
+			} else if p.source[p.pos] == ']' && inCharClass {
+				// Exiting character class
+				inCharClass = false
+				p.advance()
+			} else if p.source[p.pos] == '/' && !inCharClass {
+				// Found closing / (only if not in character class)
+				p.advance() // consume closing /
+				// Parse flags (i, g, m, etc.)
+				for !p.isAtEnd() && (unicode.IsLetter(rune(p.source[p.pos])) || unicode.IsDigit(rune(p.source[p.pos]))) {
+					p.advance()
+				}
+				break
+			} else {
+				p.advance()
+			}
+		}
+
+		raw := string(p.source[startPos.Column-1 : p.pos])
+		return &ast.Literal{
+			Value:    raw,
+			Raw:      raw,
+			Position: startPos,
+			EndPos:   p.currentPos(),
+		}, nil
+	}
+
+	if p.matchString() {
+		startPos := p.currentPos()
+		str := p.advanceStringLiteral()
+		return &ast.Literal{
+			Value:    str[1 : len(str)-1], // Remove quotes
+			Raw:      str,
+			Position: startPos,
+			EndPos:   p.currentPos(),
+		}, nil
+	}
+
+	// Array literal
+	if p.match("[") {
+		return p.parseArrayLiteral()
+	}
+
+	// Object literal
+	if p.match("{") {
+		return p.parseObjectLiteral()
+	}
+
+	// Function expression: function() {} or function name() {}
+	if p.matchKeyword("function") {
+		return p.parseFunctionExpression()
+	}
+
+	// Number literal
+	if p.matchNumber() {
+		startPos := p.currentPos()
+		num := p.advanceNumber()
+		return &ast.Literal{
+			Value:    num,
+			Raw:      num,
+			Position: startPos,
+			EndPos:   p.currentPos(),
+		}, nil
+	}
+
+	// Boolean literal
+	if p.matchKeyword("true", "false") {
+		startPos := p.currentPos()
+		val := p.advanceWord()
+		return &ast.Literal{
+			Value:    val,
+			Raw:      val,
+			Position: startPos,
+			EndPos:   p.currentPos(),
+		}, nil
+	}
+
+	// Null literal
+	if p.matchKeyword("null") {
+		startPos := p.currentPos()
+		val := p.advanceWord()
+		return &ast.Literal{
+			Value:    val,
+			Raw:      val,
+			Position: startPos,
+			EndPos:   p.currentPos(),
+		}, nil
+	}
+
+	// Undefined
+	if p.matchKeyword("undefined") {
+		startPos := p.currentPos()
+		val := p.advanceWord()
+		return &ast.Identifier{
+			Name:     val,
+			Position: startPos,
+			EndPos:   p.currentPos(),
+		}, nil
+	}
+
+	// This
 	if p.matchKeyword("this") {
 		startPos := p.currentPos()
 		p.advanceWord()
@@ -3704,6 +3872,7 @@ func (p *parser) parseObjectLiteral() (*ast.ObjectExpression, error) {
 
 						// Parse type annotation if present
 						var paramType ast.TypeNode
+						var err error
 						if p.match(":") {
 							p.advance()
 							p.skipWhitespaceAndComments()
@@ -4308,7 +4477,7 @@ func (p *parser) parseTypePrimaryNode() (ast.TypeNode, error) {
 		p.skipWhitespaceAndComments()
 		if p.match("[") {
 			// Save position for potential backtracking
-			bracketStartPos := p.pos
+			// bracketStartPos := p.pos
 			p.advance()
 			p.skipWhitespaceAndComments()
 
@@ -4329,924 +4498,34 @@ func (p *parser) parseTypePrimaryNode() (ast.TypeNode, error) {
 					}
 				}
 			} else {
-				// Indexed access type like Person['name'] - backtrack and stop
-				p.pos = bracketStartPos // Reset to before the '['
-				break
+				// Indexed access type T[K]
+				indexType, err := p.parseTypeAnnotationFull()
+				if err != nil {
+					return nil, err
+				}
+
+				p.skipWhitespaceAndComments()
+				if !p.match("]") {
+					return nil, fmt.Errorf("expected ']' in indexed access type")
+				}
+				p.advance()
+
+				return &ast.IndexedAccessType{
+					ObjectType: result,
+					IndexType:  indexType,
+					Position:   startPos,
+					EndPos:     p.currentPos(),
+				}, nil
 			}
 		} else {
 			break
 		}
 	}
 
-	return result, nil
-}
-
-// skipTypeAnnotation skips over a type annotation without parsing it
-func (p *parser) skipTypeAnnotation() {
-	p.skipTypePrimary()
-
-	// Handle array types: Type[] or Type[][]
-	for p.match("[") && p.peek(1) == "]" {
-		p.advance() // [
-		p.advance() // ]
-		p.skipWhitespaceAndComments()
-	}
-
-	// Handle union types (|) and intersection types (&)
-	iterations := 0
-	for (p.match("|") || p.match("&")) && !p.isAtEnd() && iterations < maxParserIterations {
-		iterations++
-		p.advance()
-		p.skipWhitespaceAndComments()
-		p.skipTypePrimary()
-
-		// Handle array types after each type in union/intersection
-		for p.match("[") && p.peek(1) == "]" {
-			p.advance() // [
-			p.advance() // ]
-			p.skipWhitespaceAndComments()
-		}
-	}
-}
-
-func (p *parser) skipTypePrimary() {
-	iterations := 0
-
-	// Object type: { prop: Type; prop2: Type }
-	if p.match("{") {
-		p.advance()
-		depth := 1
-		for depth > 0 && !p.isAtEnd() && iterations < maxParserIterations {
-			iterations++
-			if p.match("{") {
-				depth++
-			} else if p.match("}") {
-				depth--
-			}
-			p.advance()
-		}
-		p.skipWhitespaceAndComments()
-		return
-	}
-
-	// Tuple or array type: [Type, Type] or Type[]
-	if p.match("[") {
-		p.advance()
-		depth := 1
-		for depth > 0 && !p.isAtEnd() && iterations < maxParserIterations {
-			iterations++
-			if p.match("[") {
-				depth++
-			} else if p.match("]") {
-				depth--
-			}
-			p.advance()
-		}
-		p.skipWhitespaceAndComments()
-		return
-	}
-
-	// Function type: (arg: Type) => ReturnType
-	if p.match("(") {
-		// Look for => pattern
-		tempPos := p.pos
-		p.advance() // (
-		depth := 1
-		for depth > 0 && !p.isAtEnd() && iterations < maxParserIterations {
-			iterations++
-			if p.match("(") {
-				depth++
-			} else if p.match(")") {
-				depth--
-			}
-			p.advance()
-		}
-		p.skipWhitespaceAndComments()
-		if p.match("=") && p.peek(1) == ">" {
-			// It's a function type
-			p.advance() // =
-			p.advance() // >
-			p.skipWhitespaceAndComments()
-			p.skipTypeAnnotation() // Recurse for return type
-			return
-		}
-		// Not a function type, restore
-		p.pos = tempPos
-	}
-
-	// Identifier (possibly with generics)
-	if p.matchIdentifier() {
-		word := p.advanceWord()
-		p.skipWhitespaceAndComments()
-
-		// Special handling for 'infer' keyword - skip the inferred type name
-		if word == "infer" {
-			if p.matchIdentifier() {
-				p.advanceWord()
-				p.skipWhitespaceAndComments()
-			}
-			return
-		}
-
-		// Handle generic type arguments <T, U>
-		if p.match("<") {
-			p.advance()
-			depth := 1
-			for depth > 0 && !p.isAtEnd() && iterations < maxParserIterations {
-				iterations++
-				if p.match("<") {
-					depth++
-					p.advance()
-				} else if p.match(">") {
-					depth--
-					p.advance()
-				} else {
-					p.advance()
-				}
-			}
-			p.skipWhitespaceAndComments()
-		}
-	}
-}
-
-// parseTypeAliasDeclaration parses a type alias declaration (type Name = Type)
-func (p *parser) parseTypeAliasDeclaration() (*ast.TypeAliasDeclaration, error) {
-	startPos := p.currentPos()
-
-	p.consumeKeyword("type")
-	p.skipWhitespaceAndComments()
-
-	// Parse type name
-	id, err := p.parseIdentifier()
-	if err != nil {
-		return nil, err
-	}
-
-	p.skipWhitespaceAndComments()
-
-	// Parse type parameters if present (e.g., <T, U>)
-	var typeParameters []ast.TypeNode
-	if p.match("<") {
-		p.advance()
-		p.skipWhitespaceAndComments()
-
-		for !p.match(">") && !p.isAtEnd() {
-			typeParam, err := p.parseIdentifier()
-			if err != nil {
-				return nil, err
-			}
-			typeParameters = append(typeParameters, &ast.TypeReference{
-				Name:     typeParam.Name,
-				Position: typeParam.Pos(),
-				EndPos:   typeParam.End(),
-			})
-
-			p.skipWhitespaceAndComments()
-			if p.match(",") {
-				p.advance()
-				p.skipWhitespaceAndComments()
-			}
-		}
-
-		if !p.match(">") {
-			return nil, fmt.Errorf("expected '>' after type parameters")
-		}
-		p.advance()
-		p.skipWhitespaceAndComments()
-	}
-
-	// Expect =
-	if !p.match("=") {
-		return nil, fmt.Errorf("expected '=' in type alias declaration")
-	}
-	p.advance()
-	p.skipWhitespaceAndComments()
-
-	// Parse type annotation
-	typeAnnotation, err := p.parseTypeAnnotationFull()
-	if err != nil {
-		return nil, err
-	}
-
-	// Optional semicolon
-	p.skipWhitespaceAndComments()
-	if p.match(";") {
-		p.advance()
-	}
-
-	return &ast.TypeAliasDeclaration{
-		ID:             id,
-		TypeAnnotation: typeAnnotation,
-		TypeParameters: typeParameters,
-		Position:       startPos,
-		EndPos:         p.currentPos(),
-	}, nil
-}
-
-// parseInterfaceDeclaration parses an interface declaration
-func (p *parser) parseInterfaceDeclaration() (*ast.InterfaceDeclaration, error) {
-	startPos := p.currentPos()
-
-	p.consumeKeyword("interface")
-	p.skipWhitespaceAndComments()
-
-	// Parse interface name
-	id, err := p.parseIdentifier()
-	if err != nil {
-		return nil, err
-	}
-
-	p.skipWhitespaceAndComments()
-
-	// Parse type parameters if present
-	var typeParameters []ast.TypeNode
-	if p.match("<") {
-		p.advance()
-		p.skipWhitespaceAndComments()
-
-		iterations := 0
-		for !p.match(">") && !p.isAtEnd() && iterations < maxParserIterations {
-			iterations++
-			typeParam, err := p.parseIdentifier()
-			if err != nil {
-				return nil, err
-			}
-			typeParameters = append(typeParameters, &ast.TypeReference{
-				Name:     typeParam.Name,
-				Position: typeParam.Pos(),
-				EndPos:   typeParam.End(),
-			})
-
-			p.skipWhitespaceAndComments()
-			if p.match(",") {
-				p.advance()
-				p.skipWhitespaceAndComments()
-			}
-		}
-
-		if !p.match(">") {
-			return nil, fmt.Errorf("expected '>' after type parameters")
-		}
-		p.advance()
-		p.skipWhitespaceAndComments()
-	}
-
-	// Parse extends clause if present
-	var extends []ast.TypeNode
-	if p.matchKeyword("extends") {
-		p.consumeKeyword("extends")
-		p.skipWhitespaceAndComments()
-
-		for {
-			extendType, err := p.parseTypeAnnotation()
-			if err != nil {
-				return nil, err
-			}
-			extends = append(extends, extendType)
-
-			p.skipWhitespaceAndComments()
-			if p.match(",") {
-				p.advance()
-				p.skipWhitespaceAndComments()
-			} else {
-				break
-			}
-		}
-	}
-
-	// Parse body
-	if !p.match("{") {
-		return nil, fmt.Errorf("expected '{' in interface declaration")
-	}
-	p.advance()
-	p.skipWhitespaceAndComments()
-
-	var body []ast.InterfaceProperty
-	iterations := 0
-	for !p.match("}") && !p.isAtEnd() && iterations < maxParserIterations {
-		iterations++
-		// Parse property or method signature
-		key, err := p.parseIdentifier()
-		if err != nil {
-			return nil, err
-		}
-
-		p.skipWhitespaceAndComments()
-
-		// Check if it's a method signature (has < for generics or ( for params)
-		if p.match("<") || p.match("(") {
-			// Parse method signature
-
-			// Parse type parameters if present
-			var methodTypeParams []ast.TypeNode
-			if p.match("<") {
-				p.advance()
-				p.skipWhitespaceAndComments()
-
-				paramIterations := 0
-				for !p.match(">") && !p.isAtEnd() && paramIterations < maxParserIterations {
-					paramIterations++
-
-					// Parse type parameter name
-					typeParam, err := p.parseIdentifier()
-					if err != nil {
-						return nil, err
-					}
-
-					p.skipWhitespaceAndComments()
-
-					// Parse extends constraint if present
-					if p.matchKeyword("extends") {
-						p.consumeKeyword("extends")
-						p.skipWhitespaceAndComments()
-
-						// Parse the constraint type (can be complex like "keyof HTMLElementTagNameMap")
-						// We need to consume tokens until we hit , or > or =
-						constraintDepth := 0
-						for !p.isAtEnd() {
-							if p.match("<") {
-								constraintDepth++
-								p.advance()
-							} else if p.match(">") {
-								if constraintDepth == 0 {
-									break
-								}
-								constraintDepth--
-								p.advance()
-							} else if (p.match(",") || p.match("=")) && constraintDepth == 0 {
-								break
-							} else {
-								p.advance()
-							}
-							p.skipWhitespaceAndComments()
-						}
-					}
-
-					p.skipWhitespaceAndComments()
-
-					// Parse default type if present (e.g., = Element)
-					if p.match("=") {
-						p.advance()
-						p.skipWhitespaceAndComments()
-
-						// Consume default type until we hit , or >
-						defaultDepth := 0
-						for !p.isAtEnd() {
-							if p.match("<") {
-								defaultDepth++
-								p.advance()
-							} else if p.match(">") {
-								if defaultDepth == 0 {
-									break
-								}
-								defaultDepth--
-								p.advance()
-							} else if p.match(",") && defaultDepth == 0 {
-								break
-							} else {
-								p.advance()
-							}
-							p.skipWhitespaceAndComments()
-						}
-					}
-
-					methodTypeParams = append(methodTypeParams, &ast.TypeReference{
-						Name:     typeParam.Name,
-						Position: typeParam.Pos(),
-						EndPos:   typeParam.End(),
-					})
-
-					p.skipWhitespaceAndComments()
-					if p.match(",") {
-						p.advance()
-						p.skipWhitespaceAndComments()
-					}
-				}
-
-				if !p.match(">") {
-					return nil, fmt.Errorf("expected '>' after method type parameters")
-				}
-				p.advance()
-				p.skipWhitespaceAndComments()
-			}
-
-			// Parse method parameters
-			if !p.match("(") {
-				return nil, fmt.Errorf("expected '(' for method parameters")
-			}
-			p.advance()
-			p.skipWhitespaceAndComments()
-
-			// Skip method parameters (we're just parsing structure, not full semantics)
-			paramDepth := 1
-			for paramDepth > 0 && !p.isAtEnd() {
-				if p.match("(") {
-					paramDepth++
-					p.advance()
-				} else if p.match(")") {
-					paramDepth--
-					p.advance()
-				} else {
-					p.advance()
-				}
-				p.skipWhitespaceAndComments()
-			}
-
-			p.skipWhitespaceAndComments()
-
-			// Parse return type after :
-			if p.match(":") {
-				p.advance()
-				p.skipWhitespaceAndComments()
-
-				// Skip the entire return type (can be very complex with indexed access, unions, etc.)
-				// We'll consume tokens until we hit ; or , or } at depth 0
-				depth := 0
-				for !p.isAtEnd() {
-					if p.match("<") || p.match("[") || p.match("{") || p.match("(") {
-						depth++
-						p.advance()
-					} else if p.match(">") || p.match("]") || p.match("}") || p.match(")") {
-						if depth > 0 {
-							depth--
-						}
-						p.advance()
-					} else if (p.match(";") || p.match(",")) && depth == 0 {
-						break
-					} else if p.match("}") && depth == 0 {
-						// End of interface body
-						break
-					} else {
-						p.advance()
-					}
-					p.skipWhitespaceAndComments()
-				}
-			}
-
-			// Add as a property with function type (simplified representation)
-			body = append(body, ast.InterfaceProperty{
-				Key:      key,
-				Value:    &ast.TypeReference{Name: "Function", Position: key.Pos(), EndPos: p.currentPos()},
-				Optional: false,
-				Position: key.Pos(),
-				EndPos:   p.currentPos(),
-			})
-
-		} else {
-			// Parse property signature
-
-			// Check for optional marker
-			optional := false
-			if p.match("?") {
-				optional = true
-				p.advance()
-				p.skipWhitespaceAndComments()
-			}
-
-			// Expect :
-			if !p.match(":") {
-				return nil, fmt.Errorf("expected ':' after property name in interface")
-			}
-			p.advance()
-			p.skipWhitespaceAndComments()
-
-			// Parse property type
-			propType, err := p.parseTypeAnnotationFull()
-			if err != nil {
-				return nil, err
-			}
-
-			body = append(body, ast.InterfaceProperty{
-				Key:      key,
-				Value:    propType,
-				Optional: optional,
-				Position: key.Pos(),
-				EndPos:   p.currentPos(),
-			})
-		}
-
-		p.skipWhitespaceAndComments()
-
-		// Optional semicolon or comma
-		if p.match(";") || p.match(",") {
-			p.advance()
-			p.skipWhitespaceAndComments()
-		}
-	}
-
-	if !p.match("}") {
-		return nil, fmt.Errorf("expected '}' at end of interface")
-	}
-	p.advance()
-
-	return &ast.InterfaceDeclaration{
-		ID:             id,
-		Body:           body,
-		Extends:        extends,
-		TypeParameters: typeParameters,
-		Position:       startPos,
-		EndPos:         p.currentPos(),
-	}, nil
-}
-
-// parseDeclareStatement parses a declare statement (for .d.ts files)
-func (p *parser) parseDeclareStatement() (ast.Statement, error) {
-	startPos := p.currentPos()
-	p.consumeKeyword("declare")
-	p.skipWhitespaceAndComments()
-
-	// Check what's being declared
-	if p.matchKeyword("module") {
-		return p.parseDeclareModule(startPos)
-	}
-
-	if p.matchKeyword("namespace") {
-		return p.parseDeclareNamespace(startPos)
-	}
-
-	if p.matchKeyword("global") {
-		return p.parseDeclareGlobal(startPos)
-	}
-
-	// declare var/let/const
-	if p.matchKeyword("var", "let", "const") {
-		return p.parseVariableDeclaration()
-	}
-
-	// declare function
-	if p.matchKeyword("function") {
-		return p.parseFunctionDeclaration()
-	}
-
-	// declare class
-	if p.matchKeyword("class") {
-		return p.parseClassDeclaration()
-	}
-
-	// declare interface
-	if p.matchKeyword("interface") {
-		return p.parseInterfaceDeclaration()
-	}
-
-	// declare type
-	if p.matchKeyword("type") {
-		return p.parseTypeAliasDeclaration()
-	}
-
-	return nil, fmt.Errorf("unexpected token after 'declare' keyword")
-}
-
-// parseDeclareModule parses: declare module 'name' { ... }
-func (p *parser) parseDeclareModule(startPos ast.Position) (ast.Statement, error) {
-	p.consumeKeyword("module")
-	p.skipWhitespaceAndComments()
-
-	// Parse module name (string literal)
-	var moduleName string
-	if p.match("'") || p.match("\"") {
-		quote := p.current()
-		p.advance()
-		nameStart := p.pos
-		for !p.match(quote) && !p.isAtEnd() {
-			p.advance()
-		}
-		moduleName = p.source[nameStart:p.pos]
-		p.expect(quote)
-	} else {
-		// Could be an identifier for namespace-style module
-		id, err := p.parseIdentifier()
-		if err != nil {
-			return nil, err
-		}
-		moduleName = id.Name
-	}
-
-	// Use moduleName to avoid unused variable warning (could be used for metadata later)
-	_ = moduleName
-
-	p.skipWhitespaceAndComments()
-
-	// Parse module body
-	if !p.match("{") {
-		return nil, fmt.Errorf("expected '{' after module name")
-	}
-	p.advance()
-	p.skipWhitespaceAndComments()
-
-	var body []ast.Statement
-	iterations := 0
-	for !p.match("}") && !p.isAtEnd() && iterations < maxParserIterations {
-		iterations++
-		stmt, err := p.parseStatement()
-		if err != nil {
-			// Skip to next statement on error
-			for !p.match(";") && !p.match("}") && !p.isAtEnd() {
-				p.advance()
-			}
-			if p.match(";") {
-				p.advance()
-			}
-			continue
-		}
-		if stmt != nil {
-			body = append(body, stmt)
-		}
-		p.skipWhitespaceAndComments()
-	}
-
-	if !p.match("}") {
-		return nil, fmt.Errorf("expected '}' at end of declare module")
-	}
-	p.advance()
-
-	// Return as a block statement (simplified representation)
-	return &ast.BlockStatement{
-		Body:     body,
-		Position: startPos,
-		EndPos:   p.currentPos(),
-	}, nil
-}
-
-// parseDeclareNamespace parses: declare namespace Name { ... }
-func (p *parser) parseDeclareNamespace(startPos ast.Position) (ast.Statement, error) {
-	p.consumeKeyword("namespace")
-	p.skipWhitespaceAndComments()
-
-	// Parse namespace name
-	_, err := p.parseIdentifier()
-	if err != nil {
-		return nil, err
-	}
-
-	p.skipWhitespaceAndComments()
-
-	// Parse namespace body
-	if !p.match("{") {
-		return nil, fmt.Errorf("expected '{' after namespace name")
-	}
-	p.advance()
-	p.skipWhitespaceAndComments()
-
-	var body []ast.Statement
-	iterations := 0
-	for !p.match("}") && !p.isAtEnd() && iterations < maxParserIterations {
-		iterations++
-		stmt, err := p.parseStatement()
-		if err != nil {
-			// Skip to next statement on error
-			for !p.match(";") && !p.match("}") && !p.isAtEnd() {
-				p.advance()
-			}
-			if p.match(";") {
-				p.advance()
-			}
-			continue
-		}
-		if stmt != nil {
-			body = append(body, stmt)
-		}
-		p.skipWhitespaceAndComments()
-	}
-
-	if !p.match("}") {
-		return nil, fmt.Errorf("expected '}' at end of namespace")
-	}
-	p.advance()
-
-	return &ast.BlockStatement{
-		Body:     body,
-		Position: startPos,
-		EndPos:   p.currentPos(),
-	}, nil
-}
-
-// parseDeclareGlobal parses: declare global { ... }
-func (p *parser) parseDeclareGlobal(startPos ast.Position) (ast.Statement, error) {
-	p.consumeKeyword("global")
-	p.skipWhitespaceAndComments()
-
-	// Parse global body
-	if !p.match("{") {
-		return nil, fmt.Errorf("expected '{' after 'global'")
-	}
-	p.advance()
-	p.skipWhitespaceAndComments()
-
-	var body []ast.Statement
-	iterations := 0
-	for !p.match("}") && !p.isAtEnd() && iterations < maxParserIterations {
-		iterations++
-		stmt, err := p.parseStatement()
-		if err != nil {
-			// Skip to next statement on error
-			for !p.match(";") && !p.match("}") && !p.isAtEnd() {
-				p.advance()
-			}
-			if p.match(";") {
-				p.advance()
-			}
-			continue
-		}
-		if stmt != nil {
-			body = append(body, stmt)
-		}
-		p.skipWhitespaceAndComments()
-	}
-
-	if !p.match("}") {
-		return nil, fmt.Errorf("expected '}' at end of declare global")
-	}
-	p.advance()
-
-	return &ast.BlockStatement{
-		Body:     body,
-		Position: startPos,
-		EndPos:   p.currentPos(),
-	}, nil
-}
-
-// parseBreakStatement parses: break [label];
-func (p *parser) parseBreakStatement() (*ast.BreakStatement, error) {
-	startPos := p.currentPos()
-	p.consumeKeyword("break")
-	p.skipWhitespaceAndComments()
-
-	var label *ast.Identifier
-	// Check for optional label
-	if p.matchIdentifier() && !p.match(";") && !p.match("\n") {
-		var err error
-		label, err = p.parseIdentifier()
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	p.skipWhitespaceAndComments()
-	// Optional semicolon
-	if p.match(";") {
-		p.advance()
-	}
-
-	return &ast.BreakStatement{
-		Label:    label,
-		Position: startPos,
-		EndPos:   p.currentPos(),
-	}, nil
-}
-
-// parseContinueStatement parses: continue [label];
-func (p *parser) parseContinueStatement() (*ast.ContinueStatement, error) {
-	startPos := p.currentPos()
-	p.consumeKeyword("continue")
-	p.skipWhitespaceAndComments()
-
-	var label *ast.Identifier
-	// Check for optional label
-	if p.matchIdentifier() && !p.match(";") && !p.match("\n") {
-		var err error
-		label, err = p.parseIdentifier()
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	p.skipWhitespaceAndComments()
-	// Optional semicolon
-	if p.match(";") {
-		p.advance()
-	}
-
-	return &ast.ContinueStatement{
-		Label:    label,
-		Position: startPos,
-		EndPos:   p.currentPos(),
-	}, nil
-}
-
-// parseTypeAnnotationFull parses a complete type annotation including unions and intersections
-func (p *parser) parseTypeAnnotationFull() (ast.TypeNode, error) {
-	startPos := p.currentPos()
-
-	// Parse first type
-	firstType, err := p.parseTypeAnnotationPrimary()
-	if err != nil {
-		return nil, err
-	}
-
-	p.skipWhitespaceAndComments()
-
-	// Check for conditional type: T extends U ? X : Y or T extends infer U ? X : Y
-	// Only parse as conditional if we see "extends" followed by "?" or "infer"
-	if p.match("extends") {
-		savedPos := p.pos
-		p.advanceString(7)
-		p.skipWhitespaceAndComments()
-
-		var extendsType ast.TypeNode
-		var inferredType *ast.Identifier
-		var err error
-
-		// Check for infer keyword
-		if p.matchKeyword("infer") {
-			p.advanceWord()
-			p.skipWhitespaceAndComments()
-
-			inferredType, err = p.parseIdentifier()
-			if err != nil {
-				p.pos = savedPos
-				return firstType, nil
-			}
-			// When infer is present, there is no extends type
-		} else {
-			extendsType, err = p.parseTypeAnnotationPrimary()
-			if err != nil {
-				p.pos = savedPos
-				return firstType, nil
-			}
-		}
-
-		p.skipWhitespaceAndComments()
-
-		// Check if this is actually a conditional type (has ?)
-		if p.match("?") {
-			p.advance()
-			p.skipWhitespaceAndComments()
-
-			trueType, err := p.parseTypeAnnotationFull()
-			if err != nil {
-				return nil, err
-			}
-
-			p.skipWhitespaceAndComments()
-			if !p.match(":") {
-				return nil, fmt.Errorf("expected ':' in conditional type")
-			}
-			p.advance()
-			p.skipWhitespaceAndComments()
-
-			falseType, err := p.parseTypeAnnotationFull()
-			if err != nil {
-				return nil, err
-			}
-
-			return &ast.ConditionalType{
-				CheckType:    firstType,
-				ExtendsType:  extendsType,
-				InferredType: inferredType,
-				TrueType:     trueType,
-				FalseType:    falseType,
-				Position:     startPos,
-				EndPos:       p.currentPos(),
-			}, nil
-		} else {
-			// Not a conditional type, restore position
-			p.pos = savedPos
-		}
-	}
-
-	// Check for array type suffix [] or indexed access type: T[K]
-	if p.match("[") {
-		p.advance()
-		p.skipWhitespaceAndComments()
-
-		// Check if this is an array type (empty brackets) or indexed access type
-		if p.match("]") {
-			// Array type like (infer U)[] or string[]
-			p.advance()
-
-			// Convert firstType to array type by wrapping it
-			return &ast.TypeReference{
-				Name:          "(array)",
-				TypeArguments: []ast.TypeNode{firstType},
-				Position:      startPos,
-				EndPos:        p.currentPos(),
-			}, nil
-		} else {
-			// Indexed access type T[K]
-			indexType, err := p.parseTypeAnnotationFull()
-			if err != nil {
-				return nil, err
-			}
-
-			p.skipWhitespaceAndComments()
-			if !p.match("]") {
-				return nil, fmt.Errorf("expected ']' in indexed access type")
-			}
-			p.advance()
-
-			return &ast.IndexedAccessType{
-				ObjectType: firstType,
-				IndexType:  indexType,
-				Position:   startPos,
-				EndPos:     p.currentPos(),
-			}, nil
-		}
-	}
-
 	// Check for union (|) or intersection (&)
 	if p.match("|") {
 		// Union type
-		types := []ast.TypeNode{firstType}
+		types := []ast.TypeNode{result}
 
 		for p.match("|") {
 			p.advance()
@@ -5269,7 +4548,7 @@ func (p *parser) parseTypeAnnotationFull() (ast.TypeNode, error) {
 
 	if p.match("&") {
 		// Intersection type
-		types := []ast.TypeNode{firstType}
+		types := []ast.TypeNode{result}
 
 		for p.match("&") {
 			p.advance()
@@ -5290,12 +4569,30 @@ func (p *parser) parseTypeAnnotationFull() (ast.TypeNode, error) {
 		}, nil
 	}
 
-	return firstType, nil
+	return result, nil
 }
 
 // parseTypeAnnotationPrimary parses a primary type (identifier, literal, etc.)
 func (p *parser) parseTypeAnnotationPrimary() (ast.TypeNode, error) {
 	startPos := p.currentPos()
+
+	// readonly operator
+	if p.match("readonly") {
+		p.advanceString(8)
+		p.skipWhitespaceAndComments()
+
+		operand, err := p.parseTypeAnnotationPrimary()
+		if err != nil {
+			return nil, err
+		}
+
+		return &ast.TypeReference{
+			Name:          "readonly",
+			TypeArguments: []ast.TypeNode{operand},
+			Position:      startPos,
+			EndPos:        p.currentPos(),
+		}, nil
+	}
 
 	// Template literal type `prefix${T}suffix`
 	if p.match("`") {
@@ -5436,6 +4733,25 @@ func (p *parser) parseTypeAnnotationPrimary() (ast.TypeNode, error) {
 			Name:     "keyof " + operand.(*ast.TypeReference).Name,
 			Position: startPos,
 			EndPos:   p.currentPos(),
+		}, nil
+	}
+
+	// readonly operator
+	if p.match("readonly") {
+		startPos := p.currentPos()
+		p.advanceString(8)
+		p.skipWhitespaceAndComments()
+
+		operand, err := p.parseTypeAnnotationPrimary()
+		if err != nil {
+			return nil, err
+		}
+
+		return &ast.TypeReference{
+			Name:          "readonly",
+			TypeArguments: []ast.TypeNode{operand},
+			Position:      startPos,
+			EndPos:        p.currentPos(),
 		}, nil
 	}
 
