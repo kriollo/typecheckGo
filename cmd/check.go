@@ -309,15 +309,15 @@ func checkDirectory(templateTc *checker.TypeChecker, dir string, tsConfig *confi
 		default:
 			reportErrorsWithContext("", allErrors)
 			// Show timing info
-			fmt.Printf("%sFinished in %dms on %d files.%s\n",
-				colorGray, totalDuration.Milliseconds(), filesChecked, colorReset)
+			fmt.Printf("\n%s[Timing] Initialization: %dms | Type checking: %dms | Total: %dms%s\n",
+				colorGray, initDuration.Milliseconds(), checkDuration.Milliseconds(), totalDuration.Milliseconds(), colorReset)
 		}
 		return fmt.Errorf("type checking failed")
 	}
 
-	fmt.Printf("\n%s✓%s Checked %d files. No errors found.\n", colorGreen, colorReset, filesChecked)
-	fmt.Printf("%sFinished in %dms.%s\n",
-		colorGray, totalDuration.Milliseconds(), colorReset)
+	fmt.Printf("\n%s[Timing] Initialization: %dms | Type checking: %dms | Total: %dms%s\n",
+		colorGray, initDuration.Milliseconds(), checkDuration.Milliseconds(), totalDuration.Milliseconds(), colorReset)
+	fmt.Printf("%s✓%s Checked %d files. No errors found.\n", colorGreen, colorReset, filesChecked)
 	return nil
 
 }
