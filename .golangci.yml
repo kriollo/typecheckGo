@@ -1,0 +1,16 @@
+run:
+  timeout: 3m
+
+linters:
+  enable:
+    - staticcheck
+    - govet
+    - errcheck
+    - gosimple
+    - unused
+    - gocyclo
+    - revive
+    - unparam
+
+issues:
+  exclude-use-default: false

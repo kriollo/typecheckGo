@@ -5,9 +5,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"sync"
 	"time"
+
+	"strings"
 
 	"tstypechecker/pkg/checker"
 	"tstypechecker/pkg/config"
@@ -95,11 +96,16 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		tsConfig = config.GetDefaultConfig()
 	}
 
+	// Measure initialization time (loading types, libs, etc.)
+	initStart := time.Now()
+
 	// Create type checker with module resolution
 	typeChecker := checker.NewWithModuleResolver(rootDir)
 
 	// Configure type checker
 	configureChecker(typeChecker, tsConfig)
+
+	initDuration := time.Since(initStart)
 
 	// Show type loading stats (only in verbose mode via environment variable)
 	if os.Getenv("TSCHECK_VERBOSE") == "1" {
@@ -108,7 +114,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 
 	// Process files
 	if info.IsDir() {
-		return checkDirectory(typeChecker, absPath, tsConfig)
+		return checkDirectory(typeChecker, absPath, tsConfig, initDuration)
 	} else {
 		return checkFile(typeChecker, absPath)
 	}
@@ -149,8 +155,8 @@ func configureChecker(typeChecker *checker.TypeChecker, tsConfig *config.TSConfi
 	typeChecker.SetConfig(checkerConfig)
 }
 
-func checkDirectory(templateTc *checker.TypeChecker, dir string, tsConfig *config.TSConfig) error {
-	startTime := time.Now()
+func checkDirectory(templateTc *checker.TypeChecker, dir string, tsConfig *config.TSConfig, initDuration time.Duration) error {
+	checkStart := time.Now()
 
 	var files []string
 
@@ -213,7 +219,33 @@ func checkDirectory(templateTc *checker.TypeChecker, dir string, tsConfig *confi
 
 			// Create a new checker for this worker, sharing the module resolver
 			tc := checker.NewWithSharedModuleResolver(sharedResolver)
-			configureChecker(tc, tsConfig)
+
+			// Copy global types from the template checker (node_modules, libs, etc.)
+			// This avoids re-parsing thousands of files per worker
+			tc.CopyGlobalTypesFrom(templateTc)
+
+			// Configure path aliases (needed for module resolution)
+			if tsConfig.CompilerOptions.BaseUrl != "" || len(tsConfig.CompilerOptions.Paths) > 0 {
+				tc.SetPathAliases(tsConfig.CompilerOptions.BaseUrl, tsConfig.CompilerOptions.Paths)
+			}
+
+			// Set compiler config (no I/O, just configuration)
+			tc.SetConfig(&checker.CompilerConfig{
+				NoImplicitAny:                tsConfig.CompilerOptions.NoImplicitAny,
+				StrictNullChecks:             tsConfig.CompilerOptions.StrictNullChecks,
+				StrictFunctionTypes:          tsConfig.CompilerOptions.StrictFunctionTypes,
+				NoUnusedLocals:               tsConfig.CompilerOptions.NoUnusedLocals,
+				NoUnusedParameters:           tsConfig.CompilerOptions.NoUnusedParameters,
+				NoImplicitReturns:            tsConfig.CompilerOptions.NoImplicitReturns,
+				NoImplicitThis:               tsConfig.CompilerOptions.NoImplicitThis,
+				StrictBindCallApply:          tsConfig.CompilerOptions.StrictBindCallApply,
+				StrictPropertyInitialization: tsConfig.CompilerOptions.StrictPropertyInitialization,
+				AlwaysStrict:                 tsConfig.CompilerOptions.AlwaysStrict,
+				AllowUnreachableCode:         tsConfig.CompilerOptions.AllowUnreachableCode,
+				AllowUnusedLabels:            tsConfig.CompilerOptions.AllowUnusedLabels,
+				NoFallthroughCasesInSwitch:   tsConfig.CompilerOptions.NoFallthroughCasesInSwitch,
+				NoUncheckedIndexedAccess:     tsConfig.CompilerOptions.NoUncheckedIndexedAccess,
+			})
 
 			for path := range jobs {
 				// Parse file
@@ -264,10 +296,10 @@ func checkDirectory(templateTc *checker.TypeChecker, dir string, tsConfig *confi
 		}
 	}
 
-	elapsed := time.Since(startTime)
-	elapsedMs := elapsed.Milliseconds()
+	checkDuration := time.Since(checkStart)
+	totalDuration := initDuration + checkDuration
 
-	// Report summary
+	// Report summary with timing breakdown
 	if len(allErrors) > 0 {
 		switch outputFormat {
 		case "json":
@@ -276,15 +308,19 @@ func checkDirectory(templateTc *checker.TypeChecker, dir string, tsConfig *confi
 			reportErrorsTOON(allErrors)
 		default:
 			reportErrorsWithContext("", allErrors)
-			fmt.Printf("\n%sChecked %d files in %dms. Found errors in %d file(s).%s\n", colorYellow, filesChecked, elapsedMs, filesWithErrors, colorReset)
+			// Show timing info
+			fmt.Printf("%sFinished in %dms on %d files.%s\n",
+				colorGray, totalDuration.Milliseconds(), filesChecked, colorReset)
 		}
 		return fmt.Errorf("type checking failed")
 	}
 
-	fmt.Printf("\n%s✓%s Checked %d files in %dms. No errors found.\n", colorGreen, colorReset, filesChecked, elapsedMs)
+	fmt.Printf("\n%s✓%s Checked %d files. No errors found.\n", colorGreen, colorReset, filesChecked)
+	fmt.Printf("%sFinished in %dms.%s\n",
+		colorGray, totalDuration.Milliseconds(), colorReset)
 	return nil
-}
 
+}
 func checkFile(tc *checker.TypeChecker, filename string) error {
 	startTime := time.Now()
 
@@ -540,7 +576,8 @@ func reportErrorsWithContext(filename string, errors []checker.TypeError) {
 		errorsByFile[e.File] = append(errorsByFile[e.File], e)
 	}
 
-	fmt.Printf("\n")
+	// Get current working directory once
+	cwd, _ := os.Getwd()
 
 	// Process each file separately
 	for file, fileErrors := range errorsByFile {
@@ -548,7 +585,7 @@ func reportErrorsWithContext(filename string, errors []checker.TypeError) {
 		content, err := os.ReadFile(file)
 		if err != nil {
 			// Fallback to simple error reporting
-			fmt.Printf("\nFound %d errors in %s:\n", len(fileErrors), file)
+			fmt.Printf("\n%s⚠%s Found %d errors in %s:\n", colorYellow, colorReset, len(fileErrors), file)
 			for _, e := range fileErrors {
 				fmt.Printf("  %s:%d:%d - %s (%s)\n", e.File, e.Line, e.Column, e.Message, e.Code)
 			}
@@ -557,28 +594,34 @@ func reportErrorsWithContext(filename string, errors []checker.TypeError) {
 
 		lines := splitLines(string(content))
 
-		for i, e := range fileErrors {
-			// Show error header with color
-			fmt.Printf("  %s×%s %s%s%s\n", colorRed, colorReset, colorBold, e.Message, colorReset)
-
-			// Show file location with color
-			// Get current working directory
-			cwd, err := os.Getwd()
-			var displayPath string
-			if err == nil {
-				// Try to get relative path from cwd
-				relPath, err := filepath.Rel(cwd, e.File)
-				if err == nil && !filepath.IsAbs(relPath) && len(relPath) < len(e.File) {
+		for _, e := range fileErrors {
+			// Get relative path for display
+			displayPath := file
+			if cwd != "" {
+				if relPath, err := filepath.Rel(cwd, e.File); err == nil && !filepath.IsAbs(relPath) && len(relPath) < len(e.File) {
 					displayPath = relPath
-				} else {
-					displayPath = e.File
 				}
-			} else {
-				displayPath = e.File
 			}
-			fmt.Printf("   %s╭─[%s%s:%d:%d%s]\n", colorGray, colorCyan, displayPath, e.Line, e.Column, colorGray)
 
-			// Show code context (only 3 lines: previous, error, next)
+			// Determine error icon and color based on severity
+			icon := "×"
+			iconColor := colorRed
+			if e.Severity == "warning" {
+				icon = "⚠"
+				iconColor = colorYellow
+			}
+
+			// Show error header with icon and code
+			fmt.Printf("\n  %s%s%s %stypescript(%s)%s: %s\n",
+				iconColor, icon, colorReset,
+				colorGray, e.Code, colorReset,
+				e.Message)
+
+			// Show file location
+			fmt.Printf("     %s╭─[%s%s:%d:%d%s]\n",
+				colorGray, colorCyan, displayPath, e.Line, e.Column, colorGray)
+
+			// Show code context (3 lines: previous, error, next)
 			startLine := max(1, e.Line-1)
 			endLine := min(len(lines), e.Line+1)
 
@@ -587,45 +630,87 @@ func reportErrorsWithContext(filename string, errors []checker.TypeError) {
 					lineContent := lines[lineNum-1]
 
 					if lineNum == e.Line {
-						// Error line
-						fmt.Printf(" %s%3d%s %s│%s %s\n", colorGray, lineNum, colorReset, colorGray, colorReset, lineContent)
+						// Error line - show with line number
+						fmt.Printf(" %s%4d%s %s│%s %s\n",
+							colorGray, lineNum, colorReset,
+							colorGray, colorReset,
+							lineContent)
 
-						// Add error marker on the next line with arrow pointing up
+						// Add error marker with underline
 						spaces := e.Column - 1
 						if spaces < 0 {
 							spaces = 0
 						}
-						// Calculate padding to align with the code (after line number and │)
-						padding := 5 // "   3 │ " = 5 characters for line number display
-						fmt.Printf("%s%s%s^%s %s[%s]%s\n",
+
+						// Calculate underline length (try to underline the whole token)
+						underlineLen := 1
+						if spaces < len(lineContent) {
+							// Find end of token (simple heuristic)
+							for i := spaces; i < len(lineContent); i++ {
+								ch := lineContent[i]
+								if ch == ' ' || ch == '\t' || ch == ',' || ch == ';' || ch == ')' || ch == '}' {
+									break
+								}
+								underlineLen++
+							}
+						}
+
+						// Show the underline with arrow
+						padding := 6 // "  123 │ " = 6 characters
+						fmt.Printf("%s%s·%s%s%s\n",
 							repeatString(" ", padding+spaces),
-							colorRed,
-							"",
-							colorReset,
+							colorGray,
+							repeatString("─", max(1, underlineLen-1)),
+							"┬",
+							colorReset)
+						fmt.Printf("%s%s╰─%s %s[%s]%s\n",
+							repeatString(" ", padding+spaces),
+							colorGray,
+							"─",
 							colorGray,
 							e.Code,
 							colorReset)
 					} else {
 						// Context line
-						fmt.Printf(" %s%3d%s %s│%s %s\n", colorGray, lineNum, colorReset, colorGray, colorReset, lineContent)
+						fmt.Printf(" %s%4d%s %s│%s %s\n",
+							colorGray, lineNum, colorReset,
+							colorGray, colorReset,
+							lineContent)
 					}
 				}
 			}
 
-			fmt.Printf("   %s╰────%s\n", colorGray, colorReset)
+			fmt.Printf("     %s╰────%s\n", colorGray, colorReset)
+		}
+	}
 
-			if i < len(fileErrors)-1 {
-				fmt.Printf("\n")
+	// Count total errors and warnings
+	totalErrors := 0
+	totalWarnings := 0
+	filesWithErrors := len(errorsByFile)
+
+	for _, fileErrors := range errorsByFile {
+		for _, e := range fileErrors {
+			if e.Severity == "warning" {
+				totalWarnings++
+			} else {
+				totalErrors++
 			}
 		}
 	}
 
-	// Count total errors
-	totalErrors := 0
-	for _, fileErrors := range errorsByFile {
-		totalErrors += len(fileErrors)
+	// Show summary
+	fmt.Printf("\n")
+	if totalWarnings > 0 && totalErrors > 0 {
+		fmt.Printf("%sFound %d warnings and %d errors in %d file(s).%s\n",
+			colorYellow, totalWarnings, totalErrors, filesWithErrors, colorReset)
+	} else if totalWarnings > 0 {
+		fmt.Printf("%sFound %d warnings in %d file(s).%s\n",
+			colorYellow, totalWarnings, filesWithErrors, colorReset)
+	} else {
+		fmt.Printf("%sFound %d errors in %d file(s).%s\n",
+			colorRed, totalErrors, filesWithErrors, colorReset)
 	}
-	fmt.Printf("\n%sFound %d error(s).%s\n", colorRed, totalErrors, colorReset)
 }
 
 func splitLines(content string) []string {

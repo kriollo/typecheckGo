@@ -173,10 +173,11 @@ func NewWithSharedModuleResolver(resolver *modules.ModuleResolver) *TypeChecker 
 		typeGuards:         make(map[string]bool),
 		pkgTypeCache:       NewTypeCache(resolver.GetRootDir()),
 		loadStats:          NewLoadStats(),
+		loadedLibFiles:     make(map[string]bool),
 	}
 
-	// Load types into this checker's symbol table
-	tc.loadNodeModulesTypes(resolver.GetRootDir())
+	// Note: Types are NOT loaded here to avoid redundant I/O in worker threads.
+	// Call CopyGlobalTypesFrom() to share types from the main checker.
 
 	return tc
 }
@@ -1171,6 +1172,34 @@ func (tc *TypeChecker) GetModuleResolver() *modules.ModuleResolver {
 	return tc.moduleResolver
 }
 
+// CopyGlobalTypesFrom copies global types and symbols from another TypeChecker.
+// This is used to share pre-loaded node_modules types with worker threads
+// without re-parsing files.
+func (tc *TypeChecker) CopyGlobalTypesFrom(source *TypeChecker) {
+	// Copy global environment types (primitives, utility types, etc.)
+	for name, typ := range source.globalEnv.Types {
+		tc.globalEnv.Types[name] = typ
+	}
+
+	// Copy global environment objects (console, Math, Array, etc.)
+	for name, obj := range source.globalEnv.Objects {
+		tc.globalEnv.Objects[name] = obj
+	}
+
+	// Copy global symbols from node_modules and lib files
+	// We only copy global scope symbols, not file-specific ones
+	if source.symbolTable.Global != nil && tc.symbolTable.Global != nil {
+		for name, symbol := range source.symbolTable.Global.Symbols {
+			tc.symbolTable.Global.Symbols[name] = symbol
+		}
+	}
+
+	// Copy loaded lib files tracking
+	for path, loaded := range source.loadedLibFiles {
+		tc.loadedLibFiles[path] = loaded
+	}
+}
+
 // Clear releases memory by clearing internal caches.
 // Call this after processing a file to prevent memory leaks in long-running processes.
 func (tc *TypeChecker) Clear() {
@@ -1417,15 +1446,41 @@ func (tc *TypeChecker) FormatErrors(format string) string {
 
 // processImports processes all imports in a file and adds imported symbols to the symbol table
 func (tc *TypeChecker) processImports(file *ast.File, filename string) {
+	// Optimization: Load the current module once instead of for each import
+	// This avoids re-parsing the same file multiple times
+	var currentModule *modules.ResolvedModule
+	var moduleErr error
+
+	// Only load if we have imports to process
+	hasImports := false
+	for _, stmt := range file.Body {
+		if _, ok := stmt.(*ast.ImportDeclaration); ok {
+			hasImports = true
+			break
+		}
+	}
+
+	if !hasImports {
+		return
+	}
+
+	// Load current module once (with caching)
+	currentModule, moduleErr = tc.moduleResolver.LoadModule(filename, filename)
+	if moduleErr != nil {
+		// If we can't load the current module, skip all imports
+		return
+	}
+
+	// Process each import using the cached current module
 	for _, stmt := range file.Body {
 		if importDecl, ok := stmt.(*ast.ImportDeclaration); ok {
-			tc.processImport(importDecl, filename)
+			tc.processImportWithModule(importDecl, filename, currentModule)
 		}
 	}
 }
 
-// processImport processes a single import declaration
-func (tc *TypeChecker) processImport(importDecl *ast.ImportDeclaration, filename string) {
+// processImportWithModule processes a single import declaration with a pre-loaded current module
+func (tc *TypeChecker) processImportWithModule(importDecl *ast.ImportDeclaration, filename string, currentModule *modules.ResolvedModule) {
 	if importDecl.Source == nil {
 		return
 	}
@@ -1435,12 +1490,8 @@ func (tc *TypeChecker) processImport(importDecl *ast.ImportDeclaration, filename
 		return
 	}
 
-	// Load the current module (the file being checked)
-	currentModule, err := tc.moduleResolver.LoadModule(filename, filename)
-	if err != nil {
-		// If we can't load the current module, skip
-		return
-	}
+	// Use the pre-loaded current module instead of loading it again
+	// This is a critical optimization that prevents re-parsing the same file multiple times
 
 	importResolver := modules.NewImportResolver(tc.moduleResolver, currentModule)
 	importedSymbols, err := importResolver.ResolveImport(importDecl)
@@ -1470,6 +1521,30 @@ func (tc *TypeChecker) processImport(importDecl *ast.ImportDeclaration, filename
 			}
 		}
 	}
+}
+
+// processImport processes a single import declaration (legacy method, kept for compatibility)
+// This method loads the current module each time, which is less efficient.
+// Use processImportWithModule when possible.
+func (tc *TypeChecker) processImport(importDecl *ast.ImportDeclaration, filename string) {
+	if importDecl.Source == nil {
+		return
+	}
+
+	sourceStr, ok := importDecl.Source.Value.(string)
+	if !ok || sourceStr == "" {
+		return
+	}
+
+	// Load the current module (the file being checked)
+	currentModule, err := tc.moduleResolver.LoadModule(filename, filename)
+	if err != nil {
+		// If we can't load the current module, skip
+		return
+	}
+
+	// Delegate to the optimized version
+	tc.processImportWithModule(importDecl, filename, currentModule)
 }
 
 func (tc *TypeChecker) checkForStatement(stmt *ast.ForStatement, filename string) {

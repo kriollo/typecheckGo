@@ -473,6 +473,15 @@ func (r *ModuleResolver) resolveNodeModule(specifier string, basePath string) (s
 
 // LoadModule carga y analiza un módulo
 func (r *ModuleResolver) LoadModule(filePath string, specifier string) (module *ResolvedModule, err error) {
+	// Check cache first using absolute path as key
+	// This prevents re-parsing the same file when called directly
+	r.mu.RLock()
+	if cached, exists := r.moduleCache[filePath]; exists {
+		r.mu.RUnlock()
+		return cached, nil
+	}
+	r.mu.RUnlock()
+
 	// Recover from parser panics to prevent crashes
 	defer func() {
 		if panicErr := recover(); panicErr != nil {
@@ -508,6 +517,10 @@ func (r *ModuleResolver) LoadModule(filePath string, specifier string) (module *
 			IsExternal:    strings.Contains(filePath, "node_modules"),
 			IsTypeScript:  isTypeScript,
 		}
+		// Cache even failed modules to avoid re-parsing
+		r.mu.Lock()
+		r.moduleCache[filePath] = module
+		r.mu.Unlock()
 		return module, nil // Return empty module, not error
 	}
 
@@ -527,8 +540,17 @@ func (r *ModuleResolver) LoadModule(filePath string, specifier string) (module *
 	analyzer := NewModuleAnalyzer(r)
 	if analyzeErr := analyzer.AnalyzeModule(module, program); analyzeErr != nil {
 		// On analyze error, return module with empty exports instead of failing
+		// Cache it anyway to avoid re-parsing
+		r.mu.Lock()
+		r.moduleCache[filePath] = module
+		r.mu.Unlock()
 		return module, nil
 	}
+
+	// Cache the successfully loaded module
+	r.mu.Lock()
+	r.moduleCache[filePath] = module
+	r.mu.Unlock()
 
 	return module, nil
 }
