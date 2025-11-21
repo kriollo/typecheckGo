@@ -77,9 +77,52 @@ func (ti *TypeInferencer) InferType(expr ast.Expression) *Type {
 			return ti.InferType(e.Argument)
 		}
 		return Void
+	case *ast.MemberExpression:
+		return ti.inferMemberExpressionType(e)
 	default:
 		return Unknown
 	}
+}
+
+// inferMemberExpressionType infiere el tipo de un acceso a miembro (obj.prop)
+func (ti *TypeInferencer) inferMemberExpressionType(expr *ast.MemberExpression) *Type {
+	objType := ti.InferType(expr.Object)
+
+	// Si el objeto es Any, el resultado es Any
+	if objType.Kind == AnyType {
+		return Any
+	}
+
+	// Si es un objeto, buscar la propiedad
+	if objType.Kind == ObjectType {
+		var propName string
+
+		if !expr.Computed {
+			// Acceso directo: obj.prop
+			if id, ok := expr.Property.(*ast.Identifier); ok {
+				propName = id.Name
+			}
+		} else {
+			// Acceso computado: obj["prop"]
+			if lit, ok := expr.Property.(*ast.Literal); ok {
+				if str, ok := lit.Value.(string); ok {
+					propName = str
+				}
+			}
+		}
+
+		if propName != "" {
+			// Buscar en las propiedades del objeto
+			if propType, exists := objType.Properties[propName]; exists {
+				return propType
+			}
+
+			// TODO: Buscar en la cadena de prototipos o tipos heredados
+		}
+	}
+
+	// Si no podemos resolverlo, retornamos Any para evitar falsos positivos
+	return Any
 }
 
 // inferLiteralType infiere el tipo de un literal
