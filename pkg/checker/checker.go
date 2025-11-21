@@ -1520,6 +1520,26 @@ func (tc *TypeChecker) processImportWithModule(importDecl *ast.ImportDeclaration
 				tc.typeAliasCache[name] = types.NewObjectType(name, nil)
 			}
 		}
+
+		// If this is a variable (could be a function), infer its type and cache it
+		if symbol.Type == symbols.VariableSymbol && symbol.Node != nil {
+			// The node might be a VariableDeclaration (export const useXlsx = ...)
+			// We need to find the specific VariableDeclarator for this name
+			if varDecl, ok := symbol.Node.(*ast.VariableDeclaration); ok {
+				// Find the declarator with the matching name
+				for _, declarator := range varDecl.Decls {
+					if declarator.ID != nil && declarator.ID.Name == name {
+						// Found the right declarator, infer its type
+						if declarator.Init != nil {
+							inferredType := tc.inferencer.InferType(declarator.Init)
+							// Store in varTypeCache so it can be used when calling the function
+							tc.varTypeCache[name] = inferredType
+						}
+						break
+					}
+				}
+			}
+		}
 	}
 }
 

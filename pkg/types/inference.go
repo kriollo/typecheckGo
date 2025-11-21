@@ -62,8 +62,7 @@ func (ti *TypeInferencer) InferType(expr ast.Expression) *Type {
 	case *ast.BinaryExpression:
 		return ti.inferBinaryExpressionType(e)
 	case *ast.CallExpression:
-		// Por ahora retornamos unknown
-		return Unknown
+		return ti.inferCallExpressionType(e)
 	case *ast.ArrayExpression:
 		return ti.inferArrayType(e)
 	case *ast.ObjectExpression:
@@ -123,6 +122,78 @@ func (ti *TypeInferencer) inferMemberExpressionType(expr *ast.MemberExpression) 
 
 	// Si no podemos resolverlo, retornamos Any para evitar falsos positivos
 	return Any
+}
+
+// inferCallExpressionType infiere el tipo de retorno de una llamada a función
+func (ti *TypeInferencer) inferCallExpressionType(call *ast.CallExpression) *Type {
+	// Get the type of the callee
+	calleeType := ti.InferType(call.Callee)
+
+	// If it's a function type, return its return type
+	if calleeType.Kind == FunctionType && calleeType.ReturnType != nil {
+		return calleeType.ReturnType
+	}
+
+	// If the callee is an identifier, try to find the function definition
+	if id, ok := call.Callee.(*ast.Identifier); ok {
+		// Check if we have the variable in cache
+		if varType, exists := ti.varTypeCache[id.Name]; exists {
+			// If it's a function type, return its return type
+			if varType.Kind == FunctionType && varType.ReturnType != nil {
+				return varType.ReturnType
+			}
+		}
+
+		// Try to find the arrow function definition in the AST
+		// This is a simplified approach - in a full implementation we'd traverse the AST
+		// For now, we'll try to infer from arrow functions defined in the same scope
+	}
+
+	// If the callee is an arrow function expression (IIFE), analyze its body
+	if arrow, ok := call.Callee.(*ast.ArrowFunctionExpression); ok {
+		return ti.inferArrowFunctionReturnType(arrow)
+	}
+
+	// Default: return Unknown
+	return Unknown
+}
+
+// inferArrowFunctionReturnType analyzes an arrow function's body to infer its return type
+func (ti *TypeInferencer) inferArrowFunctionReturnType(arrow *ast.ArrowFunctionExpression) *Type {
+	// If the body is an expression (not a block), infer from that expression
+	if expr, ok := arrow.Body.(ast.Expression); ok {
+		return ti.InferType(expr)
+	}
+
+	// If the body is a block statement, look for return statements
+	if block, ok := arrow.Body.(*ast.BlockStatement); ok {
+		return ti.inferReturnTypeFromBlock(block)
+	}
+
+	return Unknown
+}
+
+// inferReturnTypeFromBlock finds return statements in a block and infers the return type
+func (ti *TypeInferencer) inferReturnTypeFromBlock(block *ast.BlockStatement) *Type {
+	for _, stmt := range block.Body {
+		if returnStmt, ok := stmt.(*ast.ReturnStatement); ok {
+			if returnStmt.Argument != nil {
+				return ti.InferType(returnStmt.Argument)
+			}
+			return Void
+		}
+
+		// Recursively check nested blocks (if statements, etc.)
+		if ifStmt, ok := stmt.(*ast.IfStatement); ok {
+			if consequent, ok := ifStmt.Consequent.(*ast.BlockStatement); ok {
+				if returnType := ti.inferReturnTypeFromBlock(consequent); returnType.Kind != UnknownType {
+					return returnType
+				}
+			}
+		}
+	}
+
+	return Void
 }
 
 // inferLiteralType infiere el tipo de un literal
@@ -221,14 +292,16 @@ func (ti *TypeInferencer) inferArrayType(arr *ast.ArrayExpression) *Type {
 
 // inferArrowFunctionType infiere el tipo de una arrow function
 func (ti *TypeInferencer) inferArrowFunctionType(arrow *ast.ArrowFunctionExpression) *Type {
-	// Por ahora, retornamos un tipo función genérico
-	// En una implementación completa, analizaríamos los parámetros y el return
+	// Infer parameter types
 	params := make([]*Type, len(arrow.Params))
 	for i := range params {
 		params[i] = Any
 	}
 
-	return NewFunctionType(params, Any)
+	// Infer return type by analyzing the function body
+	returnType := ti.inferArrowFunctionReturnType(arrow)
+
+	return NewFunctionType(params, returnType)
 }
 
 // inferObjectType infiere el tipo de un objeto literal
