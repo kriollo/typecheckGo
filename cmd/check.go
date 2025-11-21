@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"tstypechecker/pkg/checker"
@@ -96,6 +98,23 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	// Create type checker with module resolution
 	typeChecker := checker.NewWithModuleResolver(rootDir)
 
+	// Configure type checker
+	configureChecker(typeChecker, tsConfig)
+
+	// Show type loading stats (only in verbose mode via environment variable)
+	if os.Getenv("TSCHECK_VERBOSE") == "1" {
+		defer typeChecker.PrintLoadStats()
+	}
+
+	// Process files
+	if info.IsDir() {
+		return checkDirectory(typeChecker, absPath, tsConfig)
+	} else {
+		return checkFile(typeChecker, absPath)
+	}
+}
+
+func configureChecker(typeChecker *checker.TypeChecker, tsConfig *config.TSConfig) {
 	// Configure type checker with libs from tsconfig
 	libs := tsConfig.CompilerOptions.GetLib()
 	typeChecker.SetLibs(libs)
@@ -111,7 +130,6 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	}
 
 	// Configure type checker with tsconfig options
-	// Note: When strict is true, individual flags can still be explicitly disabled
 	checkerConfig := &checker.CompilerConfig{
 		NoImplicitAny:                tsConfig.CompilerOptions.NoImplicitAny,
 		StrictNullChecks:             tsConfig.CompilerOptions.StrictNullChecks,
@@ -129,26 +147,12 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		NoUncheckedIndexedAccess:     tsConfig.CompilerOptions.NoUncheckedIndexedAccess,
 	}
 	typeChecker.SetConfig(checkerConfig)
-
-	// Show type loading stats (only in verbose mode via environment variable)
-	if os.Getenv("TSCHECK_VERBOSE") == "1" {
-		defer typeChecker.PrintLoadStats()
-	}
-
-	// Process files
-	if info.IsDir() {
-		return checkDirectory(typeChecker, absPath, tsConfig)
-	} else {
-		return checkFile(typeChecker, absPath)
-	}
 }
 
-func checkDirectory(tc *checker.TypeChecker, dir string, tsConfig *config.TSConfig) error {
+func checkDirectory(templateTc *checker.TypeChecker, dir string, tsConfig *config.TSConfig) error {
 	startTime := time.Now()
 
-	var allErrors []checker.TypeError
-	var filesChecked int
-	var filesWithErrors int
+	var files []string
 
 	// Walk directory and find TypeScript files
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
@@ -167,25 +171,7 @@ func checkDirectory(tc *checker.TypeChecker, dir string, tsConfig *config.TSConf
 		isJavaScriptFile := ext == ".js" || ext == ".jsx"
 
 		if !info.IsDir() && (isTypeScriptFile || (isJavaScriptFile && tsConfig.CompilerOptions.AllowJs)) {
-			filesChecked++
-
-			// Parse file
-			ast, parseErr := parser.ParseFile(path)
-			if parseErr != nil {
-				fmt.Printf("Parse error in %s: %v\n", path, parseErr)
-				return nil
-			}
-
-			// Type check
-			errors := tc.CheckFile(path, ast)
-			if len(errors) > 0 {
-				filesWithErrors++
-				allErrors = append(allErrors, errors...)
-			}
-
-			// Clear caches after each file to prevent memory accumulation
-			// Use ClearFileCache to preserve loaded libraries across files
-			tc.ClearFileCache()
+			files = append(files, path)
 		}
 
 		return nil
@@ -193,6 +179,89 @@ func checkDirectory(tc *checker.TypeChecker, dir string, tsConfig *config.TSConf
 
 	if err != nil {
 		return err
+	}
+
+	filesChecked := len(files)
+	if filesChecked == 0 {
+		fmt.Printf("\n%s✓%s Checked 0 files. No TypeScript files found.\n", colorGreen, colorReset)
+		return nil
+	}
+
+	// Prepare for parallel execution
+	numWorkers := runtime.NumCPU()
+	// Cap workers to avoid excessive memory usage if many cores
+	if numWorkers > 8 {
+		numWorkers = 8
+	}
+	// Don't use more workers than files
+	if numWorkers > filesChecked {
+		numWorkers = filesChecked
+	}
+
+	jobs := make(chan string, filesChecked)
+	results := make(chan []checker.TypeError, filesChecked)
+	var wg sync.WaitGroup
+
+	// Get shared resolver from template
+	sharedResolver := templateTc.GetModuleResolver()
+
+	// Start workers
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			// Create a new checker for this worker, sharing the module resolver
+			tc := checker.NewWithSharedModuleResolver(sharedResolver)
+			configureChecker(tc, tsConfig)
+
+			for path := range jobs {
+				// Parse file
+				ast, parseErr := parser.ParseFile(path)
+				if parseErr != nil {
+					// Report parse error as a type error
+					results <- []checker.TypeError{{
+						File:     path,
+						Line:     1,
+						Column:   1,
+						Message:  fmt.Sprintf("Parse error: %v", parseErr),
+						Code:     "TS1005",
+						Severity: "error",
+					}}
+					continue
+				}
+
+				// Type check
+				errors := tc.CheckFile(path, ast)
+				results <- errors
+
+				// Clear caches after each file
+				tc.ClearFileCache()
+			}
+		}()
+	}
+
+	// Send jobs
+	for _, file := range files {
+		jobs <- file
+	}
+	close(jobs)
+
+	// Wait for workers in a separate goroutine
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	// Collect results
+	var allErrors []checker.TypeError
+	filesWithErrors := 0
+
+	for errs := range results {
+		if len(errs) > 0 {
+			filesWithErrors++
+			allErrors = append(allErrors, errs...)
+		}
 	}
 
 	elapsed := time.Since(startTime)

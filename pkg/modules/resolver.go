@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"tstypechecker/pkg/ast"
 	"tstypechecker/pkg/parser"
 	"tstypechecker/pkg/symbols"
@@ -38,6 +39,9 @@ type ModuleResolver struct {
 
 	// Cache for modules that could not be resolved
 	notFoundCache map[string]bool
+
+	// Mutex for thread safety
+	mu sync.RWMutex
 }
 
 // ResolvedModule representa un módulo resuelto
@@ -128,14 +132,19 @@ func (r *ModuleResolver) GetRootDir() string {
 func (r *ModuleResolver) ResolveModule(specifier string, fromFile string) (*ResolvedModule, error) {
 	// Verificar cache primero
 	cacheKey := fmt.Sprintf("%s:%s", specifier, fromFile)
+
+	r.mu.RLock()
 	if cached, exists := r.moduleCache[cacheKey]; exists {
+		r.mu.RUnlock()
 		return cached, nil
 	}
 
 	// Check not found cache
 	if r.notFoundCache[cacheKey] {
+		r.mu.RUnlock()
 		return nil, fmt.Errorf("module not found (cached): %s", specifier)
 	}
+	r.mu.RUnlock()
 
 	// Determinar la ruta base desde la cual resolver
 	var basePath string
@@ -161,7 +170,9 @@ func (r *ModuleResolver) ResolveModule(specifier string, fromFile string) (*Reso
 	}
 
 	if err != nil {
+		r.mu.Lock()
 		r.notFoundCache[cacheKey] = true
+		r.mu.Unlock()
 		return nil, fmt.Errorf("failed to resolve module %s: %w", specifier, err)
 	}
 
@@ -172,7 +183,9 @@ func (r *ModuleResolver) ResolveModule(specifier string, fromFile string) (*Reso
 	}
 
 	// Cachear el resultado
+	r.mu.Lock()
 	r.moduleCache[cacheKey] = module
+	r.mu.Unlock()
 
 	return module, nil
 }
@@ -337,13 +350,20 @@ func (r *ModuleResolver) findFileRecursive(dir string, filename string) string {
 
 // fileExists checks if a file exists, using a cache to avoid repeated os.Stat calls
 func (r *ModuleResolver) fileExists(path string) bool {
+	r.mu.RLock()
 	if exists, ok := r.fileCache[path]; ok {
+		r.mu.RUnlock()
 		return exists
 	}
+	r.mu.RUnlock()
 
 	_, err := os.Stat(path)
 	exists := err == nil
+
+	r.mu.Lock()
 	r.fileCache[path] = exists
+	r.mu.Unlock()
+
 	return exists
 }
 

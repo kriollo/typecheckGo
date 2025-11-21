@@ -148,6 +148,39 @@ func NewWithModuleResolver(rootDir string) *TypeChecker {
 	return tc
 }
 
+// NewWithSharedModuleResolver creates a new type checker with an existing module resolver
+func NewWithSharedModuleResolver(resolver *modules.ModuleResolver) *TypeChecker {
+	symbolTable := symbols.NewSymbolTable()
+	globalEnv := types.NewGlobalEnvironment()
+	typeCache := make(map[ast.Node]*types.Type)
+	varTypeCache := make(map[string]*types.Type)
+	inferencer := types.NewTypeInferencer(globalEnv)
+	inferencer.SetTypeCache(typeCache)
+	inferencer.SetVarTypeCache(varTypeCache)
+	destructuringInfer := NewDestructuringInferencer(globalEnv)
+
+	tc := &TypeChecker{
+		symbolTable:        symbolTable,
+		errors:             []TypeError{},
+		moduleResolver:     resolver,
+		globalEnv:          globalEnv,
+		typeCache:          typeCache,
+		config:             getDefaultConfig(),
+		varTypeCache:       varTypeCache,
+		typeAliasCache:     make(map[string]*types.Type),
+		inferencer:         inferencer,
+		destructuringInfer: destructuringInfer,
+		typeGuards:         make(map[string]bool),
+		pkgTypeCache:       NewTypeCache(resolver.GetRootDir()),
+		loadStats:          NewLoadStats(),
+	}
+
+	// Load types into this checker's symbol table
+	tc.loadNodeModulesTypes(resolver.GetRootDir())
+
+	return tc
+}
+
 // CheckFile checks a single TypeScript file
 func (tc *TypeChecker) CheckFile(filename string, file *ast.File) []TypeError {
 	// Clear previous errors
@@ -1131,6 +1164,11 @@ func (tc *TypeChecker) HasErrors() bool {
 // GetSymbolTable returns the symbol table for inspection
 func (tc *TypeChecker) GetSymbolTable() *symbols.SymbolTable {
 	return tc.symbolTable
+}
+
+// GetModuleResolver returns the module resolver
+func (tc *TypeChecker) GetModuleResolver() *modules.ModuleResolver {
+	return tc.moduleResolver
 }
 
 // Clear releases memory by clearing internal caches.
