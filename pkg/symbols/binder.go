@@ -3,6 +3,7 @@ package symbols
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"tstypechecker/pkg/ast"
 	"tstypechecker/pkg/types"
@@ -118,10 +119,49 @@ func (b *Binder) bindVariableDeclaration(decl *ast.VariableDeclaration) {
 				}
 			}
 
-			// Define the variable symbol
-			symbol := b.table.DefineSymbol(declarator.ID.Name, symbolType, declarator, mutable)
-			symbol.IsFunction = isFunction
-			symbol.Params = params
+			// Check if this is object destructuring pattern
+			idName := declarator.ID.Name
+
+			// Debug logging - print everything to see what we get
+			if os.Getenv("DEBUG_DESTRUCTURING") == "1" {
+				fmt.Printf("BINDER: Variable declaration: %q\n", idName)
+			}
+
+			if strings.HasPrefix(idName, "{") && strings.HasSuffix(idName, "}") {
+				// Extract individual properties from destructuring
+				propsStr := strings.TrimPrefix(idName, "{")
+				propsStr = strings.TrimSuffix(propsStr, "}")
+				propsStr = strings.TrimSpace(propsStr)
+
+				if propsStr != "" {
+					// Split by comma
+					props := strings.Split(propsStr, ",")
+					for _, prop := range props {
+						prop = strings.TrimSpace(prop)
+						// Handle default values: "title = 'default'"
+						if idx := strings.Index(prop, "="); idx != -1 {
+							prop = strings.TrimSpace(prop[:idx])
+						}
+						// Handle renaming: "oldName: newName"
+						if idx := strings.Index(prop, ":"); idx != -1 {
+							prop = strings.TrimSpace(prop[idx+1:])
+						}
+
+						if prop != "" {
+							// Register each destructured property
+							propSymbol := b.table.DefineSymbol(prop, VariableSymbol, declarator, mutable)
+							if isFunction {
+								propSymbol.IsFunction = true
+							}
+						}
+					}
+				}
+			} else {
+				// Normal variable (not destructuring)
+				symbol := b.table.DefineSymbol(declarator.ID.Name, symbolType, declarator, mutable)
+				symbol.IsFunction = isFunction
+				symbol.Params = params
+			}
 
 			// If there's an initializer, bind it
 			if declarator.Init != nil {

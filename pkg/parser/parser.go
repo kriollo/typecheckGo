@@ -477,6 +477,7 @@ func (p *parser) parseVariableDeclaration() (*ast.VariableDeclaration, error) {
 			var extractedNames []string
 			depth := 1
 			currentName := ""
+			skippingDefault := false
 
 			for depth > 0 && !p.isAtEnd() {
 				ch := p.source[p.pos]
@@ -491,6 +492,7 @@ func (p *parser) parseVariableDeclaration() (*ast.VariableDeclaration, error) {
 						if currentName != "" {
 							extractedNames = append(extractedNames, strings.TrimSpace(currentName))
 							currentName = ""
+							skippingDefault = false
 						}
 					}
 					p.advance()
@@ -499,6 +501,7 @@ func (p *parser) parseVariableDeclaration() (*ast.VariableDeclaration, error) {
 					if currentName != "" {
 						extractedNames = append(extractedNames, strings.TrimSpace(currentName))
 						currentName = ""
+						skippingDefault = false
 					}
 					p.advance()
 					p.skipWhitespaceAndComments()
@@ -506,16 +509,21 @@ func (p *parser) parseVariableDeclaration() (*ast.VariableDeclaration, error) {
 					// In object pattern, skip the rename part (e.g., {oldName: newName})
 					// We want to capture 'newName', not 'oldName'
 					currentName = ""
+					skippingDefault = false
 					p.advance()
 					p.skipWhitespaceAndComments()
-				} else if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_' || ch == '$' ||
-					(currentName != "" && ch >= '0' && ch <= '9') || ch > 127 {
+				} else if ch == '=' && depth == 1 {
+					// Start of default value, stop capturing name
+					skippingDefault = true
+					p.advance()
+				} else if !skippingDefault && ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_' || ch == '$' ||
+					(currentName != "" && ch >= '0' && ch <= '9') || ch > 127) {
 					currentName += string(ch)
 					p.advance()
 				} else if ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' {
 					p.skipWhitespaceAndComments()
 				} else {
-					// Other characters (like =, ..., etc.), skip
+					// Other characters (like quotes in default values), skip
 					p.advance()
 				}
 			}
