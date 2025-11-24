@@ -517,9 +517,6 @@ func (tc *TypeChecker) checkIfStatement(stmt *ast.IfStatement, filename string) 
 	var detectGuard func(expr ast.Expression)
 	detectGuard = func(expr ast.Expression) {
 		if binExpr, ok := expr.(*ast.BinaryExpression); ok {
-			if os.Getenv("DEBUG_TYPEGUARD") == "1" {
-				fmt.Printf("DEBUG: Binary operator: %q\n", binExpr.Operator)
-			}
 			if binExpr.Operator == "&&" {
 				detectGuard(binExpr.Left)
 				detectGuard(binExpr.Right)
