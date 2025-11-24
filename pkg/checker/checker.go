@@ -217,6 +217,12 @@ func (tc *TypeChecker) CheckFile(filename string, file *ast.File) []TypeError {
 	binder.SetParameterTypeInferencer(tc.destructuringInfer)
 	binder.BindFile(file)
 
+	// Load TypeScript lib files on first check (lazy loading)
+	// This ensures standard JavaScript globals like Intl, Promise, etc. are available
+	if tc.loadedLibFiles == nil || len(tc.loadedLibFiles) == 0 {
+		tc.loadTypeScriptLibs([]string{"ES2020", "DOM"})
+	}
+
 	// Process imports and add imported symbols to the symbol table
 	if tc.moduleResolver != nil {
 		tc.processImports(file, filename)
@@ -2670,6 +2676,32 @@ func (tc *TypeChecker) extractVariablesUsingPatterns(text string) {
 
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
+
+		// Extract global namespaces FIRST (before inDeclareBlock check)
+		// Pattern: declare namespace NAME { ... }
+		// This is how Intl and other global namespaces are defined
+		if strings.HasPrefix(trimmed, "declare namespace ") {
+			parts := strings.Fields(trimmed)
+			if len(parts) >= 3 {
+				name := parts[2]
+				// Remove { if present
+				name = strings.TrimSuffix(name, "{")
+				name = strings.TrimSpace(name)
+
+				if name != "" && isValidIdentifier(name) {
+					// Register the namespace as a global object
+					tc.globalEnv.Objects[name] = types.Any
+
+					// Also add to symbol table
+					symbol := tc.symbolTable.DefineSymbol(name, symbols.VariableSymbol, nil, false)
+					symbol.FromDTS = true
+
+					if os.Getenv("DEBUG_LIB_LOADING") == "1" {
+						fmt.Fprintf(os.Stderr, "Extracted namespace: %s\n", name)
+					}
+				}
+			}
+		}
 
 		// Track declare module/namespace blocks
 		if strings.HasPrefix(trimmed, "declare module") || strings.HasPrefix(trimmed, "declare namespace") {
