@@ -327,9 +327,20 @@ func (ti *TypeInferencer) inferObjectType(obj *ast.ObjectExpression) *Type {
 				properties[propName] = propType
 			}
 		case *ast.SpreadElement:
-			// For spread elements, we would need to resolve the type of the argument
-			// For now, we skip them
-			continue
+			// Infer the type of the spread argument
+			spreadType := ti.InferType(p.Argument)
+
+			// If we spread 'any' or 'unknown', the result is 'any' (to avoid false positives)
+			if spreadType.Kind == AnyType || spreadType.Kind == UnknownType {
+				return Any
+			}
+
+			// If it's an object type, copy its properties
+			if spreadType.Kind == ObjectType && spreadType.Properties != nil {
+				for k, v := range spreadType.Properties {
+					properties[k] = v
+				}
+			}
 		}
 	}
 
