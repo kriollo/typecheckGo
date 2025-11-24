@@ -224,7 +224,7 @@ func (tc *TypeChecker) CheckFile(filename string, file *ast.File) []TypeError {
 	// Load TypeScript lib files on first check (lazy loading)
 	// This ensures standard JavaScript globals like Intl, Promise, etc. are available
 	if tc.loadedLibFiles == nil || len(tc.loadedLibFiles) == 0 {
-		tc.loadTypeScriptLibs([]string{"ES2020", "DOM"})
+		tc.LoadTypeScriptLibsWithSnapshot([]string{"ES2020", "DOM"})
 	}
 
 	// Process imports and add imported symbols to the symbol table
@@ -2187,7 +2187,7 @@ func (tc *TypeChecker) SetLibs(libs []string) {
 
 	// Load TypeScript lib files (lib.dom.d.ts, lib.es2020.d.ts, etc.)
 	startTime := time.Now()
-	tc.loadTypeScriptLibs(libs)
+	tc.LoadTypeScriptLibsWithSnapshot(libs)
 	tc.loadStats.TypeScriptLibsTime = time.Since(startTime)
 }
 
