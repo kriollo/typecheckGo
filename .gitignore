@@ -9,3 +9,7 @@ dist
 
 .tscheck_cache
 public
+src
+
+ts*.exe
+type*.exe
