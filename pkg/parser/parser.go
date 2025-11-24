@@ -509,7 +509,7 @@ func (p *parser) parseVariableDeclaration() (*ast.VariableDeclaration, error) {
 					p.advance()
 					p.skipWhitespaceAndComments()
 				} else if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_' || ch == '$' ||
-					(currentName != "" && ch >= '0' && ch <= '9') {
+					(currentName != "" && ch >= '0' && ch <= '9') || ch > 127 {
 					currentName += string(ch)
 					p.advance()
 				} else if ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' {
@@ -2107,11 +2107,22 @@ func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 func (p *parser) parseIdentifier() (*ast.Identifier, error) {
 	startPos := p.currentPos()
 
-	if !p.matchIdentifier() {
+	// Check first character
+	ch := p.source[p.pos]
+	if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_' || ch == '$' || ch > 127) {
 		return nil, fmt.Errorf("expected identifier at %s", startPos)
 	}
 
-	name := p.advanceWord()
+	name := ""
+	for !p.isAtEnd() {
+		ch = p.source[p.pos]
+		if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_' || ch == '$' || ch > 127 {
+			name += string(ch)
+			p.advance()
+		} else {
+			break
+		}
+	}
 
 	return &ast.Identifier{
 		Name:     name,
@@ -2231,7 +2242,7 @@ func (p *parser) parseParameterList() ([]*ast.Parameter, error) {
 					p.advance()
 					p.skipWhitespaceAndComments()
 				} else if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_' || ch == '$' ||
-					(currentName != "" && ch >= '0' && ch <= '9') {
+					(currentName != "" && ch >= '0' && ch <= '9') || ch > 127 {
 					currentName += string(ch)
 					p.advance()
 				} else if ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' {
@@ -2243,8 +2254,6 @@ func (p *parser) parseParameterList() ([]*ast.Parameter, error) {
 			}
 
 			p.skipWhitespaceAndComments()
-
-			// Parse type annotation if present (: Type)
 			var paramType ast.TypeNode
 			if p.match(":") {
 				p.advance()

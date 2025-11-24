@@ -77,7 +77,7 @@ func New() *TypeChecker {
 	inferencer.SetVarTypeCache(varTypeCache)
 	destructuringInfer := NewDestructuringInferencer(globalEnv)
 
-	return &TypeChecker{
+	tc := &TypeChecker{
 		symbolTable:        symbols.NewSymbolTable(),
 		errors:             []TypeError{},
 		globalEnv:          globalEnv,
@@ -88,7 +88,11 @@ func New() *TypeChecker {
 		destructuringInfer: destructuringInfer,
 		config:             getDefaultConfig(),
 		typeGuards:         make(map[string]bool),
+		loadedLibFiles:     make(map[string]bool),
+		loadStats:          &LoadStats{},
 	}
+
+	return tc
 }
 
 // getDefaultConfig returns default compiler configuration
@@ -1330,7 +1334,7 @@ func isValidIdentifier(name string) bool {
 	firstChar := name[0]
 	if !((firstChar >= 'a' && firstChar <= 'z') ||
 		(firstChar >= 'A' && firstChar <= 'Z') ||
-		firstChar == '_' || firstChar == '$') {
+		firstChar == '_' || firstChar == '$' || firstChar > 127) {
 		return false
 	}
 
@@ -1340,7 +1344,7 @@ func isValidIdentifier(name string) bool {
 		if !((char >= 'a' && char <= 'z') ||
 			(char >= 'A' && char <= 'Z') ||
 			(char >= '0' && char <= '9') ||
-			char == '_' || char == '$') {
+			char == '_' || char == '$' || char > 127) {
 			return false
 		}
 	}
@@ -1360,7 +1364,7 @@ func isValidPropertyName(name string) bool {
 	firstChar := name[0]
 	if !((firstChar >= 'a' && firstChar <= 'z') ||
 		(firstChar >= 'A' && firstChar <= 'Z') ||
-		firstChar == '_' || firstChar == '$') {
+		firstChar == '_' || firstChar == '$' || firstChar > 127) {
 		return false
 	}
 
@@ -1370,7 +1374,7 @@ func isValidPropertyName(name string) bool {
 		if !((char >= 'a' && char <= 'z') ||
 			(char >= 'A' && char <= 'Z') ||
 			(char >= '0' && char <= '9') ||
-			char == '_' || char == '$') {
+			char == '_' || char == '$' || char > 127) {
 			return false
 		}
 	}
@@ -1381,6 +1385,8 @@ func isValidPropertyName(name string) bool {
 
 // isReservedKeyword checks if a string is a JavaScript/TypeScript reserved keyword
 func isReservedKeyword(name string) bool {
+	// Only include keywords that are ALWAYS reserved, not contextual keywords
+	// Contextual keywords like 'from', 'of', 'get', 'set', 'async', 'await' are valid as variable names
 	keywords := []string{
 		"break", "case", "catch", "class", "const", "continue", "debugger",
 		"default", "delete", "do", "else", "export", "extends", "finally",
@@ -1388,9 +1394,7 @@ func isReservedKeyword(name string) bool {
 		"new", "return", "super", "switch", "this", "throw", "try",
 		"typeof", "var", "void", "while", "with", "yield", "enum",
 		"implements", "interface", "package", "private", "protected",
-		"public", "static", "abstract", "as", "async", "await", "constructor",
-		"declare", "from", "get", "is", "module", "namespace", "of",
-		"require", "set",
+		"public", "static",
 	}
 
 	for _, keyword := range keywords {
@@ -2162,6 +2166,7 @@ func (tc *TypeChecker) loadTypeScriptLibs(libs []string) {
 		"es2018":       "lib.es2018.d.ts",
 		"es2019":       "lib.es2019.d.ts",
 		"es2020":       "lib.es2020.d.ts",
+		"es2020.intl":  "lib.es2020.intl.d.ts",
 		"es2021":       "lib.es2021.d.ts",
 		"es2022":       "lib.es2022.d.ts",
 		"es2023":       "lib.es2023.d.ts",
@@ -2178,7 +2183,18 @@ func (tc *TypeChecker) loadTypeScriptLibs(libs []string) {
 		if fileName, ok := libFileMap[libLower]; ok {
 			libFilePath := filepath.Join(typescriptLibPath, fileName)
 			if _, err := os.Stat(libFilePath); err == nil {
+				if os.Getenv("DEBUG_LIB_LOADING") == "1" {
+					fmt.Fprintf(os.Stderr, "Loading lib file: %s from %s\n", lib, libFilePath)
+				}
 				tc.loadLibFile(libFilePath)
+			} else {
+				if os.Getenv("DEBUG_LIB_LOADING") == "1" {
+					fmt.Fprintf(os.Stderr, "Lib file not found: %s (path: %s)\n", lib, libFilePath)
+				}
+			}
+		} else {
+			if os.Getenv("DEBUG_LIB_LOADING") == "1" {
+				fmt.Fprintf(os.Stderr, "No mapping for lib: %s\n", lib)
 			}
 		}
 	}
@@ -2754,6 +2770,31 @@ func (tc *TypeChecker) extractGlobalDeclarationFromLine(line string, lineIdx int
 
 				// Also add to global environment
 				tc.globalEnv.Objects[name] = types.Any
+			}
+		}
+	}
+
+	// Pattern: declare namespace NAME { ... }
+	// This is how Intl and other global namespaces are defined
+	if strings.HasPrefix(line, "declare namespace ") {
+		parts := strings.Fields(line)
+		if len(parts) >= 3 {
+			name := parts[2]
+			// Remove { if present
+			name = strings.TrimSuffix(name, "{")
+			name = strings.TrimSpace(name)
+
+			if name != "" && isValidIdentifier(name) {
+				// Register the namespace as a global object
+				tc.globalEnv.Objects[name] = types.Any
+
+				// Also add to symbol table
+				symbol := tc.symbolTable.DefineSymbol(name, symbols.VariableSymbol, nil, false)
+				symbol.FromDTS = true
+
+				if os.Getenv("DEBUG_LIB_LOADING") == "1" {
+					fmt.Fprintf(os.Stderr, "Extracted namespace: %s\n", name)
+				}
 			}
 		}
 	}
