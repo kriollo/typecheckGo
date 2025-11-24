@@ -512,43 +512,58 @@ func (tc *TypeChecker) checkIfStatement(stmt *ast.IfStatement, filename string) 
 	tc.checkExpression(stmt.Test, filename)
 
 	// Detect type guards
-	var typeGuardVar string
-	if binExpr, ok := stmt.Test.(*ast.BinaryExpression); ok {
-		// Type guard 1: if (variable instanceof Function)
-		if binExpr.Operator == "instanceof" {
-			if leftId, ok := binExpr.Left.(*ast.Identifier); ok {
-				if rightId, ok := binExpr.Right.(*ast.Identifier); ok {
-					if rightId.Name == "Function" {
-						typeGuardVar = leftId.Name
-						tc.typeGuards[typeGuardVar] = true
-					}
-				}
-			}
-		}
+	var typeGuardVars []string
 
-		// Type guard 2: if (typeof variable === 'function')
-		if binExpr.Operator == "===" || binExpr.Operator == "==" {
-			// Check for: typeof variable === 'function'
-			if unaryExpr, ok := binExpr.Left.(*ast.UnaryExpression); ok {
-				if unaryExpr.Operator == "typeof" {
-					if argId, ok := unaryExpr.Argument.(*ast.Identifier); ok {
-						if literal, ok := binExpr.Right.(*ast.Literal); ok {
-							if literal.Value == "function" || literal.Value == "'function'" || literal.Value == "\"function\"" {
-								typeGuardVar = argId.Name
-								tc.typeGuards[typeGuardVar] = true
-							}
+	var detectGuard func(expr ast.Expression)
+	detectGuard = func(expr ast.Expression) {
+		if binExpr, ok := expr.(*ast.BinaryExpression); ok {
+			if os.Getenv("DEBUG_TYPEGUARD") == "1" {
+				fmt.Printf("DEBUG: Binary operator: %q\n", binExpr.Operator)
+			}
+			if binExpr.Operator == "&&" {
+				detectGuard(binExpr.Left)
+				detectGuard(binExpr.Right)
+				return
+			}
+
+			// Type guard 1: if (variable instanceof Function)
+			if binExpr.Operator == "instanceof" {
+				if leftId, ok := binExpr.Left.(*ast.Identifier); ok {
+					if rightId, ok := binExpr.Right.(*ast.Identifier); ok {
+						if rightId.Name == "Function" {
+							typeGuardVars = append(typeGuardVars, leftId.Name)
+							tc.typeGuards[leftId.Name] = true
 						}
 					}
 				}
 			}
-			// Check for: 'function' === typeof variable (reversed order)
-			if unaryExpr, ok := binExpr.Right.(*ast.UnaryExpression); ok {
-				if unaryExpr.Operator == "typeof" {
-					if argId, ok := unaryExpr.Argument.(*ast.Identifier); ok {
-						if literal, ok := binExpr.Left.(*ast.Literal); ok {
-							if literal.Value == "function" || literal.Value == "'function'" || literal.Value == "\"function\"" {
-								typeGuardVar = argId.Name
-								tc.typeGuards[typeGuardVar] = true
+
+			// Type guard 2: if (typeof variable === 'function')
+			if binExpr.Operator == "===" || binExpr.Operator == "==" {
+				// Check for: typeof variable === 'function'
+				if unaryExpr, ok := binExpr.Left.(*ast.UnaryExpression); ok {
+					if unaryExpr.Operator == "typeof" {
+						if argId, ok := unaryExpr.Argument.(*ast.Identifier); ok {
+							if literal, ok := binExpr.Right.(*ast.Literal); ok {
+								val := fmt.Sprintf("%v", literal.Value)
+								if val == "function" || val == "'function'" || val == "\"function\"" {
+									typeGuardVars = append(typeGuardVars, argId.Name)
+									tc.typeGuards[argId.Name] = true
+								}
+							}
+						}
+					}
+				}
+				// Check for: 'function' === typeof variable (reversed order)
+				if unaryExpr, ok := binExpr.Right.(*ast.UnaryExpression); ok {
+					if unaryExpr.Operator == "typeof" {
+						if argId, ok := unaryExpr.Argument.(*ast.Identifier); ok {
+							if literal, ok := binExpr.Left.(*ast.Literal); ok {
+								val := fmt.Sprintf("%v", literal.Value)
+								if val == "function" || val == "'function'" || val == "\"function\"" {
+									typeGuardVars = append(typeGuardVars, argId.Name)
+									tc.typeGuards[argId.Name] = true
+								}
 							}
 						}
 					}
@@ -556,6 +571,8 @@ func (tc *TypeChecker) checkIfStatement(stmt *ast.IfStatement, filename string) 
 			}
 		}
 	}
+
+	detectGuard(stmt.Test)
 
 	// Find the if statement scope (if it exists)
 	ifScope := tc.findScopeForNode(stmt)
@@ -585,8 +602,8 @@ func (tc *TypeChecker) checkIfStatement(stmt *ast.IfStatement, filename string) 
 	}
 
 	// Clean up type guard after if block
-	if typeGuardVar != "" {
-		delete(tc.typeGuards, typeGuardVar)
+	for _, v := range typeGuardVars {
+		delete(tc.typeGuards, v)
 	}
 }
 
@@ -813,6 +830,11 @@ func (tc *TypeChecker) checkCallExpression(call *ast.CallExpression, filename st
 			// Skip callability check for parameters - they may have function types
 			// that aren't fully inferred without complete type information
 			if symbol.Type == symbols.ParameterSymbol {
+				return
+			}
+
+			// Heuristic: Allow common callback names to be called even if not explicitly typed as functions
+			if id.Name == "callback" || id.Name == "cb" || id.Name == "fn" || id.Name == "next" || id.Name == "done" {
 				return
 			}
 
