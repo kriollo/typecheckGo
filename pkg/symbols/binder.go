@@ -121,12 +121,6 @@ func (b *Binder) bindVariableDeclaration(decl *ast.VariableDeclaration) {
 
 			// Check if this is object destructuring pattern
 			idName := declarator.ID.Name
-
-			// Debug logging - print everything to see what we get
-			if os.Getenv("DEBUG_DESTRUCTURING") == "1" {
-				fmt.Printf("BINDER: Variable declaration: %q\n", idName)
-			}
-
 			if strings.HasPrefix(idName, "{") && strings.HasSuffix(idName, "}") {
 				// Extract individual properties from destructuring
 				propsStr := strings.TrimPrefix(idName, "{")
@@ -739,7 +733,6 @@ func (b *Binder) bindArrowFunction(arrow *ast.ArrowFunctionExpression) {
 	if os.Getenv("TSCHECK_DEBUG_SCOPE") == "1" {
 		debugFile, err := os.OpenFile("debug_scope.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if err == nil {
-			fmt.Fprintf(debugFile, "BINDER: Entered arrow function scope, level: %d, parent symbols: ", b.table.Current.Level)
 			if b.table.Current.Parent != nil {
 				for name := range b.table.Current.Parent.Symbols {
 					fmt.Fprintf(debugFile, "%s ", name)
