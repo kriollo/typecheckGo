@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"tstypechecker/pkg/ast"
 	"tstypechecker/pkg/symbols"
+	"tstypechecker/pkg/types"
 )
 
 // ImportResolver maneja la resolución de imports en el type checking
@@ -54,8 +55,12 @@ func (ir *ImportResolver) ResolveImport(importDecl *ast.ImportDeclaration) (map[
 		// Import por defecto: import foo from 'module'
 		if resolvedModule.DefaultExport != nil {
 			symbol := &symbols.Symbol{
-				Name: defaultSpecifier.Local.Name,
-				Node: resolvedModule.DefaultExport.Node,
+				Name:         defaultSpecifier.Local.Name,
+				Node:         resolvedModule.DefaultExport.Node,
+				ResolvedType: resolvedModule.DefaultExport.ResolvedType,
+				UpdateCache: func(t *types.Type) {
+					resolvedModule.DefaultExport.ResolvedType = t
+				},
 			}
 			importedSymbols[defaultSpecifier.Local.Name] = symbol
 		}
@@ -73,11 +78,15 @@ func (ir *ImportResolver) ResolveImport(importDecl *ast.ImportDeclaration) (map[
 			symbolType := ir.determineSymbolType(export.Node)
 
 			symbol := &symbols.Symbol{
-				Name:       spec.Local.Name,
-				Type:       symbolType,
-				Node:       export.Node,
-				DeclSpan:   export.Position,
-				IsFunction: symbolType == symbols.FunctionSymbol,
+				Name:         spec.Local.Name,
+				Type:         symbolType,
+				Node:         export.Node,
+				DeclSpan:     export.Position,
+				IsFunction:   symbolType == symbols.FunctionSymbol,
+				ResolvedType: export.ResolvedType,
+				UpdateCache: func(t *types.Type) {
+					export.ResolvedType = t
+				},
 			}
 
 			// If it's a function, extract parameter information

@@ -9,6 +9,7 @@ import (
 	"tstypechecker/pkg/ast"
 	"tstypechecker/pkg/parser"
 	"tstypechecker/pkg/symbols"
+	"tstypechecker/pkg/types"
 )
 
 // ModuleResolver maneja la resolución de módulos ES/TS
@@ -93,6 +94,9 @@ type ExportInfo struct {
 
 	// Módulo fuente para re-exports
 	SourceModule string
+
+	// Cached inferred type
+	ResolvedType *types.Type
 }
 
 // NewModuleResolver crea un nuevo resolver de módulos

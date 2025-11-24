@@ -2,24 +2,26 @@ package symbols
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"tstypechecker/pkg/ast"
+	"tstypechecker/pkg/types"
 )
 
 // Symbol represents a symbol in the symbol table
 type Symbol struct {
-	Name       string
-	Type       SymbolType
-	Node       ast.Node
-	Mutable    bool
-	Scope      *Scope
-	DeclSpan   ast.Position
-	Hoisted    bool
-	IsFunction bool
-	Params     []string
-	FromDTS    bool // True if this symbol was loaded from a .d.ts file
+	Name         string
+	Type         SymbolType
+	Node         ast.Node
+	Mutable      bool
+	Scope        *Scope
+	DeclSpan     ast.Position
+	Hoisted      bool
+	IsFunction   bool
+	Params       []string
+	FromDTS      bool // True if this symbol was loaded from a .d.ts file
+	ResolvedType *types.Type
+	UpdateCache  func(*types.Type)
 }
 
 // SymbolType represents the type of symbol
@@ -231,23 +233,7 @@ func (st *SymbolTable) CheckSymbolUsage(name string, usagePos ast.Position, expe
 // CheckFunctionCall checks if a function call is valid
 func (st *SymbolTable) CheckFunctionCall(name string, usagePos ast.Position, argCount int) bool {
 	// Debug logging for emit
-	if name == "emit" {
-		debugFile, err := os.OpenFile("debug_scope.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-		if err == nil {
-			fmt.Fprintf(debugFile, "CheckFunctionCall: Looking for '%s' at line %d, Current scope level: %d\n",
-				name, usagePos.Line, st.Current.Level)
-			scope := st.Current
-			for scope != nil {
-				fmt.Fprintf(debugFile, "  Scope level %d symbols: ", scope.Level)
-				for sname := range scope.Symbols {
-					fmt.Fprintf(debugFile, "%s ", sname)
-				}
-				fmt.Fprintf(debugFile, "\n")
-				scope = scope.Parent
-			}
-			debugFile.Close()
-		}
-	}
+	// Debug logging removed for performance
 
 	symbol, exists := st.ResolveSymbol(name)
 	if !exists {

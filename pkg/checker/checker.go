@@ -33,6 +33,8 @@ type TypeChecker struct {
 	loadedLibFiles     map[string]bool          // Track loaded lib files to avoid duplicates
 	pkgTypeCache       *TypeCache               // Cache for package types
 	loadStats          *LoadStats               // Statistics for type loading
+	lazyLibMap         map[string]string        // Map of global symbol name -> lib file name
+	typescriptLibPath  string                   // Path to TypeScript lib directory
 }
 
 // CompilerConfig holds the compiler options for type checking
@@ -90,6 +92,7 @@ func New() *TypeChecker {
 		typeGuards:         make(map[string]bool),
 		loadedLibFiles:     make(map[string]bool),
 		loadStats:          &LoadStats{},
+		lazyLibMap:         getCommonGlobalMap(),
 	}
 
 	return tc
@@ -141,6 +144,7 @@ func NewWithModuleResolver(rootDir string) *TypeChecker {
 		typeGuards:         make(map[string]bool),
 		pkgTypeCache:       NewTypeCache(rootDir),
 		loadStats:          NewLoadStats(),
+		lazyLibMap:         getCommonGlobalMap(),
 	}
 
 	// Load types in priority order:
@@ -771,6 +775,17 @@ func (tc *TypeChecker) checkIdentifier(id *ast.Identifier, filename string) {
 	}
 
 	// Check if it's a global object or type
+	if tc.globalEnv.HasGlobal(id.Name) {
+		return
+	}
+
+	// Lazy load global symbols if they are known
+	tc.ensureGlobalLoaded(id.Name)
+
+	// Retry resolution after loading
+	if _, exists := tc.symbolTable.ResolveSymbol(id.Name); exists {
+		return
+	}
 	if tc.globalEnv.HasGlobal(id.Name) {
 		return
 	}
@@ -1538,33 +1553,51 @@ func (tc *TypeChecker) processImportWithModule(importDecl *ast.ImportDeclaration
 
 		// If this is a type alias or interface, resolve its definition and cache it
 		if (symbol.Type == symbols.TypeAliasSymbol || symbol.Type == symbols.InterfaceSymbol) && symbol.Node != nil {
-			if typeAliasDecl, ok := symbol.Node.(*ast.TypeAliasDeclaration); ok {
-				// Resolve the type annotation
-				resolvedType := tc.convertTypeNode(typeAliasDecl.TypeAnnotation)
-				// Cache the resolved type so it can be found when referenced
-				tc.typeAliasCache[name] = resolvedType
-			} else if _, ok := symbol.Node.(*ast.InterfaceDeclaration); ok {
-				// For interfaces, create an object type placeholder
-				// In a full implementation, we would parse the interface body
-				tc.typeAliasCache[name] = types.NewObjectType(name, nil)
+			if symbol.ResolvedType != nil {
+				tc.typeAliasCache[name] = symbol.ResolvedType
+			} else {
+				if typeAliasDecl, ok := symbol.Node.(*ast.TypeAliasDeclaration); ok {
+					// Resolve the type annotation
+					resolvedType := tc.convertTypeNode(typeAliasDecl.TypeAnnotation)
+					// Cache the resolved type so it can be found when referenced
+					tc.typeAliasCache[name] = resolvedType
+					if symbol.UpdateCache != nil {
+						symbol.UpdateCache(resolvedType)
+					}
+				} else if _, ok := symbol.Node.(*ast.InterfaceDeclaration); ok {
+					// For interfaces, create an object type placeholder
+					// In a full implementation, we would parse the interface body
+					objType := types.NewObjectType(name, nil)
+					tc.typeAliasCache[name] = objType
+					if symbol.UpdateCache != nil {
+						symbol.UpdateCache(objType)
+					}
+				}
 			}
 		}
 
 		// If this is a variable (could be a function), infer its type and cache it
 		if symbol.Type == symbols.VariableSymbol && symbol.Node != nil {
-			// The node might be a VariableDeclaration (export const useXlsx = ...)
-			// We need to find the specific VariableDeclarator for this name
-			if varDecl, ok := symbol.Node.(*ast.VariableDeclaration); ok {
-				// Find the declarator with the matching name
-				for _, declarator := range varDecl.Decls {
-					if declarator.ID != nil && declarator.ID.Name == name {
-						// Found the right declarator, infer its type
-						if declarator.Init != nil {
-							inferredType := tc.inferencer.InferType(declarator.Init)
-							// Store in varTypeCache so it can be used when calling the function
-							tc.varTypeCache[name] = inferredType
+			if symbol.ResolvedType != nil {
+				tc.varTypeCache[name] = symbol.ResolvedType
+			} else {
+				// The node might be a VariableDeclaration (export const useXlsx = ...)
+				// We need to find the specific VariableDeclarator for this name
+				if varDecl, ok := symbol.Node.(*ast.VariableDeclaration); ok {
+					// Find the declarator with the matching name
+					for _, declarator := range varDecl.Decls {
+						if declarator.ID != nil && declarator.ID.Name == name {
+							// Found the right declarator, infer its type
+							if declarator.Init != nil {
+								inferredType := tc.inferencer.InferType(declarator.Init)
+								// Store in varTypeCache so it can be used when calling the function
+								tc.varTypeCache[name] = inferredType
+								if symbol.UpdateCache != nil {
+									symbol.UpdateCache(inferredType)
+								}
+							}
+							break
 						}
-						break
 					}
 				}
 			}
@@ -2181,6 +2214,9 @@ func (tc *TypeChecker) loadTypeScriptLibs(libs []string) {
 		}
 	}
 
+	// Store the path for lazy loading
+	tc.typescriptLibPath = typescriptLibPath
+
 	// Map of lib names to file names
 	libFileMap := map[string]string{
 		"es5":          "lib.es5.d.ts",
@@ -2212,14 +2248,6 @@ func (tc *TypeChecker) loadTypeScriptLibs(libs []string) {
 					fmt.Fprintf(os.Stderr, "Loading lib file: %s from %s\n", lib, libFilePath)
 				}
 				tc.loadLibFile(libFilePath)
-			} else {
-				if os.Getenv("DEBUG_LIB_LOADING") == "1" {
-					fmt.Fprintf(os.Stderr, "Lib file not found: %s (path: %s)\n", lib, libFilePath)
-				}
-			}
-		} else {
-			if os.Getenv("DEBUG_LIB_LOADING") == "1" {
-				fmt.Fprintf(os.Stderr, "No mapping for lib: %s\n", lib)
 			}
 		}
 	}
@@ -3082,6 +3110,9 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 				return resolvedType
 			}
 		}
+
+		// Lazy load if needed
+		tc.ensureGlobalLoaded(t.Name)
 
 		// Handle generic type alias instantiation
 		if symbol, exists := tc.symbolTable.ResolveSymbol(t.Name); exists && symbol.Type == symbols.TypeAliasSymbol {

@@ -57,6 +57,10 @@ func (ti *TypeInferencer) InferType(expr ast.Expression) *Type {
 		if cachedType, ok := ti.varTypeCache[e.Name]; ok {
 			return cachedType
 		}
+		// Check global environment
+		if globalType, exists := ti.globalEnv.Objects[e.Name]; exists {
+			return globalType
+		}
 		// If not found in cache, return Unknown
 		return Unknown
 	case *ast.BinaryExpression:
