@@ -157,28 +157,20 @@ func NewWithModuleResolver(rootDir string) *TypeChecker {
 	// 2. TypeScript lib files will be loaded when SetLibs is called
 	// 3. typeRoots will be loaded when SetTypeRoots is called
 
-	// Check if parallel loading is enabled for node_modules
-	if os.Getenv("TSCHECK_PARALLEL_LOAD") == "1" {
-		if tc.profiler.IsEnabled() {
-			tc.profiler.StartPhase("Node Modules Loading")
-		}
+	// Load types in priority order:
+	// 1. node_modules/@types (highest priority - installed type definitions)
+	// 2. TypeScript lib files will be loaded when SetLibs is called
+	// 3. typeRoots will be loaded when SetTypeRoots is called
 
-		parallelLoader := NewParallelLibLoader(tc)
-		parallelLoader.LoadNodeModulesTypesParallel(rootDir)
+	// Use sequential loading (parallel has race conditions with symbol table)
+	if tc.profiler.IsEnabled() {
+		tc.profiler.StartPhase("Node Modules Loading")
+	}
 
-		if tc.profiler.IsEnabled() {
-			tc.profiler.EndPhase("Node Modules Loading")
-		}
-	} else {
-		if tc.profiler.IsEnabled() {
-			tc.profiler.StartPhase("Node Modules Loading")
-		}
+	tc.loadNodeModulesTypes(rootDir)
 
-		tc.loadNodeModulesTypes(rootDir)
-
-		if tc.profiler.IsEnabled() {
-			tc.profiler.EndPhase("Node Modules Loading")
-		}
+	if tc.profiler.IsEnabled() {
+		tc.profiler.EndPhase("Node Modules Loading")
 	}
 
 	return tc
