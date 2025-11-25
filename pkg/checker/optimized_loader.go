@@ -125,19 +125,31 @@ func (oll *OptimizedLibLoader) LoadLibFileOptimized(filePath string) error {
 
 			// Fast path: Extract global variables
 			if strings.HasPrefix(trimmed, "declare const ") || strings.HasPrefix(trimmed, "declare var ") || strings.HasPrefix(trimmed, "declare let ") {
-				if name := extractVarName(trimmed); name != "" {
+				if name, typeName := extractVarName(trimmed); name != "" {
 					symbol := oll.tc.symbolTable.DefineSymbol(name, symbols.VariableSymbol, nil, false)
 					symbol.FromDTS = true
+
+					// If it's a constructor (e.g. Number: NumberConstructor), mark as function/callable
+					if strings.HasSuffix(typeName, "Constructor") {
+						symbol.IsFunction = true
+						// Also assign Any to ensure it's treated as callable by checkCallExpression
+						symbol.ResolvedType = types.Any
+					}
+
 					oll.tc.globalEnv.Objects[name] = types.Any
 				}
 			}
 
-			// Track interfaces with call signatures
+			// Track interfaces with call signatures and members
 			if strings.HasPrefix(trimmed, "interface ") || strings.HasPrefix(trimmed, "export interface ") {
 				interfaceName = extractInterfaceName(trimmed)
 				if interfaceName != "" {
 					inInterfaceBlock = true
 					hasCallSignature = false
+					// Create a new object type for this interface if it doesn't exist
+					if _, exists := oll.tc.globalEnv.Types[interfaceName]; !exists {
+						oll.tc.globalEnv.Types[interfaceName] = types.NewObjectType(interfaceName, make(map[string]*types.Type))
+					}
 					oll.globalInterfaces[interfaceName] = true
 				}
 			}
@@ -149,13 +161,36 @@ func (oll *OptimizedLibLoader) LoadLibFileOptimized(filePath string) error {
 					hasCallSignature = true
 				}
 
+				// Extract methods: name(...): Type
+				if methodName, isMethod := extractMethodName(trimmed); isMethod {
+					if typ, exists := oll.tc.globalEnv.Types[interfaceName]; exists && typ.Properties != nil {
+						// For now, just assign Any type to methods to avoid false positives
+						// In a full implementation, we would parse the return type
+						typ.Properties[methodName] = types.Any
+					}
+				}
+
+				// Extract properties: name: Type
+				if propName, isProp := extractPropertyName(trimmed); isProp {
+					if typ, exists := oll.tc.globalEnv.Types[interfaceName]; exists && typ.Properties != nil {
+						typ.Properties[propName] = types.Any
+					}
+				}
+
 				// End of interface
 				if blockDepth <= 0 && interfaceName != "" {
+					symbol := oll.tc.symbolTable.DefineSymbol(interfaceName, symbols.InterfaceSymbol, nil, false)
+					symbol.FromDTS = true
+
 					if hasCallSignature {
-						symbol := oll.tc.symbolTable.DefineSymbol(interfaceName, symbols.InterfaceSymbol, nil, false)
 						symbol.IsFunction = true
-						symbol.FromDTS = true
 					}
+
+					// Link the symbol to the type
+					if typ, exists := oll.tc.globalEnv.Types[interfaceName]; exists {
+						symbol.ResolvedType = typ
+					}
+
 					inInterfaceBlock = false
 					interfaceName = ""
 				}
@@ -233,20 +268,43 @@ func extractFunctionName(line string) string {
 	return ""
 }
 
-func extractVarName(line string) string {
-	// Extract from: declare const/var/let NAME: TYPE
+func extractVarName(line string) (string, string) {
+	// Extract from: declare const/var/let NAME: TYPE;
 	parts := strings.Fields(line)
 	if len(parts) >= 3 {
-		name := parts[2]
+		// Find the name part (usually index 2)
+		namePartIdx := 2
+
+		// Handle "declare var name" vs "declare var name: type"
+		name := parts[namePartIdx]
+		typeName := ""
+
+		// Check for colon in name part
 		if idx := strings.Index(name, ":"); idx != -1 {
+			if idx < len(name)-1 {
+				typeName = name[idx+1:]
+			} else if namePartIdx+1 < len(parts) {
+				typeName = parts[namePartIdx+1]
+			}
 			name = name[:idx]
+		} else if namePartIdx+1 < len(parts) && parts[namePartIdx+1] == ":" {
+			// name : type
+			if namePartIdx+2 < len(parts) {
+				typeName = parts[namePartIdx+2]
+			}
+		} else if namePartIdx+1 < len(parts) && strings.HasPrefix(parts[namePartIdx+1], ":") {
+			// name :type
+			typeName = parts[namePartIdx+1][1:]
 		}
+
 		name = strings.TrimSuffix(name, ";")
+		typeName = strings.TrimSuffix(typeName, ";")
+
 		if isValidIdentifier(name) {
-			return name
+			return name, typeName
 		}
 	}
-	return ""
+	return "", ""
 }
 
 func extractInterfaceName(line string) string {
@@ -266,6 +324,51 @@ func extractInterfaceName(line string) string {
 		}
 	}
 	return ""
+}
+
+func extractMethodName(line string) (string, bool) {
+	// Extract from: methodName(args): Type;
+	// Ignore if it starts with special chars or keywords
+	if strings.HasPrefix(line, "//") || strings.HasPrefix(line, "/*") {
+		return "", false
+	}
+
+	idx := strings.Index(line, "(")
+	if idx == -1 {
+		// Check for generic methods: method<T>(...)
+		idx = strings.Index(line, "<")
+	}
+
+	if idx != -1 {
+		name := strings.TrimSpace(line[:idx])
+		// Handle optional methods: method?()
+		name = strings.TrimSuffix(name, "?")
+
+		if isValidIdentifier(name) {
+			return name, true
+		}
+	}
+	return "", false
+}
+
+func extractPropertyName(line string) (string, bool) {
+	// Extract from: propName: Type;
+	// Ignore methods (handled above) and index signatures [key: type]
+	if strings.Contains(line, "(") || strings.HasPrefix(line, "[") {
+		return "", false
+	}
+
+	idx := strings.Index(line, ":")
+	if idx != -1 {
+		name := strings.TrimSpace(line[:idx])
+		// Handle optional properties: prop?: Type
+		name = strings.TrimSuffix(name, "?")
+
+		if isValidIdentifier(name) {
+			return name, true
+		}
+	}
+	return "", false
 }
 
 // LoadTypeScriptLibsOptimized loads TypeScript libs with maximum optimization
