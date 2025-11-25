@@ -52,7 +52,7 @@ func runParse(cmd *cobra.Command, args []string) error {
 			}
 			if !info.IsDir() && (strings.HasSuffix(path, ".ts") || strings.HasSuffix(path, ".tsx")) && !strings.Contains(path, "node_modules") {
 				fileCount++
-				fmt.Printf("Parsing file %d: %s\n", fileCount, path)
+				// fmt.Printf("Parsing file %d: %s\n", fileCount, path)
 				if err := parseFile(path); err != nil {
 					errorCount++
 					fmt.Printf("Parse error in %s: %v\n", path, err)
