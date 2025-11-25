@@ -245,153 +245,9 @@ func (tc *TypeChecker) checkFile(file *ast.File, filename string) {
 // Statement checking functions moved to checker_statements.go:
 // - checkStatement
 
-func (tc *TypeChecker) checkVariableDeclaration(decl *ast.VariableDeclaration, filename string) {
-	for _, declarator := range decl.Decls {
-		if declarator.ID != nil {
-			// Check if the identifier is valid
-			if !isValidIdentifier(declarator.ID.Name) {
-				tc.addError(filename, declarator.ID.Pos().Line, declarator.ID.Pos().Column,
-					fmt.Sprintf("Invalid identifier: '%s'", declarator.ID.Name), "TS1003", "error")
-			}
-
-			// Check for implicit any
-			if tc.GetConfig().NoImplicitAny {
-				// If no type annotation and no initializer, it's implicit any
-				if declarator.TypeAnnotation == nil && declarator.Init == nil {
-					tc.addError(filename, declarator.ID.Pos().Line, declarator.ID.Pos().Column,
-						fmt.Sprintf("Variable '%s' implicitly has an 'any' type.", declarator.ID.Name),
-						"TS7005", "error")
-				}
-			}
-
-			// Determine the declared type from type annotation
-			var declaredType *types.Type
-			if declarator.TypeAnnotation != nil {
-				declaredType = tc.convertTypeNode(declarator.TypeAnnotation)
-			}
-
-			// Infer type from initializer if present
-			if declarator.Init != nil {
-				tc.checkExpression(declarator.Init, filename)
-
-				// Infer the type of the initializer
-				inferredType := tc.inferencer.InferType(declarator.Init)
-
-				// Check if inferred type is 'any' and noImplicitAny is enabled
-				if tc.GetConfig().NoImplicitAny && inferredType.Kind == types.AnyType {
-					// Only report if there's no explicit type annotation
-					if declarator.TypeAnnotation == nil {
-						tc.addError(filename, declarator.ID.Pos().Line, declarator.ID.Pos().Column,
-							fmt.Sprintf("Variable '%s' implicitly has an 'any' type.", declarator.ID.Name),
-							"TS7005", "error")
-					}
-				}
-
-				// If there's a type annotation, check compatibility with initializer type
-				if declaredType != nil {
-					// Special handling for literal assignments to union types
-					typeToCheck := inferredType
-					if tc.needsLiteralType(declaredType) {
-						typeToCheck = tc.inferLiteralType(declarator.Init)
-					}
-
-					if !tc.isAssignableTo(typeToCheck, declaredType) {
-						tc.addError(filename, declarator.Init.Pos().Line, declarator.Init.Pos().Column,
-							fmt.Sprintf("Type '%s' is not assignable to type '%s'.", typeToCheck.String(), declaredType.String()),
-							"TS2322", "error")
-					}
-					// Store the declared type (not the inferred type) in the cache
-					tc.typeCache[declarator] = declaredType
-					tc.typeCache[declarator.ID] = declaredType
-					tc.varTypeCache[declarator.ID.Name] = declaredType
-				} else {
-					// No type annotation, store the inferred type
-					tc.typeCache[declarator] = inferredType
-					tc.typeCache[declarator.ID] = inferredType
-					tc.varTypeCache[declarator.ID.Name] = inferredType
-				}
-			} else if declarator.TypeAnnotation != nil {
-				// No initializer but has type annotation
-				tc.typeCache[declarator.ID] = declaredType
-				tc.varTypeCache[declarator.ID.Name] = declaredType
-			} else {
-				// No initializer and no type annotation - implicit any
-				tc.typeCache[declarator.ID] = types.Any
-				tc.varTypeCache[declarator.ID.Name] = types.Any
-			}
-		}
-	}
-}
-
-func (tc *TypeChecker) checkFunctionDeclaration(decl *ast.FunctionDeclaration, filename string) {
-	// Check if the function name is valid
-	if !isValidIdentifier(decl.ID.Name) {
-		tc.addError(filename, decl.ID.Pos().Line, decl.ID.Pos().Column,
-			fmt.Sprintf("Invalid function name: '%s'", decl.ID.Name), "TS1003", "error")
-	}
-
-	// Check if async function is used without Promise support
-	if decl.Async {
-		if !tc.globalEnv.HasGlobal("Promise") {
-			tc.addError(filename, decl.Pos().Line, decl.Pos().Column,
-				"An async function or method in ES5 requires the 'Promise' constructor.  Make sure you have a declaration for the 'Promise' constructor or include 'ES2015' in your '--lib' option.",
-				"TS2705", "error")
-		}
-	}
-
-	// Check parameter names and types
-	for _, param := range decl.Params {
-		if param.ID != nil {
-			if !isValidIdentifier(param.ID.Name) {
-				tc.addError(filename, param.ID.Pos().Line, param.ID.Pos().Column,
-					fmt.Sprintf("Invalid parameter name: '%s'", param.ID.Name), "TS1003", "error")
-			}
-
-			// Check for implicit any in parameters
-			if tc.GetConfig().NoImplicitAny && param.ParamType == nil {
-				tc.addError(filename, param.ID.Pos().Line, param.ID.Pos().Column,
-					fmt.Sprintf("Parameter '%s' implicitly has an 'any' type.", param.ID.Name),
-					"TS7006", "error")
-			}
-
-			// Store parameter type in varTypeCache if it has a type annotation
-			if param.ParamType != nil {
-				paramType := tc.convertTypeNode(param.ParamType)
-				if paramType != nil {
-					tc.varTypeCache[param.ID.Name] = paramType
-					tc.typeCache[param.ID] = paramType
-				}
-			}
-		}
-	}
-
-	// Check function body in the function's scope
-	if decl.Body != nil {
-		// Set current function for return type checking
-		previousFunction := tc.currentFunction
-		tc.currentFunction = decl
-
-		// Find the function scope
-		functionScope := tc.findScopeForNode(decl)
-		if functionScope != nil {
-			// Enter the function scope
-			originalScope := tc.symbolTable.Current
-			tc.symbolTable.Current = functionScope
-
-			// Check the body
-			tc.checkBlockStatement(decl.Body, filename)
-
-			// Restore the original scope
-			tc.symbolTable.Current = originalScope
-		} else {
-			// Fallback: check without scope change
-			tc.checkBlockStatement(decl.Body, filename)
-		}
-
-		// Restore previous function
-		tc.currentFunction = previousFunction
-	}
-}
+// Declaration checking functions moved to checker_declarations.go:
+// - checkVariableDeclaration
+// - checkFunctionDeclaration
 
 // Statement checking functions moved to checker_statements.go:
 // - checkBlockStatement
@@ -1428,40 +1284,8 @@ func (tc *TypeChecker) processImport(importDecl *ast.ImportDeclaration, filename
 // - checkBreakStatement
 // - checkContinueStatement
 
-// checkImportDeclaration checks import statements
-func (tc *TypeChecker) checkImportDeclaration(importDecl *ast.ImportDeclaration, filename string) {
-	if tc.moduleResolver == nil {
-		// If we don't have module resolution, just skip import checking
-		return
-	}
-
-	// Obtener el string del source
-	if importDecl.Source == nil {
-		return
-	}
-
-	sourceStr, ok := importDecl.Source.Value.(string)
-	if !ok || sourceStr == "" {
-		return
-	}
-
-	// Create an import resolver for this file
-	currentModule, err := tc.moduleResolver.ResolveModule(filename, "")
-	if err != nil {
-		// If we can't resolve the current module, we can't check imports
-		return
-	}
-
-	importResolver := modules.NewImportResolver(tc.moduleResolver, currentModule)
-
-	// Try to resolve the import
-	_, err = importResolver.ResolveImport(importDecl)
-	if err != nil {
-		tc.addError(filename, importDecl.Pos().Line, importDecl.Pos().Column,
-			fmt.Sprintf("Cannot find module '%s' or its corresponding type declarations", sourceStr),
-			"TS2307", "error")
-	}
-}
+// Declaration checking functions moved to checker_declarations.go:
+// - checkImportDeclaration
 
 // getExpressionType gets the type of an expression
 func (tc *TypeChecker) getExpressionType(expr ast.Expression) *types.Type {
@@ -1749,70 +1573,12 @@ func (tc *TypeChecker) isObjectAssignable(sourceType, targetType *types.Type) bo
 	return true
 }
 
-// checkExportDeclaration checks export statements
-func (tc *TypeChecker) checkExportDeclaration(exportDecl *ast.ExportDeclaration, filename string) {
-	// First, check the exported declaration itself (e.g., export default class, export class, etc.)
-	if exportDecl.Declaration != nil {
-		tc.checkStatement(exportDecl.Declaration, filename)
-	}
-
-	if tc.moduleResolver == nil {
-		// If we don't have module resolution, just skip export checking
-		return
-	}
-
-	// Solo verificar re-exports que tienen source
-	if exportDecl.Source == nil || len(exportDecl.Specifiers) == 0 {
-		return
-	}
-
-	sourceStr, ok := exportDecl.Source.Value.(string)
-	if !ok || sourceStr == "" {
-		return
-	}
-
-	// Create an import resolver for this file
-	currentModule, err := tc.moduleResolver.ResolveModule(filename, "")
-	if err != nil {
-		// If we can't resolve the current module, we can't check exports
-		return
-	}
-
-	importResolver := modules.NewImportResolver(tc.moduleResolver, currentModule)
-
-	// Check re-exports
-	err = importResolver.ResolveExport(exportDecl)
-	if err != nil {
-		tc.addError(filename, exportDecl.Pos().Line, exportDecl.Pos().Column,
-			fmt.Sprintf("Module '%s' has no exported member", sourceStr),
-			"TS2305", "error")
-	}
-}
-
-func (tc *TypeChecker) checkTypeAliasDeclaration(decl *ast.TypeAliasDeclaration, filename string) {
-	if decl.ID != nil {
-		if !isValidIdentifier(decl.ID.Name) {
-			tc.addError(filename, decl.ID.Pos().Line, decl.ID.Pos().Column,
-				fmt.Sprintf("Invalid type name: '%s'", decl.ID.Name), "TS1003", "error")
-		}
-
-		// For non-generic type aliases, resolve and cache them.
-		// Generic ones are resolved on instantiation.
-		if len(decl.TypeParameters) == 0 {
-			resolvedType := tc.convertTypeNode(decl.TypeAnnotation)
-			tc.typeAliasCache[decl.ID.Name] = resolvedType
-		}
-	}
-}
-
-func (tc *TypeChecker) checkInterfaceDeclaration(decl *ast.InterfaceDeclaration, filename string) {
-	// Interfaces are just declarations, no runtime checking needed
-	// We just verify the name is valid
-	if decl.ID != nil && !isValidIdentifier(decl.ID.Name) {
-		tc.addError(filename, decl.ID.Pos().Line, decl.ID.Pos().Column,
-			fmt.Sprintf("Invalid interface name: '%s'", decl.ID.Name), "TS1003", "error")
-	}
-}
+// Declaration checking functions moved to checker_declarations.go:
+// - checkExportDeclaration
+// - checkTypeAliasDeclaration
+// - checkInterfaceDeclaration
+// - checkClassDeclaration
+// - checkEnumDeclaration
 
 // SetConfig configures the type checker with compiler options
 func (tc *TypeChecker) SetConfig(config *CompilerConfig) {
@@ -1881,104 +1647,6 @@ func (tc *TypeChecker) GetConfig() *CompilerConfig {
 		tc.config = getDefaultConfig()
 	}
 	return tc.config
-}
-
-func (tc *TypeChecker) checkClassDeclaration(decl *ast.ClassDeclaration, filename string) {
-	// Check class name
-	if !isValidIdentifier(decl.ID.Name) {
-		tc.addError(filename, decl.ID.Pos().Line, decl.ID.Pos().Column,
-			fmt.Sprintf("Invalid class name: '%s'", decl.ID.Name), "TS1003", "error")
-	}
-
-	// Find the class scope
-	classScope := tc.findScopeForNode(decl)
-	if classScope == nil {
-		// If we can't find the scope, skip member checking
-		return
-	}
-
-	// Save current scope
-	originalScope := tc.symbolTable.Current
-
-	// Enter class scope
-	tc.symbolTable.Current = classScope
-
-	// Check members
-	for _, member := range decl.Body {
-		switch m := member.(type) {
-		case *ast.MethodDefinition:
-			// Check method
-			if m.Value != nil && m.Value.Body != nil {
-				// Find method scope
-				methodScope := tc.findScopeForNode(m)
-				if methodScope != nil {
-					// Set current function for return type checking
-					previousFunction := tc.currentFunction
-					tc.currentFunction = nil // Methods are not FunctionDeclaration
-
-					// Enter method scope
-					tc.symbolTable.Current = methodScope
-
-					tc.checkBlockStatement(m.Value.Body, filename)
-
-					// Restore class scope
-					tc.symbolTable.Current = classScope
-
-					tc.currentFunction = previousFunction
-				}
-			}
-
-		case *ast.PropertyDefinition:
-			// Check property initializer
-			if m.Value != nil {
-				tc.checkExpression(m.Value, filename)
-			}
-		}
-	}
-
-	// Restore original scope
-	tc.symbolTable.Current = originalScope
-}
-
-func (tc *TypeChecker) checkEnumDeclaration(decl *ast.EnumDeclaration, filename string) {
-	// Check enum name is valid
-	if decl.Name != nil && !isValidIdentifier(decl.Name.Name) {
-		tc.addError(filename, decl.Name.Pos().Line, decl.Name.Pos().Column,
-			fmt.Sprintf("Invalid enum name: '%s'", decl.Name.Name), "TS1003", "error")
-	}
-
-	// Check enum members
-	enumValues := make(map[string]bool)
-	for _, member := range decl.Members {
-		if member.Name == nil {
-			continue
-		}
-
-		// Check for duplicate member names
-		if enumValues[member.Name.Name] {
-			tc.addError(filename, member.Name.Pos().Line, member.Name.Pos().Column,
-				fmt.Sprintf("Duplicate enum member name: '%s'", member.Name.Name), "TS2300", "error")
-		}
-		enumValues[member.Name.Name] = true
-
-		// If member has an initializer, check it
-		if member.Value != nil {
-			tc.checkExpression(member.Value, filename)
-
-			// Enum members should be initialized with number or string literals
-			initType := tc.inferencer.InferType(member.Value)
-			if initType.Kind != types.NumberType && initType.Kind != types.StringType {
-				tc.addError(filename, member.Value.Pos().Line, member.Value.Pos().Column,
-					"Enum member must have initializer of type string or number", "TS1066", "error")
-			}
-		}
-	}
-
-	// Create enum type and cache it
-	if decl.Name != nil {
-		enumType := types.NewObjectType(decl.Name.Name, nil)
-		tc.typeAliasCache[decl.Name.Name] = enumType
-	}
 }
 
 func (tc *TypeChecker) checkNewExpression(expr *ast.NewExpression, filename string) {
