@@ -2087,7 +2087,7 @@ func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 		startPos := p.currentPos()
 		val := p.advanceWord()
 		return &ast.Literal{
-			Value:    val,
+			Value:    nil, // null should be nil, not the string "null"
 			Raw:      val,
 			Position: startPos,
 			EndPos:   p.currentPos(),
