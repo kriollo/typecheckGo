@@ -666,9 +666,12 @@ func (u *UnaryExpression) exprNode()     {}
 type MappedType struct {
 	TypeParameter *Identifier
 	Constraint    TypeNode
+	NameType      TypeNode // For remapping: [K in T as NewKey]
 	MappedType    TypeNode
 	Optional      bool // For { [K in T]?: U }
+	MinusOptional bool // For { [K in T]-?: U }
 	Readonly      bool // For { readonly [K in T]: U }
+	MinusReadonly bool // For { -readonly [K in T]: U }
 	Position      Position
 	EndPos        Position
 }

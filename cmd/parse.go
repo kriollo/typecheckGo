@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"tstypechecker/pkg/checker"
 	"tstypechecker/pkg/parser"
 
 	"github.com/spf13/cobra"
@@ -42,8 +43,8 @@ func runParse(cmd *cobra.Command, args []string) error {
 	}
 
 	start := time.Now()
-	var errorCount int
 	var fileCount int
+	var allErrors []checker.TypeError
 
 	if info.IsDir() {
 		err = filepath.Walk(absPath, func(path string, info os.FileInfo, err error) error {
@@ -52,19 +53,18 @@ func runParse(cmd *cobra.Command, args []string) error {
 			}
 			if !info.IsDir() && (strings.HasSuffix(path, ".ts") || strings.HasSuffix(path, ".tsx")) && !strings.Contains(path, "node_modules") {
 				fileCount++
-				// fmt.Printf("Parsing file %d: %s\n", fileCount, path)
-				if err := parseFile(path); err != nil {
-					errorCount++
-					fmt.Printf("Parse error in %s: %v\n", path, err)
+				_, parseErr := parser.ParseFile(path)
+				if parseErr != nil {
+					allErrors = append(allErrors, parseErrorToTypeError(path, parseErr))
 				}
 			}
 			return nil
 		})
 	} else {
 		fileCount = 1
-		if err := parseFile(absPath); err != nil {
-			errorCount++
-			fmt.Printf("Parse error in %s: %v\n", absPath, err)
+		_, parseErr := parser.ParseFile(absPath)
+		if parseErr != nil {
+			allErrors = append(allErrors, parseErrorToTypeError(absPath, parseErr))
 		}
 	}
 
@@ -73,17 +73,21 @@ func runParse(cmd *cobra.Command, args []string) error {
 	}
 
 	duration := time.Since(start)
-	fmt.Printf("\nParsed %d files in %v\n", fileCount, duration)
-	if errorCount > 0 {
-		fmt.Printf("Found %d parse errors.\n", errorCount)
-		os.Exit(1)
+
+	if len(allErrors) > 0 {
+		switch outputFormat {
+		case "json":
+			reportErrorsJSON(allErrors)
+		case "toon":
+			reportErrorsTOON(allErrors)
+		default:
+			reportErrorsWithContext("", allErrors)
+			fmt.Printf("\nParsed %d files in %v\n", fileCount, duration)
+		}
+		return fmt.Errorf("found %d parse errors", len(allErrors))
 	}
 
+	fmt.Printf("\nParsed %d files in %v\n", fileCount, duration)
 	fmt.Println("No parse errors found.")
 	return nil
-}
-
-func parseFile(filePath string) error {
-	_, err := parser.ParseFile(filePath)
-	return err
 }

@@ -4519,6 +4519,21 @@ func (p *parser) parseTypeAnnotationPrimary() (ast.TypeNode, error) {
 		}, nil
 	}
 
+	// unique keyword (for unique symbol)
+	if p.matchKeyword("unique") {
+		p.advanceWord()
+		p.skipWhitespaceAndComments()
+		// Expect symbol after unique
+		if p.matchKeyword("symbol") {
+			p.advanceWord()
+			return &ast.TypeReference{
+				Name:     "unique symbol",
+				Position: startPos,
+				EndPos:   p.currentPos(),
+			}, nil
+		}
+	}
+
 	// Primitive types
 	if p.matchKeyword("string", "number", "boolean", "any", "void", "null", "undefined", "never", "unknown", "object", "symbol", "bigint") {
 		typeName := p.advanceWord()
@@ -5275,7 +5290,6 @@ func (p *parser) parseObjectTypeLiteral() (ast.TypeNode, error) {
 	p.skipWhitespaceAndComments()
 
 	var members []ast.TypeMember
-
 	for !p.match("}") && !p.isAtEnd() {
 		memberStart := p.currentPos()
 
@@ -5285,17 +5299,6 @@ func (p *parser) parseObjectTypeLiteral() (ast.TypeNode, error) {
 			readonly = true
 			p.advanceWord()
 			p.skipWhitespaceAndComments()
-		}
-
-		// Parse property name
-		if !p.matchIdentifier() && !p.matchString() {
-			// Empty object type or trailing comma/semicolon
-			if p.match(";") || p.match(",") {
-				p.advance()
-				p.skipWhitespaceAndComments()
-				continue
-			}
-			break
 		}
 
 		var key *ast.Identifier

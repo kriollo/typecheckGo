@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"strconv"
 	"sync"
 	"time"
 
@@ -257,14 +259,7 @@ func checkDirectory(templateTc *checker.TypeChecker, dir string, tsConfig *confi
 				ast, parseErr := parser.ParseFile(path)
 				if parseErr != nil {
 					// Report parse error as a type error
-					results <- []checker.TypeError{{
-						File:     path,
-						Line:     1,
-						Column:   1,
-						Message:  fmt.Sprintf("Parse error: %v", parseErr),
-						Code:     "TS1005",
-						Severity: "error",
-					}}
+					results <- []checker.TypeError{parseErrorToTypeError(path, parseErr)}
 					continue
 				}
 
@@ -332,7 +327,18 @@ func checkFile(tc *checker.TypeChecker, filename string) error {
 	// Parse file
 	ast, err := parser.ParseFile(filename)
 	if err != nil {
-		return fmt.Errorf("parse error in %s: %w", filename, err)
+		// Report parse error as a type error instead of hard failing
+		errors := []checker.TypeError{parseErrorToTypeError(filename, err)}
+
+		if outputFormat == "json" {
+			reportErrorsJSON(errors)
+		} else if outputFormat == "toon" {
+			reportErrorsTOON(errors)
+		} else {
+			reportErrorsWithContext(filename, errors)
+			fmt.Printf("\n%sFinished in %dms.%s\n", colorGray, time.Since(startTime).Milliseconds(), colorReset)
+		}
+		return fmt.Errorf("type checking failed")
 	}
 
 	// Show AST if requested
@@ -433,7 +439,18 @@ func checkCodeInput(code string, name string) error {
 	// Parse code from string
 	ast, err := parser.ParseCode(code, name)
 	if err != nil {
-		return fmt.Errorf("parse error in %s: %w", name, err)
+		// Report parse error as a type error
+		errors := []checker.TypeError{parseErrorToTypeError(name, err)}
+
+		if outputFormat == "json" {
+			reportErrorsJSON(errors)
+		} else if outputFormat == "toon" {
+			reportErrorsTOON(errors)
+		} else {
+			reportErrorsWithContextFromCode(name, code, errors)
+			fmt.Printf("\n%sFinished in %dms.%s\n", colorGray, time.Since(startTime).Milliseconds(), colorReset)
+		}
+		return fmt.Errorf("type checking failed")
 	}
 
 	// Show AST if requested
@@ -468,6 +485,52 @@ func checkCodeInput(code string, name string) error {
 	// Success message
 	fmt.Printf("%s✓%s %s %s(%dms)%s\n", colorGreen, colorReset, name, colorGray, elapsedMs, colorReset)
 	return nil
+}
+
+// parseErrorToTypeError converts a parser error to a checker.TypeError with TS1005 code
+func parseErrorToTypeError(filename string, err error) checker.TypeError {
+	line := 1
+	column := 1
+
+	// Try to extract line and column from error message
+	// Expected formats:
+	// - "parser stuck at line %d, col %d..."
+	// - "... at %d:%d" (from ast.Position.String())
+
+	errMsg := err.Error()
+
+	// Regex for "at line X, col Y"
+	reLineCol := regexp.MustCompile(`line (\d+), col (\d+)`)
+	matches := reLineCol.FindStringSubmatch(errMsg)
+	if len(matches) == 3 {
+		if l, e := strconv.Atoi(matches[1]); e == nil {
+			line = l
+		}
+		if c, e := strconv.Atoi(matches[2]); e == nil {
+			column = c
+		}
+	} else {
+		// Regex for "at X:Y"
+		rePos := regexp.MustCompile(`at (\d+):(\d+)`)
+		matches = rePos.FindStringSubmatch(errMsg)
+		if len(matches) == 3 {
+			if l, e := strconv.Atoi(matches[1]); e == nil {
+				line = l
+			}
+			if c, e := strconv.Atoi(matches[2]); e == nil {
+				column = c
+			}
+		}
+	}
+
+	return checker.TypeError{
+		File:     filename,
+		Line:     line,
+		Column:   column,
+		Message:  fmt.Sprintf("Parse error: %v", err),
+		Code:     "TS1005",
+		Severity: "error",
+	}
 }
 
 func reportErrorsWithContextFromCode(filename string, code string, errors []checker.TypeError) {
