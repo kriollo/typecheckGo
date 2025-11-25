@@ -32,6 +32,7 @@ type TypeChecker struct {
 	loadStats          *LoadStats               // Statistics for type loading
 	lazyLibMap         map[string]string        // Map of global symbol name -> lib file name
 	typescriptLibPath  string                   // Path to TypeScript lib directory
+	profiler           *PerformanceProfiler     // Performance profiler for initialization
 }
 
 // CompilerConfig holds the compiler options for type checking
@@ -90,6 +91,7 @@ func New() *TypeChecker {
 		loadedLibFiles:     make(map[string]bool),
 		loadStats:          &LoadStats{},
 		lazyLibMap:         getCommonGlobalMap(),
+		profiler:           NewPerformanceProfiler(),
 	}
 
 	return tc
@@ -142,13 +144,42 @@ func NewWithModuleResolver(rootDir string) *TypeChecker {
 		pkgTypeCache:       NewTypeCache(rootDir),
 		loadStats:          NewLoadStats(),
 		lazyLibMap:         getCommonGlobalMap(),
+		profiler:           NewPerformanceProfiler(),
+	}
+
+	// Start profiling if enabled
+	if tc.profiler.IsEnabled() {
+		tc.profiler.Start()
 	}
 
 	// Load types in priority order:
 	// 1. node_modules/@types (highest priority - installed type definitions)
 	// 2. TypeScript lib files will be loaded when SetLibs is called
 	// 3. typeRoots will be loaded when SetTypeRoots is called
-	tc.loadNodeModulesTypes(rootDir)
+
+	// Check if parallel loading is enabled for node_modules
+	if os.Getenv("TSCHECK_PARALLEL_LOAD") == "1" {
+		if tc.profiler.IsEnabled() {
+			tc.profiler.StartPhase("Node Modules Loading")
+		}
+
+		parallelLoader := NewParallelLibLoader(tc)
+		parallelLoader.LoadNodeModulesTypesParallel(rootDir)
+
+		if tc.profiler.IsEnabled() {
+			tc.profiler.EndPhase("Node Modules Loading")
+		}
+	} else {
+		if tc.profiler.IsEnabled() {
+			tc.profiler.StartPhase("Node Modules Loading")
+		}
+
+		tc.loadNodeModulesTypes(rootDir)
+
+		if tc.profiler.IsEnabled() {
+			tc.profiler.EndPhase("Node Modules Loading")
+		}
+	}
 
 	return tc
 }
@@ -179,6 +210,7 @@ func NewWithSharedModuleResolver(resolver *modules.ModuleResolver) *TypeChecker 
 		pkgTypeCache:       NewTypeCache(resolver.GetRootDir()),
 		loadStats:          NewLoadStats(),
 		loadedLibFiles:     make(map[string]bool),
+		profiler:           NewPerformanceProfiler(),
 	}
 
 	// Note: Types are NOT loaded here to avoid redundant I/O in worker threads.
@@ -951,6 +983,17 @@ func (tc *TypeChecker) PrintLoadStats() {
 	if tc.loadStats != nil {
 		tc.loadStats.Finish()
 		fmt.Fprintln(os.Stderr, tc.loadStats.String())
+	}
+}
+
+// PrintProfileReport prints the detailed performance profile report
+func (tc *TypeChecker) PrintProfileReport() {
+	if tc.profiler != nil && tc.profiler.IsEnabled() {
+		tc.profiler.Finish()
+		report := tc.profiler.GenerateReport()
+		if report != "" {
+			fmt.Fprint(os.Stderr, report)
+		}
 	}
 }
 

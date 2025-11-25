@@ -10,6 +10,12 @@ import (
 // LoadTypeScriptLibsWithSnapshot loads TypeScript libs using binary snapshots for performance
 // This is a wrapper around the original loadTypeScriptLibs that adds snapshot support
 func (tc *TypeChecker) LoadTypeScriptLibsWithSnapshot(libs []string) {
+	// Start profiling if enabled
+	if tc.profiler.IsEnabled() {
+		tc.profiler.StartPhase("TypeScript Libs Loading")
+		defer tc.profiler.EndPhase("TypeScript Libs Loading")
+	}
+
 	// Get root directory
 	var rootDir string
 	if tc.moduleResolver != nil {
@@ -42,16 +48,32 @@ func (tc *TypeChecker) LoadTypeScriptLibsWithSnapshot(libs []string) {
 
 	if snapshotMgr.SnapshotExists(snapshotPath) {
 		// Load from snapshot (fast path - should be ~50-100ms)
+		if tc.profiler.IsEnabled() {
+			tc.profiler.StartSubPhase("TypeScript Libs Loading", "Load from Snapshot")
+		}
+
 		if loadErr := snapshotMgr.LoadSnapshot(tc, snapshotPath); loadErr == nil {
+			if tc.profiler.IsEnabled() {
+				tc.profiler.EndSubPhase("TypeScript Libs Loading", "Load from Snapshot")
+				tc.profiler.RecordCacheHit("TypeScript Libs Loading")
+			}
 			if os.Getenv("DEBUG_LIB_LOADING") == "1" {
 				fmt.Fprintf(os.Stderr, "✓ Loaded TypeScript libs from snapshot cache\n")
 			}
 			return
 		} else {
 			// If snapshot loading fails, fall through to normal loading
+			if tc.profiler.IsEnabled() {
+				tc.profiler.EndSubPhase("TypeScript Libs Loading", "Load from Snapshot")
+				tc.profiler.RecordCacheMiss("TypeScript Libs Loading")
+			}
 			if os.Getenv("DEBUG_LIB_LOADING") == "1" {
 				fmt.Fprintf(os.Stderr, "⚠ Snapshot loading failed: %v, falling back to normal loading\n", loadErr)
 			}
+		}
+	} else {
+		if tc.profiler.IsEnabled() {
+			tc.profiler.RecordCacheMiss("TypeScript Libs Loading")
 		}
 	}
 
@@ -60,8 +82,33 @@ func (tc *TypeChecker) LoadTypeScriptLibsWithSnapshot(libs []string) {
 		fmt.Fprintf(os.Stderr, "→ No snapshot found, loading libs normally (this will take a few seconds)...\n")
 	}
 
-	// Use the original method to load libs
-	tc.loadTypeScriptLibs(libs)
+	// Check if parallel loading is enabled
+	useParallel := os.Getenv("TSCHECK_PARALLEL_LOAD") == "1"
+
+	if useParallel {
+		// Use parallel loading for better performance
+		if tc.profiler.IsEnabled() {
+			tc.profiler.StartSubPhase("TypeScript Libs Loading", "Parallel Load")
+		}
+
+		parallelLoader := NewParallelLibLoader(tc)
+		parallelLoader.LoadTypeScriptLibsParallel(libs, typescriptLibPath)
+
+		if tc.profiler.IsEnabled() {
+			tc.profiler.EndSubPhase("TypeScript Libs Loading", "Parallel Load")
+		}
+	} else {
+		// Use the original sequential method
+		if tc.profiler.IsEnabled() {
+			tc.profiler.StartSubPhase("TypeScript Libs Loading", "Sequential Load")
+		}
+
+		tc.loadTypeScriptLibs(libs)
+
+		if tc.profiler.IsEnabled() {
+			tc.profiler.EndSubPhase("TypeScript Libs Loading", "Sequential Load")
+		}
+	}
 
 	// Save snapshot for next time (in background to not slow down current run)
 	go func() {

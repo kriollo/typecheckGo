@@ -112,6 +112,11 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		defer typeChecker.PrintLoadStats()
 	}
 
+	// Show detailed performance profile (only when TSCHECK_PROFILE=1)
+	if os.Getenv("TSCHECK_PROFILE") == "1" {
+		defer typeChecker.PrintProfileReport()
+	}
+
 	// Process files
 	if info.IsDir() {
 		return checkDirectory(typeChecker, absPath, tsConfig, initDuration)
