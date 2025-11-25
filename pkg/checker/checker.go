@@ -360,6 +360,16 @@ func (tc *TypeChecker) checkAssignmentExpression(assign *ast.AssignmentExpressio
 		leftType := tc.getExpressionType(assign.Left)
 		rightType := tc.inferencer.InferType(assign.Right)
 
+		// Special case: Allow assigning to new or flexible properties on object literals
+		// This handles patterns like: const init = {}; init.body = data;
+		if _, ok := assign.Left.(*ast.MemberExpression); ok {
+			// If leftType is Any/null/undefined, it means the property doesn't exist yet or is flexible
+			// In this case, we allow the assignment without strict type checking
+			if leftType.Kind == types.AnyType || leftType.Kind == types.NullType || leftType.Kind == types.UndefinedType {
+				return
+			}
+		}
+
 		// Check if right is assignable to left
 		if !tc.isAssignableTo(rightType, leftType) {
 			// Build a more descriptive error message
