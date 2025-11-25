@@ -140,6 +140,17 @@ func (oll *OptimizedLibLoader) LoadLibFileOptimized(filePath string) error {
 				}
 			}
 
+			// Fast path: Extract type aliases
+			if strings.HasPrefix(trimmed, "type ") || strings.HasPrefix(trimmed, "export type ") {
+				if name := extractTypeAliasName(trimmed); name != "" {
+					symbol := oll.tc.symbolTable.DefineSymbol(name, symbols.TypeAliasSymbol, nil, false)
+					symbol.FromDTS = true
+					// Assign Any to avoid false positives with utility types like Partial, Pick, etc.
+					oll.tc.globalEnv.Types[name] = types.Any
+					symbol.ResolvedType = types.Any
+				}
+			}
+
 			// Track interfaces with call signatures and members
 			if strings.HasPrefix(trimmed, "interface ") || strings.HasPrefix(trimmed, "export interface ") {
 				interfaceName = extractInterfaceName(trimmed)
@@ -307,6 +318,29 @@ func extractVarName(line string) (string, string) {
 	return "", ""
 }
 
+func extractTypeAliasName(line string) string {
+	// Extract from: type NAME = ... or export type NAME = ...
+	parts := strings.Fields(line)
+	for i, part := range parts {
+		if part == "type" && i+1 < len(parts) {
+			name := parts[i+1]
+			// Handle generics: type Name<T> = ...
+			if idx := strings.Index(name, "<"); idx != -1 {
+				name = name[:idx]
+			}
+			// Handle assignment: type Name = ...
+			if idx := strings.Index(name, "="); idx != -1 {
+				name = name[:idx]
+			}
+			name = strings.TrimSpace(name)
+			if isValidIdentifier(name) {
+				return name
+			}
+		}
+	}
+	return ""
+}
+
 func extractInterfaceName(line string) string {
 	// Extract from: interface NAME { or export interface NAME {
 	parts := strings.Fields(line)
@@ -404,6 +438,20 @@ func (oll *OptimizedLibLoader) LoadTypeScriptLibsOptimized(libs []string, typesc
 				if err := oll.LoadLibFileOptimized(libFilePath); err != nil {
 					return err
 				}
+			}
+		}
+	}
+
+	// Safety net: Ensure common globals are defined if missed
+	commonGlobals := []string{"Intl", "console", "window", "document", "setTimeout", "clearTimeout", "setInterval", "clearInterval", "process", "module", "require"}
+	for _, name := range commonGlobals {
+		if _, exists := oll.tc.globalEnv.Objects[name]; !exists {
+			// Check if it exists in symbol table but not in Objects (e.g. namespace)
+			if sym, ok := oll.tc.symbolTable.ResolveSymbol(name); !ok || sym == nil {
+				symbol := oll.tc.symbolTable.DefineSymbol(name, symbols.VariableSymbol, nil, false)
+				symbol.FromDTS = true
+				symbol.ResolvedType = types.Any
+				oll.tc.globalEnv.Objects[name] = types.Any
 			}
 		}
 	}

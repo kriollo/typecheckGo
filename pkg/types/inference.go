@@ -305,6 +305,12 @@ func (ti *TypeInferencer) inferArrowFunctionType(arrow *ast.ArrowFunctionExpress
 	// Infer return type by analyzing the function body
 	returnType := ti.inferArrowFunctionReturnType(arrow)
 
+	// If it's an async function, the return type is a Promise
+	// For now, we return Any to allow .then() and await, as we don't have full Promise<T> support yet
+	if arrow.Async {
+		returnType = Any
+	}
+
 	return NewFunctionType(params, returnType)
 }
 
