@@ -139,6 +139,11 @@ func (ti *TypeInferencer) inferCallExpressionType(call *ast.CallExpression) *Typ
 		return calleeType.ReturnType
 	}
 
+	// If callee is Any, return Any
+	if calleeType.Kind == AnyType {
+		return Any
+	}
+
 	// If the callee is an identifier, try to find the function definition
 	if id, ok := call.Callee.(*ast.Identifier); ok {
 		// Check if we have the variable in cache

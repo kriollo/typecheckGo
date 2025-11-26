@@ -518,27 +518,42 @@ func (p *parser) parseInterfaceDeclaration() (ast.Declaration, error) {
 
 		// Check for call signature: (args): Type
 		if p.match("(") {
-			// Skip call signature
-			depth := 1
-			p.advance()
-			for depth > 0 && !p.isAtEnd() {
-				if p.match("(") {
-					depth++
-				} else if p.match(")") {
-					depth--
-				}
-				p.advance()
+			callSigStart := p.currentPos()
+
+			// Parse parameters
+			params, err := p.parseCallParameters()
+			if err != nil {
+				return nil, err
 			}
+
 			p.skipWhitespaceAndComments()
+
+			var returnType ast.TypeNode
 			if p.match(":") {
 				p.advance()
 				p.skipWhitespaceAndComments()
-				p.skipTypeAnnotation()
+				returnType, err = p.parseTypeAnnotationFull()
+				if err != nil {
+					return nil, err
+				}
+			} else {
+				// Default return type is any? or void?
+				// For now, let's assume any if missing (though TS requires it usually)
+				// Or maybe it's a method shorthand without name?
+				// But interface call signature usually requires return type
 			}
+
 			p.skipWhitespaceAndComments()
 			if p.match(";") || p.match(",") {
 				p.advance()
 			}
+
+			members = append(members, &ast.CallSignature{
+				Parameters: params,
+				ReturnType: returnType,
+				Position:   callSigStart,
+				EndPos:     p.currentPos(),
+			})
 			p.skipWhitespaceAndComments()
 			continue
 		}

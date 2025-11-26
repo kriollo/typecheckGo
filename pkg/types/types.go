@@ -32,6 +32,7 @@ const (
 	ConditionalType
 	TemplateLiteralType
 	IndexedAccessType
+	RestType
 )
 
 func (tk TypeKind) String() string {
@@ -89,15 +90,16 @@ func (tk TypeKind) String() string {
 
 // Type representa un tipo en el sistema de tipos
 type Type struct {
-	Kind        TypeKind
-	Name        string
-	Properties  map[string]*Type
-	ElementType *Type       // Para arrays
-	Parameters  []*Type     // Para funciones y type parameters
-	ReturnType  *Type       // Para funciones
-	Types       []*Type     // Para unions/intersections
-	Value       interface{} // Para literal types
-	IsFunction  bool        // Indica si el tipo es una función callable
+	Kind           TypeKind
+	Name           string
+	Properties     map[string]*Type
+	ElementType    *Type       // Para arrays
+	Parameters     []*Type     // Para funciones y type parameters
+	ReturnType     *Type       // Para funciones
+	Types          []*Type     // Para unions/intersections
+	Value          interface{} // Para literal types
+	CallSignatures []*Type     // Para interfaces con call signatures
+	IsFunction     bool        // Indica si el tipo es una función callable
 
 	// Para mapped types: { [K in keyof T]: U }
 	TypeParameter *Type // K
@@ -242,6 +244,14 @@ func NewTypeParameter(name string, constraint *Type, defaultType *Type) *Type {
 	}
 }
 
+// NewRestType crea un rest type (...T)
+func NewRestType(elemType *Type) *Type {
+	return &Type{
+		Kind:        RestType,
+		ElementType: elemType,
+	}
+}
+
 // String retorna una representación en string del tipo
 func (t *Type) String() string {
 	if t == nil {
@@ -326,6 +336,9 @@ func (t *Type) String() string {
 		}
 		return t.Name
 
+	case RestType:
+		return "..." + t.ElementType.String()
+
 	case ObjectType:
 		if t.Name != "" {
 			return t.Name
@@ -400,9 +413,31 @@ func (t *Type) IsAssignableTo(target *Type) bool {
 		return true
 	}
 
-	// Functions - simplificado por ahora
-	if t.Kind == FunctionType && target.Kind == FunctionType {
-		return true // TODO: implementar contravariance/covariance
+	// Tuples
+	if t.Kind == TupleType && target.Kind == TupleType {
+		if len(t.Types) != len(target.Types) {
+			return false
+		}
+		for i := range t.Types {
+			if !t.Types[i].IsAssignableTo(target.Types[i]) {
+				return false
+			}
+		}
+		return true
+	}
+
+	// Functions
+	if t.Kind == FunctionType {
+		if target.Kind == FunctionType {
+			return true // TODO: implementar contravariance/covariance
+		}
+		// Function assignable to Interface with Call Signature
+		if target.Kind == ObjectType && len(target.CallSignatures) > 0 {
+			// Check if function matches at least one call signature
+			// For now, just return true if there are call signatures
+			// In a real implementation, we should check parameters and return type
+			return true
+		}
 	}
 
 	return false

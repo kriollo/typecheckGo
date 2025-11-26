@@ -4748,6 +4748,7 @@ func (p *parser) parseTypeAnnotationPrimary() (ast.TypeNode, error) {
 		var elements []ast.TypeNode
 		for !p.match("]") && !p.isAtEnd() {
 			if p.match("...") {
+				restStartPos := p.currentPos()
 				p.advanceString(3)
 				p.skipWhitespaceAndComments()
 				// Parse the array type after ...
@@ -4755,10 +4756,13 @@ func (p *parser) parseTypeAnnotationPrimary() (ast.TypeNode, error) {
 				if err != nil {
 					return nil, err
 				}
-				// Wrap in a RestType or similar if we had it, but for now just append
-				// We might want to mark it as rest in the AST if we had a specific node for it
-				// For now, let's just parse it to avoid the error
-				elements = append(elements, elem)
+				// Wrap in a RestType
+				restElem := &ast.RestType{
+					TypeAnnotation: elem,
+					Position:       restStartPos,
+					EndPos:         elem.End(),
+				}
+				elements = append(elements, restElem)
 			} else {
 				elem, err := p.parseTypeAnnotationFull()
 				if err != nil {

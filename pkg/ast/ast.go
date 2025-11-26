@@ -259,6 +259,7 @@ type InterfaceProperty struct {
 	Key      *Identifier
 	Value    TypeNode
 	Optional bool
+	Readonly bool
 	Position Position
 	EndPos   Position
 }
@@ -266,6 +267,32 @@ type InterfaceProperty struct {
 func (i InterfaceProperty) Type() string  { return "InterfaceProperty" }
 func (i InterfaceProperty) Pos() Position { return i.Position }
 func (i InterfaceProperty) End() Position { return i.EndPos }
+
+// TypeMember represents a member of an interface or type literal
+type TypeMember interface {
+	Type() string
+	Pos() Position
+	End() Position
+}
+
+// Ensure InterfaceProperty implements TypeMember
+func (i InterfaceProperty) typeMember() {}
+
+// CallSignature represents a call signature in an interface: (args): Type
+type CallSignature struct {
+	Parameters []Parameter
+	ReturnType TypeNode
+	Position   Position
+	EndPos     Position
+}
+
+func (c *CallSignature) Type() string  { return "CallSignature" }
+func (c *CallSignature) Pos() Position { return c.Position }
+func (c *CallSignature) End() Position { return c.EndPos }
+func (c *CallSignature) typeMember()   {}
+
+// PropertySignature is an alias for InterfaceProperty for consistency
+type PropertySignature = InterfaceProperty
 
 // ModuleDeclaration represents an ambient module declaration (declare module 'name' { ... })
 type ModuleDeclaration struct {
@@ -436,6 +463,18 @@ func (t *TupleType) Pos() Position { return t.Position }
 func (t *TupleType) End() Position { return t.EndPos }
 func (t *TupleType) typeNode()     {}
 
+// RestType represents a rest element in a tuple or parameter list (...T)
+type RestType struct {
+	TypeAnnotation TypeNode
+	Position       Position
+	EndPos         Position
+}
+
+func (r *RestType) Type() string  { return "RestType" }
+func (r *RestType) Pos() Position { return r.Position }
+func (r *RestType) End() Position { return r.EndPos }
+func (r *RestType) typeNode()     {}
+
 // LiteralType represents a literal type like 'foo' or 42
 type LiteralType struct {
 	Value    interface{}
@@ -473,20 +512,6 @@ func (o *ObjectTypeLiteral) Type() string  { return "ObjectTypeLiteral" }
 func (o *ObjectTypeLiteral) Pos() Position { return o.Position }
 func (o *ObjectTypeLiteral) End() Position { return o.EndPos }
 func (o *ObjectTypeLiteral) typeNode()     {}
-
-// TypeMember represents a member in an object type literal
-type TypeMember struct {
-	Key       *Identifier
-	ValueType TypeNode
-	Optional  bool
-	Readonly  bool
-	Position  Position
-	EndPos    Position
-}
-
-func (tm *TypeMember) Type() string  { return "TypeMember" }
-func (tm *TypeMember) Pos() Position { return tm.Position }
-func (tm *TypeMember) End() Position { return tm.EndPos }
 
 // ArrayExpression represents an array literal [1, 2, 3]
 type ArrayExpression struct {

@@ -1777,38 +1777,43 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 		tc.ensureGlobalLoaded(t.Name)
 
 		// Handle generic type alias instantiation
-		if symbol, exists := tc.symbolTable.ResolveSymbol(t.Name); exists && symbol.Type == symbols.TypeAliasSymbol {
-			if symbol.Node == nil {
-				// Built-in type alias without AST node (e.g. Record)
-				// TODO: Implement proper built-in type handling
-				return types.Any
-			}
-			aliasDecl := symbol.Node.(*ast.TypeAliasDeclaration)
-
-			// Create substitution map
-			substitutions := make(map[string]*types.Type)
-			for i, param := range aliasDecl.TypeParameters {
-				if i < len(t.TypeArguments) {
-					argType := tc.convertTypeNode(t.TypeArguments[i])
-					// TypeParameters have a Name field of type *Identifier
-					if typeParam, ok := param.(*ast.TypeParameter); ok {
-						substitutions[typeParam.Name.Name] = argType
-					} else if typeRef, ok := param.(*ast.TypeReference); ok {
-						// Fallback for TypeReference (shouldn't happen for type parameters)
-						substitutions[typeRef.Name] = argType
+		if symbol, exists := tc.symbolTable.ResolveSymbol(t.Name); exists {
+			if symbol.Type == symbols.TypeAliasSymbol {
+				if symbol.Node == nil {
+					return types.Any
+				}
+				aliasDecl := symbol.Node.(*ast.TypeAliasDeclaration)
+				// ... (existing logic for TypeAlias) ...
+				// Create substitution map
+				substitutions := make(map[string]*types.Type)
+				for i, param := range aliasDecl.TypeParameters {
+					if i < len(t.TypeArguments) {
+						argType := tc.convertTypeNode(t.TypeArguments[i])
+						if typeParam, ok := param.(*ast.TypeParameter); ok {
+							substitutions[typeParam.Name.Name] = argType
+						} else if typeRef, ok := param.(*ast.TypeReference); ok {
+							substitutions[typeRef.Name] = argType
+						}
 					}
 				}
-			}
+				annotationType := tc.convertTypeNode(aliasDecl.TypeAnnotation)
+				resolvedType := tc.substituteType(annotationType, substitutions)
+							// Assuming p is Identifier or Parameter
+							// We need to extract type annotation from parameter
+							// But ast.Parameter structure depends on AST definition
+							// For now, assume Any for params if complex
+							params[i] = types.Any
+							// TODO: extract actual param types
+						}
+						returnType := tc.convertTypeNode(m.ReturnType)
+						callSignatures = append(callSignatures, types.NewFunctionType(params, returnType))
+					}
+				}
 
-			// Substitute in the alias's type annotation
-			annotationType := tc.convertTypeNode(aliasDecl.TypeAnnotation)
-			resolvedType := tc.substituteType(annotationType, substitutions)
-
-			// Evaluate if it's a conditional type
-			if resolvedType.Kind == types.ConditionalType {
-				return tc.evaluateConditionalType(resolvedType)
+				objType := types.NewObjectType(t.Name, properties)
+				objType.CallSignatures = callSignatures
+				return objType
 			}
-			return resolvedType
 		}
 
 		// Handle basic type references
@@ -1884,6 +1889,10 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 			intersectionTypes = append(intersectionTypes, tc.convertTypeNode(typ))
 		}
 		return types.NewIntersectionType(intersectionTypes)
+
+	case *ast.RestType:
+		elemType := tc.convertTypeNode(t.TypeAnnotation)
+		return types.NewRestType(elemType)
 
 	case *ast.LiteralType:
 		return types.NewLiteralType(t.Value)
@@ -1987,6 +1996,24 @@ func (tc *TypeChecker) substituteType(t *types.Type, substitutions map[string]*t
 			intersectionTypes[i] = tc.substituteType(it, substitutions)
 		}
 		return types.NewIntersectionType(intersectionTypes)
+	case types.TupleType:
+		var newElements []*types.Type
+		for _, elem := range t.Types {
+			if elem.Kind == types.RestType {
+				substitutedRest := tc.substituteType(elem.ElementType, substitutions)
+				// Flatten tuple types inside rest
+				if substitutedRest.Kind == types.TupleType {
+					newElements = append(newElements, substitutedRest.Types...)
+				} else {
+					newElements = append(newElements, types.NewRestType(substitutedRest))
+				}
+			} else {
+				newElements = append(newElements, tc.substituteType(elem, substitutions))
+			}
+		}
+		return &types.Type{Kind: types.TupleType, Types: newElements}
+	case types.RestType:
+		return types.NewRestType(tc.substituteType(t.ElementType, substitutions))
 	case types.ObjectType:
 		// For object types, substitute type parameters in properties
 		if t.Properties != nil {
