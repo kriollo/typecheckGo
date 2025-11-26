@@ -214,7 +214,7 @@ func (ti *TypeInferencer) inferLiteralType(lit *ast.Literal) *Type {
 
 	switch v := lit.Value.(type) {
 	case bool:
-		return Boolean
+		return NewLiteralType(v)
 	case string:
 		// Check if it's actually a number stored as a string
 		if len(lit.Raw) > 0 {

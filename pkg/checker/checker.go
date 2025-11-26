@@ -546,9 +546,19 @@ func (tc *TypeChecker) checkCallExpression(call *ast.CallExpression, filename st
 			}
 
 			if !symbol.IsFunction && !isUnderTypeGuard {
-				msg := fmt.Sprintf("This expression is not callable. Type '%s' has no call signatures.", id.Name)
-				msg += "\n  Sugerencia: Verifica que estés llamando a una función y no a una variable"
-				tc.addError(filename, call.Pos().Line, call.Pos().Column, msg, "TS2349", "error")
+				// Check if the inferred type is a function or any
+				// This handles cases where IsFunction flag wasn't set but type inference knows it's callable
+				// (e.g. result of .bind(), or variable with function type)
+				symbolType := tc.getExpressionType(call.Callee)
+				isCallable := symbolType.Kind == types.FunctionType ||
+					symbolType.Kind == types.AnyType ||
+					(symbolType.Kind == types.ObjectType && len(symbolType.CallSignatures) > 0)
+
+				if !isCallable {
+					msg := fmt.Sprintf("This expression is not callable. Type '%s' has no call signatures.", id.Name)
+					msg += "\n  Sugerencia: Verifica que estés llamando a una función y no a una variable"
+					tc.addError(filename, call.Pos().Line, call.Pos().Column, msg, "TS2349", "error")
+				}
 			} else {
 				// Check parameter count
 				// Skip validation for symbols from .d.ts files (they may have complex overloads)
