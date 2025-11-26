@@ -1794,6 +1794,29 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 			return types.NewArrayType(elementType)
 		}
 
+		// Handle keyof operator (parsed as TypeReference with name starting with "keyof ")
+		if strings.HasPrefix(t.Name, "keyof ") {
+			typeName := strings.TrimPrefix(t.Name, "keyof ")
+			if symbol, exists := tc.symbolTable.ResolveSymbol(typeName); exists {
+				if symbol.Type == symbols.InterfaceSymbol && symbol.Node != nil {
+					if interfaceDecl, ok := symbol.Node.(*ast.InterfaceDeclaration); ok {
+						// Create a union of string literals for each property key
+						var unionTypes []*types.Type
+						for _, member := range interfaceDecl.Members {
+							if prop, ok := member.(ast.InterfaceProperty); ok {
+								unionTypes = append(unionTypes, types.NewLiteralType(prop.Key.Name))
+							}
+						}
+						if len(unionTypes) > 0 {
+							return types.NewUnionType(unionTypes)
+						}
+					}
+				}
+			}
+			// Fallback if resolution fails
+			return types.String
+		}
+
 		// First, check if we have this type cached (for imported types)
 		// Only use cache for non-generic references (no type arguments)
 		if len(t.TypeArguments) == 0 {
@@ -1915,32 +1938,33 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 		if symbol, exists := tc.symbolTable.ResolveSymbol(t.Name); exists {
 			if symbol.Type == symbols.InterfaceSymbol {
 				if symbol.Node != nil {
-					interfaceDecl := symbol.Node.(*ast.InterfaceDeclaration)
+					if interfaceDecl, ok := symbol.Node.(*ast.InterfaceDeclaration); ok {
 
-					// Convert interface members
-					properties := make(map[string]*types.Type)
-					var callSignatures []*types.Type
+						// Convert interface members
+						properties := make(map[string]*types.Type)
+						var callSignatures []*types.Type
 
-					for _, member := range interfaceDecl.Members {
-						switch m := member.(type) {
-						case ast.InterfaceProperty:
-							propName := m.Key.Name
-							propType := tc.convertTypeNode(m.Value)
-							properties[propName] = propType
-						case *ast.CallSignature:
-							// Convert call signature to FunctionType
-							params := make([]*types.Type, len(m.Parameters))
-							for i := range m.Parameters {
-								params[i] = types.Any
+						for _, member := range interfaceDecl.Members {
+							switch m := member.(type) {
+							case ast.InterfaceProperty:
+								propName := m.Key.Name
+								propType := tc.convertTypeNode(m.Value)
+								properties[propName] = propType
+							case *ast.CallSignature:
+								// Convert call signature to FunctionType
+								params := make([]*types.Type, len(m.Parameters))
+								for i := range m.Parameters {
+									params[i] = types.Any
+								}
+								returnType := tc.convertTypeNode(m.ReturnType)
+								callSignatures = append(callSignatures, types.NewFunctionType(params, returnType))
 							}
-							returnType := tc.convertTypeNode(m.ReturnType)
-							callSignatures = append(callSignatures, types.NewFunctionType(params, returnType))
 						}
-					}
 
-					objType := types.NewObjectType(t.Name, properties)
-					objType.CallSignatures = callSignatures
-					return objType
+						objType := types.NewObjectType(t.Name, properties)
+						objType.CallSignatures = callSignatures
+						return objType
+					}
 				}
 			}
 		}
