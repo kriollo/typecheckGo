@@ -299,6 +299,7 @@ type CallExpression struct {
 	Callee        Expression
 	TypeArguments []TypeNode
 	Arguments     []Expression
+	Optional      bool // true for optional chaining call ?.()
 	Position      Position
 	EndPos        Position
 }
@@ -438,10 +439,12 @@ func (l *LiteralType) End() Position { return l.EndPos }
 func (l *LiteralType) typeNode()     {}
 
 type FunctionType struct {
-	Params   []*Parameter
-	Return   TypeNode
-	Position Position
-	EndPos   Position
+	Params         []*Parameter
+	Return         TypeNode
+	TypeParameters []TypeNode // Generic type parameters <T>
+	IsConstructor  bool       // true for new (...) => Type
+	Position       Position
+	EndPos         Position
 }
 
 func (f *FunctionType) Type() string  { return "FunctionType" }
@@ -847,6 +850,18 @@ func (s *SuperExpression) Type() string  { return "SuperExpression" }
 func (s *SuperExpression) Pos() Position { return s.Position }
 func (s *SuperExpression) End() Position { return s.EndPos }
 func (s *SuperExpression) exprNode()     {}
+
+// ClassExpression represents a class expression
+type ClassExpression struct {
+	Class    *ClassDeclaration
+	Position Position
+	EndPos   Position
+}
+
+func (c *ClassExpression) Type() string  { return "ClassExpression" }
+func (c *ClassExpression) Pos() Position { return c.Position }
+func (c *ClassExpression) End() Position { return c.EndPos }
+func (c *ClassExpression) exprNode()     {}
 
 // YieldExpression represents 'yield' keyword in generator functions
 type YieldExpression struct {
