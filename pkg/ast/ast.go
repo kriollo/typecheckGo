@@ -230,7 +230,8 @@ func (t *TypeAliasDeclaration) declNode()     {}
 // InterfaceDeclaration represents an interface declaration
 type InterfaceDeclaration struct {
 	ID             *Identifier
-	Body           []InterfaceProperty
+	Body           []InterfaceProperty // Deprecated: use Members instead
+	Members        []TypeMember        // New field for full member support
 	Extends        []TypeNode
 	TypeParameters []TypeNode
 	Position       Position
@@ -767,6 +768,7 @@ type MethodDefinition struct {
 	Kind           string // "method", "constructor", "get", "set"
 	Static         bool
 	Async          bool
+	Abstract       bool
 	Position       Position
 	EndPos         Position
 	AccessModifier string // "public", "private", "protected", ""

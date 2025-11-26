@@ -436,47 +436,175 @@ func (p *parser) parseInterfaceDeclaration() (ast.Declaration, error) {
 		return nil, fmt.Errorf("expected '{' in interface declaration")
 	}
 
-	// Skip body - handle nested braces and potential union types (invalid syntax but we should recover)
-	depth := 1
-	p.advance()
-	for depth > 0 && !p.isAtEnd() {
-		if p.match("{") {
-			depth++
-			p.advance()
-		} else if p.match("}") {
-			depth--
-			p.advance()
-			// Check if there's a union type after the closing brace (invalid syntax, but handle it)
-			if depth == 0 {
-				p.skipWhitespaceAndComments()
-				if p.match("|") || p.match("&") {
-					// Skip union/intersection type continuation (invalid for interfaces)
-					// Continue until we hit a semicolon or newline
-					for !p.isAtEnd() && !p.match(";") && !p.match("\n") {
-						if p.match("{") {
-							depth++
-						} else if p.match("}") {
-							depth--
-							if depth < 0 {
-								depth = 0
-								break
-							}
-						}
-						p.advance()
+	// Parse interface body
+	var members []ast.TypeMember
+
+	// Loop through members
+	for !p.match("}") && !p.isAtEnd() {
+		memberStart := p.currentPos()
+
+		// Check for constructor signature: new (args): Type
+		if p.matchKeyword("new") {
+			p.advanceWord() // consume new
+			p.skipWhitespaceAndComments()
+
+			if p.match("(") {
+				// Parse parameters
+				// For now, we'll just skip parameters and return type to avoid complex parsing logic here
+				// In a full implementation, we would parse them properly
+				depth := 1
+				p.advance()
+				for depth > 0 && !p.isAtEnd() {
+					if p.match("(") {
+						depth++
+					} else if p.match(")") {
+						depth--
 					}
-					// Skip final semicolon if present
-					if p.match(";") {
-						p.advance()
-					}
+					p.advance()
 				}
+				p.skipWhitespaceAndComments()
+
+				if p.match(":") {
+					p.advance()
+					p.skipTypeAnnotation()
+				}
+				p.skipWhitespaceAndComments()
+				if p.match(";") || p.match(",") {
+					p.advance()
+				}
+
+				// Add a placeholder member for now
+				members = append(members, ast.TypeMember{
+					Key:      &ast.Identifier{Name: "new", Position: memberStart, EndPos: p.currentPos()},
+					Position: memberStart,
+					EndPos:   p.currentPos(),
+				})
+				p.skipWhitespaceAndComments()
+				continue
 			}
-		} else {
-			p.advance()
 		}
+
+		// Check for call signature: (args): Type
+		if p.match("(") {
+			// Skip call signature
+			depth := 1
+			p.advance()
+			for depth > 0 && !p.isAtEnd() {
+				if p.match("(") {
+					depth++
+				} else if p.match(")") {
+					depth--
+				}
+				p.advance()
+			}
+			p.skipWhitespaceAndComments()
+			if p.match(":") {
+				p.advance()
+				p.skipTypeAnnotation()
+			}
+			p.skipWhitespaceAndComments()
+			if p.match(";") || p.match(",") {
+				p.advance()
+			}
+			p.skipWhitespaceAndComments()
+			continue
+		}
+
+		// Check for index signature: [key: Type]: Type
+		if p.match("[") {
+			// Skip index signature
+			depth := 1
+			p.advance()
+			for depth > 0 && !p.isAtEnd() {
+				if p.match("[") {
+					depth++
+				} else if p.match("]") {
+					depth--
+				}
+				p.advance()
+			}
+			p.skipWhitespaceAndComments()
+			if p.match(":") {
+				p.advance()
+				p.skipTypeAnnotation()
+			}
+			p.skipWhitespaceAndComments()
+			if p.match(";") || p.match(",") {
+				p.advance()
+			}
+			p.skipWhitespaceAndComments()
+			continue
+		}
+
+		// Regular property or method
+		if p.matchIdentifier() || p.matchString() {
+			// Parse property name
+			var name *ast.Identifier
+			if p.matchString() {
+				str, _ := p.parseStringLiteral()
+				name = &ast.Identifier{Name: str, Position: memberStart, EndPos: p.currentPos()}
+			} else {
+				name, _ = p.parseIdentifier()
+			}
+
+			p.skipWhitespaceAndComments()
+
+			// Optional ?
+			if p.match("?") {
+				p.advance()
+				p.skipWhitespaceAndComments()
+			}
+
+			// Method signature: name(args): Type
+			if p.match("(") {
+				depth := 1
+				p.advance()
+				for depth > 0 && !p.isAtEnd() {
+					if p.match("(") {
+						depth++
+					} else if p.match(")") {
+						depth--
+					}
+					p.advance()
+				}
+				p.skipWhitespaceAndComments()
+				if p.match(":") {
+					p.advance()
+					p.skipTypeAnnotation()
+				}
+			} else if p.match(":") {
+				// Property: name: Type
+				p.advance()
+				p.skipTypeAnnotation()
+			}
+
+			p.skipWhitespaceAndComments()
+			if p.match(";") || p.match(",") {
+				p.advance()
+			}
+			p.skipWhitespaceAndComments()
+
+			members = append(members, ast.TypeMember{
+				Key:      name,
+				Position: memberStart,
+				EndPos:   p.currentPos(),
+			})
+			continue
+		}
+
+		// If we get here, skip token to avoid infinite loop
+		p.advance()
+		p.skipWhitespaceAndComments()
 	}
+
+	if !p.match("}") {
+		return nil, fmt.Errorf("expected '}' to close interface declaration")
+	}
+	p.advance()
 
 	return &ast.InterfaceDeclaration{
 		ID:       id,
+		Members:  members,
 		Position: startPos,
 		EndPos:   p.currentPos(),
 	}, nil

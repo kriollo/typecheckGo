@@ -215,6 +215,21 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 		return p.parseInterfaceDeclaration()
 	}
 
+	// Abstract class declaration
+	if p.matchKeyword("abstract") {
+		// Check if it's an abstract class
+		savedPos := p.saveState()
+		p.advanceWord()
+		p.skipWhitespaceAndComments()
+
+		if p.matchKeyword("class") {
+			return p.parseClassDeclaration()
+		}
+
+		// If not a class, restore state (might be used elsewhere or invalid)
+		p.restoreState(savedPos)
+	}
+
 	// Class declaration
 	if p.matchKeyword("class") {
 		return p.parseClassDeclaration()
@@ -1190,6 +1205,8 @@ func (p *parser) parseBinaryExpression() (ast.Expression, error) {
 			op = "==="
 		} else if p.match("!==") {
 			op = "!=="
+		} else if p.match("**") {
+			op = "**"
 		} else if p.match("==") {
 			op = "=="
 		} else if p.match("!=") {
@@ -4638,11 +4655,25 @@ func (p *parser) parseTypeAnnotationPrimary() (ast.TypeNode, error) {
 		p.skipWhitespaceAndComments()
 		var elements []ast.TypeNode
 		for !p.match("]") && !p.isAtEnd() {
-			elem, err := p.parseTypeAnnotationFull()
-			if err != nil {
-				return nil, err
+			if p.match("...") {
+				p.advanceString(3)
+				p.skipWhitespaceAndComments()
+				// Parse the array type after ...
+				elem, err := p.parseTypeAnnotationFull()
+				if err != nil {
+					return nil, err
+				}
+				// Wrap in a RestType or similar if we had it, but for now just append
+				// We might want to mark it as rest in the AST if we had a specific node for it
+				// For now, let's just parse it to avoid the error
+				elements = append(elements, elem)
+			} else {
+				elem, err := p.parseTypeAnnotationFull()
+				if err != nil {
+					return nil, err
+				}
+				elements = append(elements, elem)
 			}
-			elements = append(elements, elem)
 			p.skipWhitespaceAndComments()
 			if p.match(",") {
 				p.advance()
@@ -4915,6 +4946,31 @@ func (p *parser) parseClassMember() (ast.ClassMember, error) {
 	startPos := p.currentPos()
 	p.skipWhitespaceAndComments()
 
+	// Check for decorators
+	for p.match("@") {
+		p.advance() // consume @
+		p.skipWhitespaceAndComments()
+		// Parse decorator name
+		if p.matchIdentifier() {
+			p.advanceWord()
+		}
+		p.skipWhitespaceAndComments()
+		// Parse decorator arguments if present
+		if p.match("(") {
+			depth := 1
+			p.advance()
+			for depth > 0 && !p.isAtEnd() {
+				if p.match("(") {
+					depth++
+				} else if p.match(")") {
+					depth--
+				}
+				p.advance()
+			}
+		}
+		p.skipWhitespaceAndComments()
+	}
+
 	// Parse access modifier
 	accessModifier := ""
 	if p.matchKeyword("public", "private", "protected") {
@@ -4934,6 +4990,14 @@ func (p *parser) parseClassMember() (ast.ClassMember, error) {
 	isReadonly := false
 	if p.matchKeyword("readonly") {
 		isReadonly = true
+		p.advanceWord()
+		p.skipWhitespaceAndComments()
+	}
+
+	// Parse abstract keyword
+	isAbstract := false
+	if p.matchKeyword("abstract") {
+		isAbstract = true
 		p.advanceWord()
 		p.skipWhitespaceAndComments()
 	}
@@ -4965,15 +5029,16 @@ func (p *parser) parseClassMember() (ast.ClassMember, error) {
 	// Check if it's a method (has parentheses) or property
 	if p.match("(") {
 		// It's a method
-		return p.parseMethodDefinition(memberName, accessModifier, isStatic, isAsync, startPos)
+		return p.parseMethodDefinition(memberName, accessModifier, isStatic, isAsync, isAbstract, startPos)
 	} else {
 		// It's a property
+		// Abstract properties are also possible: abstract prop: Type;
 		return p.parsePropertyDefinition(memberName, accessModifier, isStatic, isReadonly, startPos)
 	}
 }
 
 // parseMethodDefinition parses a method definition
-func (p *parser) parseMethodDefinition(name *ast.Identifier, accessModifier string, isStatic bool, isAsync bool, startPos ast.Position) (*ast.MethodDefinition, error) {
+func (p *parser) parseMethodDefinition(name *ast.Identifier, accessModifier string, isStatic bool, isAsync bool, isAbstract bool, startPos ast.Position) (*ast.MethodDefinition, error) {
 	// Parse parameters
 	p.advance() // consume '('
 	p.skipWhitespaceAndComments()
@@ -5009,13 +5074,24 @@ func (p *parser) parseMethodDefinition(name *ast.Identifier, accessModifier stri
 	}
 
 	// Parse method body
-	if !p.match("{") {
-		return nil, fmt.Errorf("expected '{' for method body")
-	}
+	var body *ast.BlockStatement
+	var err error
 
-	body, err := p.parseBlockStatement()
-	if err != nil {
-		return nil, err
+	if isAbstract {
+		// Abstract methods don't have a body, just a semicolon (optional)
+		if p.match(";") {
+			p.advance()
+		}
+		// No body for abstract methods
+	} else {
+		if !p.match("{") {
+			return nil, fmt.Errorf("expected '{' for method body")
+		}
+
+		body, err = p.parseBlockStatement()
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Determine method kind
@@ -5039,6 +5115,7 @@ func (p *parser) parseMethodDefinition(name *ast.Identifier, accessModifier stri
 		Kind:           kind,
 		Static:         isStatic,
 		Async:          isAsync,
+		Abstract:       isAbstract,
 		AccessModifier: accessModifier,
 		Position:       startPos,
 		EndPos:         p.currentPos(),
@@ -5293,12 +5370,60 @@ func (p *parser) parseObjectTypeLiteral() (ast.TypeNode, error) {
 	for !p.match("}") && !p.isAtEnd() {
 		memberStart := p.currentPos()
 
-		// Check for readonly modifier
+		// Check for readonly modifiers: -readonly, +readonly, readonly
 		readonly := false
-		if p.matchKeyword("readonly") {
+		if p.match("-") && p.peekWord() == "readonly" {
+			// -readonly modifier
+			p.advance()     // consume -
+			p.advanceWord() // consume readonly
+			p.skipWhitespaceAndComments()
+			readonly = false // -readonly means not readonly
+		} else if p.match("+") && p.peekWord() == "readonly" {
+			// +readonly modifier
+			p.advance()     // consume +
+			p.advanceWord() // consume readonly
+			p.skipWhitespaceAndComments()
+			readonly = true
+		} else if p.matchKeyword("readonly") {
 			readonly = true
 			p.advanceWord()
 			p.skipWhitespaceAndComments()
+		}
+
+		// Check if this is a mapped type: [P in keyof T]
+		if p.match("[") {
+			// Skip the entire mapped type construct
+			depth := 1
+			p.advance() // consume [
+			for depth > 0 && !p.isAtEnd() {
+				if p.match("[") {
+					depth++
+				} else if p.match("]") {
+					depth--
+				}
+				p.advance()
+			}
+			p.skipWhitespaceAndComments()
+			// Skip optional modifiers
+			if p.match("-") || p.match("+") {
+				p.advance()
+			}
+			if p.match("?") {
+				p.advance()
+				p.skipWhitespaceAndComments()
+			}
+			// Skip : Type
+			if p.match(":") {
+				p.advance()
+				p.skipWhitespaceAndComments()
+				p.skipTypeAnnotation()
+			}
+			p.skipWhitespaceAndComments()
+			if p.match(";") || p.match(",") {
+				p.advance()
+				p.skipWhitespaceAndComments()
+			}
+			continue
 		}
 
 		var key *ast.Identifier
