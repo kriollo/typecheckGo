@@ -249,6 +249,11 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 		return p.parseEnumDeclaration()
 	}
 
+	// Namespace declaration
+	if p.matchKeyword("namespace") {
+		return p.parseNamespaceDeclaration()
+	}
+
 	// Handle block statements
 	if p.match("{") {
 		return p.parseBlockStatement()
@@ -1160,6 +1165,25 @@ func (p *parser) parseConditionalExpression() (ast.Expression, error) {
 	}
 
 	p.skipWhitespaceAndComments()
+
+	// Check for satisfies operator
+	if p.matchKeyword("satisfies") {
+		startPos := expr.Pos()
+		p.advanceWord() // consume 'satisfies'
+		p.skipWhitespaceAndComments()
+
+		typeAnn, err := p.parseTypeAnnotationFull()
+		if err != nil {
+			return nil, err
+		}
+
+		return &ast.SatisfiesExpression{
+			Expression:     expr,
+			TypeAnnotation: typeAnn,
+			Position:       startPos,
+			EndPos:         p.currentPos(),
+		}, nil
+	}
 
 	// Check for ternary operator (but not optional chaining ?.)
 	if p.match("?") && p.peek(1) != "." {
