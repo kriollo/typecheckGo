@@ -367,7 +367,13 @@ func (tc *TypeChecker) checkAssignmentExpression(assign *ast.AssignmentExpressio
 	// Type checking - verify that right is assignable to left (only for simple assignments)
 	if assign.Operator == "=" {
 		leftType := tc.getExpressionType(assign.Left)
-		rightType := tc.inferencer.InferType(assign.Right)
+
+		var rightType *types.Type
+		if tc.needsLiteralType(leftType) {
+			rightType = tc.inferLiteralType(assign.Right)
+		} else {
+			rightType = tc.inferencer.InferType(assign.Right)
+		}
 
 		// Special case: Allow assigning to new or flexible properties on object literals
 		// This handles patterns like: const init = {}; init.body = data;
