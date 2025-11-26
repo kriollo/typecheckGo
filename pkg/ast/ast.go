@@ -1003,3 +1003,30 @@ func (t *TypeOperator) Type() string  { return "TypeOperator" }
 func (t *TypeOperator) Pos() Position { return t.Position }
 func (t *TypeOperator) End() Position { return t.EndPos }
 func (t *TypeOperator) typeNode()     {}
+
+// NamespaceDeclaration represents a namespace declaration
+type NamespaceDeclaration struct {
+	Name     *Identifier
+	Body     []Statement
+	Position Position
+	EndPos   Position
+}
+
+func (n *NamespaceDeclaration) Type() string  { return "NamespaceDeclaration" }
+func (n *NamespaceDeclaration) Pos() Position { return n.Position }
+func (n *NamespaceDeclaration) End() Position { return n.EndPos }
+func (n *NamespaceDeclaration) stmtNode()     {}
+func (n *NamespaceDeclaration) declNode()     {}
+
+// SatisfiesExpression represents the satisfies operator (expr satisfies Type)
+type SatisfiesExpression struct {
+	Expression     Expression
+	TypeAnnotation TypeNode
+	Position       Position
+	EndPos         Position
+}
+
+func (s *SatisfiesExpression) Type() string  { return "SatisfiesExpression" }
+func (s *SatisfiesExpression) Pos() Position { return s.Position }
+func (s *SatisfiesExpression) End() Position { return s.EndPos }
+func (s *SatisfiesExpression) exprNode()     {}
