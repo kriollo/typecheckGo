@@ -134,34 +134,49 @@ func (p *parser) parseTypeAnnotationFull() (ast.TypeNode, error) {
 		}
 	}
 
-	// Check for union | or intersection &
+	// Check for union type: T | U or T | U | V | ...
 	if p.match("|") {
-		p.advance()
-		p.skipWhitespaceAndComments()
+		types := []ast.TypeNode{firstType}
 
-		right, err := p.parseTypeAnnotationFull()
-		if err != nil {
-			return nil, err
+		// Loop to handle multiple union types
+		for p.match("|") && !p.isAtEnd() {
+			p.advance()
+			p.skipWhitespaceAndComments()
+
+			right, err := p.parseTypeAnnotationPrimary()
+			if err != nil {
+				return nil, err
+			}
+			types = append(types, right)
+			p.skipWhitespaceAndComments()
 		}
 
 		return &ast.UnionType{
-			Types:    []ast.TypeNode{firstType, right},
+			Types:    types,
 			Position: startPos,
 			EndPos:   p.currentPos(),
 		}, nil
 	}
 
+	// Check for intersection type: T & U or T & U & V & ...
 	if p.match("&") {
-		p.advance()
-		p.skipWhitespaceAndComments()
+		types := []ast.TypeNode{firstType}
 
-		right, err := p.parseTypeAnnotationFull()
-		if err != nil {
-			return nil, err
+		// Loop to handle multiple intersection types
+		for p.match("&") && !p.isAtEnd() {
+			p.advance()
+			p.skipWhitespaceAndComments()
+
+			right, err := p.parseTypeAnnotationPrimary()
+			if err != nil {
+				return nil, err
+			}
+			types = append(types, right)
+			p.skipWhitespaceAndComments()
 		}
 
 		return &ast.IntersectionType{
-			Types:    []ast.TypeNode{firstType, right},
+			Types:    types,
 			Position: startPos,
 			EndPos:   p.currentPos(),
 		}, nil
@@ -601,6 +616,38 @@ func (p *parser) parseInterfaceDeclaration() (ast.Declaration, error) {
 		return nil, fmt.Errorf("expected '}' to close interface declaration")
 	}
 	p.advance()
+
+	// Handle union types after interface (invalid TypeScript but we need to support it)
+	// Example: interface X { } | { }
+	p.skipWhitespaceAndComments()
+	if p.match("|") {
+		// Skip union types - just consume tokens until we hit a statement boundary
+		for p.match("|") && !p.isAtEnd() {
+			p.advance() // consume |
+			p.skipWhitespaceAndComments()
+
+			// Skip the union type member
+			if p.match("{") {
+				// Object type
+				depth := 1
+				p.advance()
+				for depth > 0 && !p.isAtEnd() {
+					if p.match("{") {
+						depth++
+					} else if p.match("}") {
+						depth--
+					}
+					p.advance()
+				}
+			} else {
+				// Other type - skip until | or statement end
+				for !p.match("|") && !p.match(";") && !p.isAtEnd() && !p.matchKeyword("export", "const", "let", "var", "function", "class", "interface", "type") {
+					p.advance()
+				}
+			}
+			p.skipWhitespaceAndComments()
+		}
+	}
 
 	return &ast.InterfaceDeclaration{
 		ID:       id,
