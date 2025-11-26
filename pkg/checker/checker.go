@@ -1771,48 +1771,37 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 			if resolvedType, ok := tc.typeAliasCache[t.Name]; ok {
 				return resolvedType
 			}
-		}
 
-		// Lazy load if needed
-		tc.ensureGlobalLoaded(t.Name)
-
-		// Handle generic type alias instantiation
-		if symbol, exists := tc.symbolTable.ResolveSymbol(t.Name); exists {
-			if symbol.Type == symbols.TypeAliasSymbol {
-				if symbol.Node == nil {
-					return types.Any
+			// Handle basic type references
+			switch t.Name {
+			case "string":
+				return types.String
+			case "number":
+				return types.Number
+			case "boolean":
+				return types.Boolean
+			case "bigint":
+				return types.BigInt
+			case "any":
+				return types.Any
+			case "unknown":
+				return types.Unknown
+			case "void":
+				return types.Void
+			case "never":
+				return types.Never
+			case "null":
+				return types.Null
+			case "undefined":
+				return types.Undefined
+			case "Array":
+				// Handle Array<T> generic type
+				if len(t.TypeArguments) == 1 {
+					elementType := tc.convertTypeNode(t.TypeArguments[0])
+					return types.NewArrayType(elementType)
 				}
-				aliasDecl := symbol.Node.(*ast.TypeAliasDeclaration)
-				// ... (existing logic for TypeAlias) ...
-				// Create substitution map
-				substitutions := make(map[string]*types.Type)
-				for i, param := range aliasDecl.TypeParameters {
-					if i < len(t.TypeArguments) {
-						argType := tc.convertTypeNode(t.TypeArguments[i])
-						if typeParam, ok := param.(*ast.TypeParameter); ok {
-							substitutions[typeParam.Name.Name] = argType
-						} else if typeRef, ok := param.(*ast.TypeReference); ok {
-							substitutions[typeRef.Name] = argType
-						}
-					}
-				}
-				annotationType := tc.convertTypeNode(aliasDecl.TypeAnnotation)
-				resolvedType := tc.substituteType(annotationType, substitutions)
-							// Assuming p is Identifier or Parameter
-							// We need to extract type annotation from parameter
-							// But ast.Parameter structure depends on AST definition
-							// For now, assume Any for params if complex
-							params[i] = types.Any
-							// TODO: extract actual param types
-						}
-						returnType := tc.convertTypeNode(m.ReturnType)
-						callSignatures = append(callSignatures, types.NewFunctionType(params, returnType))
-					}
-				}
-
-				objType := types.NewObjectType(t.Name, properties)
-				objType.CallSignatures = callSignatures
-				return objType
+				// Array without type argument defaults to any[]
+				return types.NewArrayType(types.Any)
 			}
 		}
 
@@ -1904,12 +1893,15 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 		// Convert object type literal to Type
 		properties := make(map[string]*types.Type)
 		for _, member := range t.Members {
-			propType := tc.convertTypeNode(member.ValueType)
-			// If the member is optional, wrap it in a union with undefined
-			if member.Optional {
-				propType = types.NewUnionType([]*types.Type{propType, types.Undefined})
+			// TypeMember is an interface, need to type assert to InterfaceProperty
+			if prop, ok := member.(ast.InterfaceProperty); ok {
+				propType := tc.convertTypeNode(prop.Value)
+				// If the member is optional, wrap it in a union with undefined
+				if prop.Optional {
+					propType = types.NewUnionType([]*types.Type{propType, types.Undefined})
+				}
+				properties[prop.Key.Name] = propType
 			}
-			properties[member.Key.Name] = propType
 		}
 		return types.NewObjectType("", properties)
 

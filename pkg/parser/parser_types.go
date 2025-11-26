@@ -692,3 +692,74 @@ func (p *parser) parseInterfaceDeclaration() (ast.Declaration, error) {
 		EndPos:   p.currentPos(),
 	}, nil
 }
+
+// parseCallParameters parses parameters for a call signature: (a: string, b: number)
+func (p *parser) parseCallParameters() ([]ast.Parameter, error) {
+	if !p.match("(") {
+		return nil, fmt.Errorf("expected '(' for parameters")
+	}
+	p.advance() // consume '('
+	p.skipWhitespaceAndComments()
+
+	var params []ast.Parameter
+
+	for !p.match(")") && !p.isAtEnd() {
+		// Parse parameter
+		startPos := p.currentPos()
+
+		// Check for rest parameter
+		isRest := false
+		if p.match("...") {
+			p.advanceString(3)
+			p.skipWhitespaceAndComments()
+			isRest = true
+		}
+
+		id, err := p.parseIdentifier()
+		if err != nil {
+			return nil, err
+		}
+		p.skipWhitespaceAndComments()
+
+		// Optional?
+		optional := false
+		if p.match("?") {
+			p.advance()
+			optional = true
+			p.skipWhitespaceAndComments()
+		}
+
+		// Type annotation
+		var typeAnn ast.TypeNode
+		if p.match(":") {
+			p.advance()
+			p.skipWhitespaceAndComments()
+			typeAnn, err = p.parseTypeAnnotationFull()
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		params = append(params, ast.Parameter{
+			ID:        id,
+			ParamType: typeAnn,
+			Optional:  optional,
+			Rest:      isRest,
+			Position:  startPos,
+			EndPos:    p.currentPos(),
+		})
+
+		p.skipWhitespaceAndComments()
+		if p.match(",") {
+			p.advance()
+			p.skipWhitespaceAndComments()
+		}
+	}
+
+	if !p.match(")") {
+		return nil, fmt.Errorf("expected ')' after parameters")
+	}
+	p.advance() // consume ')'
+
+	return params, nil
+}

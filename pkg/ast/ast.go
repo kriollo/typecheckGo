@@ -987,7 +987,6 @@ type TypeQuery struct {
 	EndPos   Position
 }
 
-func (t *TypeQuery) Type() string  { return "TypeQuery" }
 func (t *TypeQuery) Pos() Position { return t.Position }
 func (t *TypeQuery) End() Position { return t.EndPos }
 func (t *TypeQuery) typeNode()     {}
