@@ -346,6 +346,11 @@ func (tc *TypeChecker) checkExpression(expr ast.Expression, filename string) {
 		tc.checkConditionalExpression(e, filename)
 	case *ast.SpreadElement:
 		tc.checkExpression(e.Argument, filename)
+	case *ast.ClassExpression:
+		// Class expressions are valid (e.g., const MyClass = class { ... })
+		// For now, we don't type-check the class body
+		// In a full implementation, we would check class members
+		return
 	default:
 		// Unknown expression type - just a warning, don't block compilation
 		fmt.Fprintf(os.Stderr, "Warning: Unknown expression type: %T\n", expr)

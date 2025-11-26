@@ -316,6 +316,11 @@ func (b *Binder) bindExpression(expr ast.Expression) {
 		b.bindConditionalExpression(e)
 	case *ast.SpreadElement:
 		b.bindExpression(e.Argument)
+	case *ast.ClassExpression:
+		// Class expressions are valid (e.g., const MyClass = class { ... })
+		// For now, we don't bind the class body
+		// In a full implementation, we would bind class members
+		return
 	default:
 		// Unknown expression type
 		fmt.Printf("Warning: Unknown expression type: %T\n", expr)
