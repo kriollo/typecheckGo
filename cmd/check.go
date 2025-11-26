@@ -224,37 +224,37 @@ func checkDirectory(templateTc *checker.TypeChecker, dir string, tsConfig *confi
 		go func() {
 			defer wg.Done()
 
-			// Create a new checker for this worker, sharing the module resolver
-			tc := checker.NewWithSharedModuleResolver(sharedResolver)
-
-			// Copy global types from the template checker (node_modules, libs, etc.)
-			// This avoids re-parsing thousands of files per worker
-			tc.CopyGlobalTypesFrom(templateTc)
-
-			// Configure path aliases (needed for module resolution)
-			if tsConfig.CompilerOptions.BaseUrl != "" || len(tsConfig.CompilerOptions.Paths) > 0 {
-				tc.SetPathAliases(tsConfig.CompilerOptions.BaseUrl, tsConfig.CompilerOptions.Paths)
-			}
-
-			// Set compiler config (no I/O, just configuration)
-			tc.SetConfig(&checker.CompilerConfig{
-				NoImplicitAny:                tsConfig.CompilerOptions.NoImplicitAny,
-				StrictNullChecks:             tsConfig.CompilerOptions.StrictNullChecks,
-				StrictFunctionTypes:          tsConfig.CompilerOptions.StrictFunctionTypes,
-				NoUnusedLocals:               tsConfig.CompilerOptions.NoUnusedLocals,
-				NoUnusedParameters:           tsConfig.CompilerOptions.NoUnusedParameters,
-				NoImplicitReturns:            tsConfig.CompilerOptions.NoImplicitReturns,
-				NoImplicitThis:               tsConfig.CompilerOptions.NoImplicitThis,
-				StrictBindCallApply:          tsConfig.CompilerOptions.StrictBindCallApply,
-				StrictPropertyInitialization: tsConfig.CompilerOptions.StrictPropertyInitialization,
-				AlwaysStrict:                 tsConfig.CompilerOptions.AlwaysStrict,
-				AllowUnreachableCode:         tsConfig.CompilerOptions.AllowUnreachableCode,
-				AllowUnusedLabels:            tsConfig.CompilerOptions.AllowUnusedLabels,
-				NoFallthroughCasesInSwitch:   tsConfig.CompilerOptions.NoFallthroughCasesInSwitch,
-				NoUncheckedIndexedAccess:     tsConfig.CompilerOptions.NoUncheckedIndexedAccess,
-			})
-
 			for path := range jobs {
+				// Create a new checker for this file to ensure isolation
+				// This prevents symbols from one file polluting another (e.g. multiple files defining 'interface Person')
+				tc := checker.NewWithSharedModuleResolver(sharedResolver)
+
+				// Copy global types from the template checker (node_modules, libs, etc.)
+				tc.CopyGlobalTypesFrom(templateTc)
+
+				// Configure path aliases
+				if tsConfig.CompilerOptions.BaseUrl != "" || len(tsConfig.CompilerOptions.Paths) > 0 {
+					tc.SetPathAliases(tsConfig.CompilerOptions.BaseUrl, tsConfig.CompilerOptions.Paths)
+				}
+
+				// Set compiler config
+				tc.SetConfig(&checker.CompilerConfig{
+					NoImplicitAny:                tsConfig.CompilerOptions.NoImplicitAny,
+					StrictNullChecks:             tsConfig.CompilerOptions.StrictNullChecks,
+					StrictFunctionTypes:          tsConfig.CompilerOptions.StrictFunctionTypes,
+					NoUnusedLocals:               tsConfig.CompilerOptions.NoUnusedLocals,
+					NoUnusedParameters:           tsConfig.CompilerOptions.NoUnusedParameters,
+					NoImplicitReturns:            tsConfig.CompilerOptions.NoImplicitReturns,
+					NoImplicitThis:               tsConfig.CompilerOptions.NoImplicitThis,
+					StrictBindCallApply:          tsConfig.CompilerOptions.StrictBindCallApply,
+					StrictPropertyInitialization: tsConfig.CompilerOptions.StrictPropertyInitialization,
+					AlwaysStrict:                 tsConfig.CompilerOptions.AlwaysStrict,
+					AllowUnreachableCode:         tsConfig.CompilerOptions.AllowUnreachableCode,
+					AllowUnusedLabels:            tsConfig.CompilerOptions.AllowUnusedLabels,
+					NoFallthroughCasesInSwitch:   tsConfig.CompilerOptions.NoFallthroughCasesInSwitch,
+					NoUncheckedIndexedAccess:     tsConfig.CompilerOptions.NoUncheckedIndexedAccess,
+				})
+
 				// Parse file
 				ast, parseErr := parser.ParseFile(path)
 				if parseErr != nil {
@@ -266,9 +266,6 @@ func checkDirectory(templateTc *checker.TypeChecker, dir string, tsConfig *confi
 				// Type check
 				errors := tc.CheckFile(path, ast)
 				results <- errors
-
-				// Clear caches after each file
-				tc.ClearFileCache()
 			}
 		}()
 	}
