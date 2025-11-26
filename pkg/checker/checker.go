@@ -1805,45 +1805,84 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 			}
 		}
 
-		// Handle basic type references
-		switch t.Name {
-		case "string":
-			return types.String
-		case "number":
-			return types.Number
-		case "boolean":
-			return types.Boolean
-		case "bigint":
-			return types.BigInt
-		case "any":
-			return types.Any
-		case "unknown":
-			return types.Unknown
-		case "void":
-			return types.Void
-		case "never":
-			return types.Never
-		case "null":
-			return types.Null
-		case "undefined":
-			return types.Undefined
-		case "Array":
-			// Handle Array<T> generic type
-			if len(t.TypeArguments) == 1 {
-				elementType := tc.convertTypeNode(t.TypeArguments[0])
-				return types.NewArrayType(elementType)
-			}
-			// Array without type argument defaults to any[]
-			return types.NewArrayType(types.Any)
-		default:
-			// Check type alias cache for non-generic aliases
-			if resolvedType, ok := tc.typeAliasCache[t.Name]; ok {
-				return resolvedType
-			}
+		// Lazy load if needed
+		tc.ensureGlobalLoaded(t.Name)
 
-			// For other type references, create a basic object type
-			return types.NewObjectType(t.Name, nil)
+		// Handle generic type alias instantiation (when TypeArguments are present)
+		if len(t.TypeArguments) > 0 {
+			if symbol, exists := tc.symbolTable.ResolveSymbol(t.Name); exists {
+				if symbol.Type == symbols.TypeAliasSymbol {
+					if symbol.Node == nil {
+						return types.Any
+					}
+					aliasDecl := symbol.Node.(*ast.TypeAliasDeclaration)
+
+					// Create substitution map
+					substitutions := make(map[string]*types.Type)
+					for i, param := range aliasDecl.TypeParameters {
+						if i < len(t.TypeArguments) {
+							argType := tc.convertTypeNode(t.TypeArguments[i])
+							if typeParam, ok := param.(*ast.TypeParameter); ok {
+								substitutions[typeParam.Name.Name] = argType
+							} else if typeRef, ok := param.(*ast.TypeReference); ok {
+								substitutions[typeRef.Name] = argType
+							}
+						}
+					}
+
+					// Substitute in the alias's type annotation
+					annotationType := tc.convertTypeNode(aliasDecl.TypeAnnotation)
+					resolvedType := tc.substituteType(annotationType, substitutions)
+
+					// Preserve the alias name by wrapping in an ObjectType
+					// This ensures "Tuple<[boolean]>" shows as "Tuple" not "tuple"
+					if resolvedType.Kind == types.TupleType {
+						// For tuple types, we need to preserve the name
+						resolvedType.Name = t.Name
+						return resolvedType
+					}
+
+					// Evaluate if it's a conditional type
+					if resolvedType.Kind == types.ConditionalType {
+						return tc.evaluateConditionalType(resolvedType)
+					}
+					return resolvedType
+				} else if symbol.Type == symbols.InterfaceSymbol {
+					if symbol.Node == nil {
+						return types.Any
+					}
+					interfaceDecl := symbol.Node.(*ast.InterfaceDeclaration)
+
+					// Convert interface members
+					properties := make(map[string]*types.Type)
+					var callSignatures []*types.Type
+
+					for _, member := range interfaceDecl.Members {
+						switch m := member.(type) {
+						case ast.InterfaceProperty:
+							propName := m.Key.Name
+							propType := tc.convertTypeNode(m.Value)
+							properties[propName] = propType
+						case *ast.CallSignature:
+							// Convert call signature to FunctionType
+							params := make([]*types.Type, len(m.Parameters))
+							for i := range m.Parameters {
+								params[i] = types.Any
+							}
+							returnType := tc.convertTypeNode(m.ReturnType)
+							callSignatures = append(callSignatures, types.NewFunctionType(params, returnType))
+						}
+					}
+
+					objType := types.NewObjectType(t.Name, properties)
+					objType.CallSignatures = callSignatures
+					return objType
+				}
+			}
 		}
+
+		// For other type references without type arguments, create a basic object type
+		return types.NewObjectType(t.Name, nil)
 
 	case *ast.ConditionalType:
 		checkType := tc.convertTypeNode(t.CheckType)
