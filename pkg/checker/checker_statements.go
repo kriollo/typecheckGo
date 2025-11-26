@@ -59,6 +59,8 @@ func (tc *TypeChecker) checkStatement(stmt ast.Statement, filename string) {
 		return
 	case *ast.EnumDeclaration:
 		tc.checkEnumDeclaration(s, filename)
+	case *ast.NamespaceDeclaration:
+		tc.checkNamespaceDeclaration(s, filename)
 	default:
 		// Unknown statement type - just a warning, don't block compilation
 		fmt.Fprintf(os.Stderr, "Warning: Unknown statement type: %T\n", stmt)

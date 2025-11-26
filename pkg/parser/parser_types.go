@@ -600,34 +600,80 @@ func (p *parser) parseInterfaceDeclaration() (ast.Declaration, error) {
 			p.skipWhitespaceAndComments()
 
 			// Optional ?
+			isOptional := false
 			if p.match("?") {
+				isOptional = true
 				p.advance()
 				p.skipWhitespaceAndComments()
 			}
 
 			// Method signature: name(args): Type
 			if p.match("(") {
-				depth := 1
-				p.advance()
-				for depth > 0 && !p.isAtEnd() {
-					if p.match("(") {
-						depth++
-					} else if p.match(")") {
-						depth--
-					}
-					p.advance()
+				params, err := p.parseCallParameters()
+				if err != nil {
+					return nil, err
 				}
+
 				p.skipWhitespaceAndComments()
+				var returnType ast.TypeNode
 				if p.match(":") {
 					p.advance()
 					p.skipWhitespaceAndComments()
-					p.skipTypeAnnotation()
+					returnType, err = p.parseTypeAnnotationFull()
+					if err != nil {
+						return nil, err
+					}
+				} else {
+					// Default to any if no return type specified
+					returnType = &ast.TypeReference{Name: "any"}
 				}
+
+				// Create FunctionType for the method
+				// Convert []ast.Parameter to []*ast.Parameter
+				paramPtrs := make([]*ast.Parameter, len(params))
+				for i := range params {
+					paramPtrs[i] = &params[i]
+				}
+
+				funcType := &ast.FunctionType{
+					Params:   paramPtrs,
+					Return:   returnType,
+					Position: memberStart,
+					EndPos:   p.currentPos(),
+				}
+
+				members = append(members, ast.InterfaceProperty{
+					Key:      name,
+					Value:    funcType,
+					Optional: isOptional,
+					Position: memberStart,
+					EndPos:   p.currentPos(),
+				})
 			} else if p.match(":") {
 				// Property: name: Type
 				p.advance()
 				p.skipWhitespaceAndComments()
-				p.skipTypeAnnotation()
+				propType, err := p.parseTypeAnnotationFull()
+				if err != nil {
+					return nil, err
+				}
+
+				members = append(members, ast.InterfaceProperty{
+					Key:      name,
+					Value:    propType,
+					Optional: isOptional,
+					Position: memberStart,
+					EndPos:   p.currentPos(),
+				})
+			} else {
+				// Property without type annotation (implicit any)
+				members = append(members, ast.InterfaceProperty{
+					Key:      name,
+					Value:    nil, // Will be treated as Unknown/Any
+					Optional: isOptional,
+					Position: memberStart,
+					EndPos:   p.currentPos(),
+				})
 			}
 
 			p.skipWhitespaceAndComments()
@@ -636,12 +682,6 @@ func (p *parser) parseInterfaceDeclaration() (ast.Declaration, error) {
 			}
 			p.skipWhitespaceAndComments()
 
-			members = append(members, ast.InterfaceProperty{
-				Key:      name,
-				Value:    nil,
-				Position: memberStart,
-				EndPos:   p.currentPos(),
-			})
 			continue
 		}
 
@@ -764,4 +804,35 @@ func (p *parser) parseCallParameters() ([]ast.Parameter, error) {
 	p.advance() // consume ')'
 
 	return params, nil
+}
+
+// parseNamespaceDeclaration parses a namespace declaration: namespace Name { ... }
+func (p *parser) parseNamespaceDeclaration() (ast.Statement, error) {
+	startPos := p.currentPos()
+	p.consumeKeyword("namespace")
+	p.skipWhitespaceAndComments()
+
+	name, err := p.parseIdentifier()
+	if err != nil {
+		return nil, err
+	}
+
+	p.skipWhitespaceAndComments()
+
+	if !p.match("{") {
+		return nil, fmt.Errorf("expected '{' in namespace declaration")
+	}
+
+	// Parse namespace body
+	body, err := p.parseBlockStatement()
+	if err != nil {
+		return nil, err
+	}
+
+	return &ast.NamespaceDeclaration{
+		Name:     name,
+		Body:     body.Body,
+		Position: startPos,
+		EndPos:   p.currentPos(),
+	}, nil
 }

@@ -351,6 +351,8 @@ func (tc *TypeChecker) checkExpression(expr ast.Expression, filename string) {
 		// For now, we don't type-check the class body
 		// In a full implementation, we would check class members
 		return
+	case *ast.SatisfiesExpression:
+		tc.checkSatisfiesExpression(e, filename)
 	default:
 		// Unknown expression type - just a warning, don't block compilation
 		fmt.Fprintf(os.Stderr, "Warning: Unknown expression type: %T\n", expr)
@@ -430,6 +432,26 @@ func (tc *TypeChecker) checkConditionalExpression(cond *ast.ConditionalExpressio
 	// Check the alternate expression (false branch)
 	if cond.Alternate != nil {
 		tc.checkExpression(cond.Alternate, filename)
+	}
+}
+
+func (tc *TypeChecker) checkSatisfiesExpression(satisfies *ast.SatisfiesExpression, filename string) {
+	// Check the expression
+	if satisfies.Expression != nil {
+		tc.checkExpression(satisfies.Expression, filename)
+	}
+
+	// Get the type of the expression
+	exprType := tc.inferencer.InferType(satisfies.Expression)
+
+	// Get the type annotation
+	annotationType := tc.convertTypeNode(satisfies.TypeAnnotation)
+
+	// Check if the expression type satisfies the annotation type
+	if !tc.isAssignableTo(exprType, annotationType) {
+		msg := fmt.Sprintf("Type '%s' does not satisfy the expected type '%s'.", exprType.String(), annotationType.String())
+		msg += "\n  Sugerencia: El operador 'satisfies' valida que la expresión cumpla con el tipo especificado"
+		tc.addError(filename, satisfies.Expression.Pos().Line, satisfies.Expression.Pos().Column, msg, "TS1360", "error")
 	}
 }
 
@@ -1914,6 +1936,19 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 					}
 					interfaceDecl := symbol.Node.(*ast.InterfaceDeclaration)
 
+					// Create substitution map
+					substitutions := make(map[string]*types.Type)
+					for i, param := range interfaceDecl.TypeParameters {
+						if i < len(t.TypeArguments) {
+							argType := tc.convertTypeNode(t.TypeArguments[i])
+							if typeParam, ok := param.(*ast.TypeParameter); ok {
+								substitutions[typeParam.Name.Name] = argType
+							} else if typeRef, ok := param.(*ast.TypeReference); ok {
+								substitutions[typeRef.Name] = argType
+							}
+						}
+					}
+
 					// Convert interface members
 					properties := make(map[string]*types.Type)
 					var callSignatures []*types.Type
@@ -1923,6 +1958,15 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 						case ast.InterfaceProperty:
 							propName := m.Key.Name
 							propType := tc.convertTypeNode(m.Value)
+
+							// Apply substitutions
+							if len(substitutions) > 0 {
+								propType = tc.substituteType(propType, substitutions)
+							}
+
+							if m.Optional {
+								propType = types.NewUnionType([]*types.Type{propType, types.Undefined})
+							}
 							properties[propName] = propType
 						case *ast.CallSignature:
 							// Convert call signature to FunctionType
@@ -1958,6 +2002,9 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 							case ast.InterfaceProperty:
 								propName := m.Key.Name
 								propType := tc.convertTypeNode(m.Value)
+								if m.Optional {
+									propType = types.NewUnionType([]*types.Type{propType, types.Undefined})
+								}
 								properties[propName] = propType
 							case *ast.CallSignature:
 								// Convert call signature to FunctionType

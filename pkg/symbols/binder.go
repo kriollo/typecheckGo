@@ -83,6 +83,8 @@ func (b *Binder) bindStatement(stmt ast.Statement) {
 		if s.Name != nil {
 			b.table.DefineSymbol(s.Name.Name, EnumSymbol, s, false)
 		}
+	case *ast.NamespaceDeclaration:
+		b.bindNamespaceDeclaration(s)
 	default:
 		// Unknown statement type
 		fmt.Printf("Warning: Unknown statement type: %T\n", stmt)
@@ -821,6 +823,24 @@ func (b *Binder) bindInterfaceDeclaration(decl *ast.InterfaceDeclaration) {
 	if decl.ID != nil {
 		b.table.DefineSymbol(decl.ID.Name, InterfaceSymbol, decl, false)
 	}
+}
+
+func (b *Binder) bindNamespaceDeclaration(decl *ast.NamespaceDeclaration) {
+	// Register the namespace in the symbol table
+	if decl.Name != nil {
+		b.table.DefineSymbol(decl.Name.Name, VariableSymbol, decl, false)
+	}
+
+	// Create a new scope for the namespace
+	b.table.EnterScope(decl)
+
+	// Bind all statements in the namespace
+	for _, stmt := range decl.Body {
+		b.bindStatement(stmt)
+	}
+
+	// Exit the namespace scope
+	b.table.ExitScope()
 }
 
 func (b *Binder) bindClassDeclaration(decl *ast.ClassDeclaration) {

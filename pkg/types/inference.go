@@ -225,17 +225,24 @@ func (ti *TypeInferencer) inferLiteralType(lit *ast.Literal) *Type {
 				if strings.HasSuffix(lit.Raw, "n") {
 					return BigInt
 				}
-				return Number
+				// It's a number literal
+				// Try to parse it as float64 to store in LiteralType
+				// For now, we just store the raw string or generic number if parsing fails
+				// But to be safe and consistent with existing logic, let's return Number type
+				// UNLESS we want specific literal types for numbers too.
+				// For satisfies operator, we usually care about string literals.
+				// Number literals are also useful.
+				return Number // Keep as Number for now to avoid breaking changes, or change to NewLiteralType(v) if we parse it
 			}
-			// If it starts with a quote, it's a string
+			// If it starts with a quote, it's a string literal
 			if firstChar == '"' || firstChar == '\'' || firstChar == '`' {
-				return String
+				return NewLiteralType(v)
 			}
 		}
-		// Default to string
-		return String
+		// Default to string literal
+		return NewLiteralType(v)
 	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
-		return Number
+		return NewLiteralType(v)
 	default:
 		_ = v
 		return Unknown

@@ -352,7 +352,17 @@ func (tc *TypeChecker) checkEnumDeclaration(decl *ast.EnumDeclaration, filename 
 
 			// Enum members should be initialized with number or string literals
 			initType := tc.inferencer.InferType(member.Value)
-			if initType.Kind != types.NumberType && initType.Kind != types.StringType {
+			isValid := false
+			if initType.Kind == types.NumberType || initType.Kind == types.StringType {
+				isValid = true
+			} else if initType.Kind == types.LiteralType {
+				switch initType.Value.(type) {
+				case string, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
+					isValid = true
+				}
+			}
+
+			if !isValid {
 				tc.addError(filename, member.Value.Pos().Line, member.Value.Pos().Column,
 					"Enum member must have initializer of type string or number", "TS1066", "error")
 			}
@@ -363,5 +373,36 @@ func (tc *TypeChecker) checkEnumDeclaration(decl *ast.EnumDeclaration, filename 
 	if decl.Name != nil {
 		enumType := types.NewObjectType(decl.Name.Name, nil)
 		tc.typeAliasCache[decl.Name.Name] = enumType
+	}
+}
+
+func (tc *TypeChecker) checkNamespaceDeclaration(decl *ast.NamespaceDeclaration, filename string) {
+	// Check namespace name is valid
+	if decl.Name != nil && !isValidIdentifier(decl.Name.Name) {
+		tc.addError(filename, decl.Name.Pos().Line, decl.Name.Pos().Column,
+			fmt.Sprintf("Invalid namespace name: '%s'", decl.Name.Name), "TS1003", "error")
+	}
+
+	// Find the namespace scope
+	namespaceScope := tc.findScopeForNode(decl)
+	if namespaceScope != nil {
+		// Save current scope
+		originalScope := tc.symbolTable.Current
+
+		// Enter namespace scope
+		tc.symbolTable.Current = namespaceScope
+
+		// Check all statements in the namespace
+		for _, stmt := range decl.Body {
+			tc.checkStatement(stmt, filename)
+		}
+
+		// Restore original scope
+		tc.symbolTable.Current = originalScope
+	} else {
+		// Fallback: check without scope change
+		for _, stmt := range decl.Body {
+			tc.checkStatement(stmt, filename)
+		}
 	}
 }

@@ -440,7 +440,70 @@ func (t *Type) IsAssignableTo(target *Type) bool {
 		}
 	}
 
+	// Object types (Structural typing)
+	if t.Kind == ObjectType && target.Kind == ObjectType {
+		// If target has no properties, any object is assignable (except null/undefined which are handled by Kind check)
+		if len(target.Properties) == 0 {
+			return true
+		}
+
+		// Check if all required properties in target exist in t and are compatible
+		for name, targetProp := range target.Properties {
+			// Check if property is optional (this logic depends on how optionality is stored)
+			// In this simple implementation, we assume properties in the map are required unless they are union with undefined
+			// But wait, the AST has optional flag, but Type struct doesn't seem to have it explicitly on the property map.
+			// Usually optional properties are represented as UnionType(T | Undefined).
+
+			propInT, exists := t.Properties[name]
+			if !exists {
+				// If property is missing in t, it must be optional in target (i.e., allow undefined)
+				if targetProp.Kind == UnionType {
+					isOptional := false
+					for _, unionPart := range targetProp.Types {
+						if unionPart.Kind == UndefinedType {
+							isOptional = true
+							break
+						}
+					}
+					if isOptional {
+						continue
+					}
+				}
+				// Also check if targetProp itself is Undefined (unlikely for a property type but possible)
+				if targetProp.Kind == UndefinedType {
+					continue
+				}
+
+				return false
+			}
+
+			// Property exists, check compatibility
+			if !propInT.IsAssignableTo(targetProp) {
+				return false
+			}
+		}
+		return true
+	}
+
+	// Literal Types
+	if t.Kind == LiteralType {
+		// Literal assignable to same literal
+		if target.Kind == LiteralType {
+			return t.Value == target.Value
+		}
+		// Literal assignable to corresponding primitive
+		switch t.Value.(type) {
+		case string:
+			return target.Kind == StringType
+		case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
+			return target.Kind == NumberType
+		case bool:
+			return target.Kind == BooleanType
+		}
+	}
+
 	return false
+
 }
 
 // Tipos primitivos predefinidos
