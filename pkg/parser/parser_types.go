@@ -506,8 +506,9 @@ func (p *parser) parseInterfaceDeclaration() (ast.Declaration, error) {
 				}
 
 				// Add a placeholder member for now
-				members = append(members, ast.TypeMember{
+				members = append(members, ast.InterfaceProperty{
 					Key:      &ast.Identifier{Name: "new", Position: memberStart, EndPos: p.currentPos()},
+					Value:    nil,
 					Position: memberStart,
 					EndPos:   p.currentPos(),
 				})
@@ -635,8 +636,9 @@ func (p *parser) parseInterfaceDeclaration() (ast.Declaration, error) {
 			}
 			p.skipWhitespaceAndComments()
 
-			members = append(members, ast.TypeMember{
+			members = append(members, ast.InterfaceProperty{
 				Key:      name,
+				Value:    nil,
 				Position: memberStart,
 				EndPos:   p.currentPos(),
 			})

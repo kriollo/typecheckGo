@@ -5556,13 +5556,13 @@ func (p *parser) parseObjectTypeLiteral() (ast.TypeNode, error) {
 			return nil, err
 		}
 
-		members = append(members, ast.TypeMember{
-			Key:       key,
-			ValueType: valueType,
-			Optional:  optional,
-			Readonly:  readonly,
-			Position:  memberStart,
-			EndPos:    p.currentPos(),
+		members = append(members, ast.InterfaceProperty{
+			Key:      key,
+			Value:    valueType,
+			Optional: optional,
+			Readonly: readonly,
+			Position: memberStart,
+			EndPos:   p.currentPos(),
 		})
 
 		p.skipWhitespaceAndComments()
