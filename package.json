@@ -32,6 +32,7 @@
     "@types/vue": "^2.0.0",
     "@typescript/native-preview": "^7.0.0-dev.20251117.1",
     "code-tag": "^1.2.0",
+    "express": "^5.1.0",
     "oxlint": "^1.29.0",
     "typescript": "^5.9.3"
   },
