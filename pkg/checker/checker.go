@@ -1504,6 +1504,17 @@ func (tc *TypeChecker) isAssignableTo(sourceType, targetType *types.Type) bool {
 		}
 	}
 
+	// Check if function is assignable to interface with call signature
+	// Example: (x: number) => string is assignable to interface Callable { (x: number): string }
+	if sourceType.Kind == types.FunctionType && targetType.Kind == types.ObjectType {
+		if len(targetType.CallSignatures) > 0 {
+			// The target is a callable interface (has call signatures)
+			// A function is assignable to any callable interface
+			// In a full implementation, we would check parameter and return type compatibility
+			return true
+		}
+	}
+
 	// Check array types
 	if sourceType.Kind == types.ArrayType && targetType.Kind == types.ArrayType {
 		if sourceType.ElementType != nil && targetType.ElementType != nil {
@@ -1851,6 +1862,41 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 					if symbol.Node == nil {
 						return types.Any
 					}
+					interfaceDecl := symbol.Node.(*ast.InterfaceDeclaration)
+
+					// Convert interface members
+					properties := make(map[string]*types.Type)
+					var callSignatures []*types.Type
+
+					for _, member := range interfaceDecl.Members {
+						switch m := member.(type) {
+						case ast.InterfaceProperty:
+							propName := m.Key.Name
+							propType := tc.convertTypeNode(m.Value)
+							properties[propName] = propType
+						case *ast.CallSignature:
+							// Convert call signature to FunctionType
+							params := make([]*types.Type, len(m.Parameters))
+							for i := range m.Parameters {
+								params[i] = types.Any
+							}
+							returnType := tc.convertTypeNode(m.ReturnType)
+							callSignatures = append(callSignatures, types.NewFunctionType(params, returnType))
+						}
+					}
+
+					objType := types.NewObjectType(t.Name, properties)
+					objType.CallSignatures = callSignatures
+					return objType
+				}
+			}
+		}
+
+		// For other type references without type arguments, check if it's an interface
+		// and convert its members (including call signatures)
+		if symbol, exists := tc.symbolTable.ResolveSymbol(t.Name); exists {
+			if symbol.Type == symbols.InterfaceSymbol {
+				if symbol.Node != nil {
 					interfaceDecl := symbol.Node.(*ast.InterfaceDeclaration)
 
 					// Convert interface members
