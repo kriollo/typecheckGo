@@ -99,6 +99,16 @@ func (b *BlockStatement) Pos() Position { return b.Position }
 func (b *BlockStatement) End() Position { return b.EndPos }
 func (b *BlockStatement) stmtNode()     {}
 
+type EmptyStatement struct {
+	Position Position
+	EndPos   Position
+}
+
+func (e *EmptyStatement) Type() string  { return "EmptyStatement" }
+func (e *EmptyStatement) Pos() Position { return e.Position }
+func (e *EmptyStatement) End() Position { return e.EndPos }
+func (e *EmptyStatement) stmtNode()     {}
+
 type ReturnStatement struct {
 	Argument Expression
 	Position Position

@@ -15,6 +15,69 @@ func (p *parser) parseTypeAnnotationFull() (ast.TypeNode, error) {
 		p.skipWhitespaceAndComments()
 	}
 
+	// Parse first type (unary)
+	firstType, err := p.parseTypeAnnotationUnary()
+	if err != nil {
+		return nil, err
+	}
+
+	p.skipWhitespaceAndComments()
+
+	// Check for union type: T | U or T | U | V | ...
+	if p.match("|") {
+		types := []ast.TypeNode{firstType}
+
+		// Loop to handle multiple union types
+		for p.match("|") && !p.isAtEnd() {
+			p.advance()
+			p.skipWhitespaceAndComments()
+
+			right, err := p.parseTypeAnnotationUnary()
+			if err != nil {
+				return nil, err
+			}
+			types = append(types, right)
+			p.skipWhitespaceAndComments()
+		}
+
+		return &ast.UnionType{
+			Types:    types,
+			Position: startPos,
+			EndPos:   p.currentPos(),
+		}, nil
+	}
+
+	// Check for intersection type: T & U or T & U & V & ...
+	if p.match("&") {
+		types := []ast.TypeNode{firstType}
+
+		// Loop to handle multiple intersection types
+		for p.match("&") && !p.isAtEnd() {
+			p.advance()
+			p.skipWhitespaceAndComments()
+
+			right, err := p.parseTypeAnnotationUnary()
+			if err != nil {
+				return nil, err
+			}
+			types = append(types, right)
+			p.skipWhitespaceAndComments()
+		}
+
+		return &ast.IntersectionType{
+			Types:    types,
+			Position: startPos,
+			EndPos:   p.currentPos(),
+		}, nil
+	}
+
+	return firstType, nil
+}
+
+// parseTypeAnnotationUnary parses a type without unions/intersections (primary, extends, array)
+func (p *parser) parseTypeAnnotationUnary() (ast.TypeNode, error) {
+	startPos := p.currentPos()
+
 	// Parse first type
 	firstType, err := p.parseTypeAnnotationPrimary()
 	if err != nil {
@@ -132,54 +195,6 @@ func (p *parser) parseTypeAnnotationFull() (ast.TypeNode, error) {
 				EndPos:   p.currentPos(),
 			}, nil
 		}
-	}
-
-	// Check for union type: T | U or T | U | V | ...
-	if p.match("|") {
-		types := []ast.TypeNode{firstType}
-
-		// Loop to handle multiple union types
-		for p.match("|") && !p.isAtEnd() {
-			p.advance()
-			p.skipWhitespaceAndComments()
-
-			right, err := p.parseTypeAnnotationPrimary()
-			if err != nil {
-				return nil, err
-			}
-			types = append(types, right)
-			p.skipWhitespaceAndComments()
-		}
-
-		return &ast.UnionType{
-			Types:    types,
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		}, nil
-	}
-
-	// Check for intersection type: T & U or T & U & V & ...
-	if p.match("&") {
-		types := []ast.TypeNode{firstType}
-
-		// Loop to handle multiple intersection types
-		for p.match("&") && !p.isAtEnd() {
-			p.advance()
-			p.skipWhitespaceAndComments()
-
-			right, err := p.parseTypeAnnotationPrimary()
-			if err != nil {
-				return nil, err
-			}
-			types = append(types, right)
-			p.skipWhitespaceAndComments()
-		}
-
-		return &ast.IntersectionType{
-			Types:    types,
-			Position: startPos,
-			EndPos:   p.currentPos(),
-		}, nil
 	}
 
 	return firstType, nil
@@ -450,6 +465,7 @@ func (p *parser) parseInterfaceDeclaration() (ast.Declaration, error) {
 	if !p.match("{") {
 		return nil, fmt.Errorf("expected '{' in interface declaration")
 	}
+	p.advance() // Consume opening brace
 
 	// Parse interface body
 	var members []ast.TypeMember
@@ -481,6 +497,7 @@ func (p *parser) parseInterfaceDeclaration() (ast.Declaration, error) {
 
 				if p.match(":") {
 					p.advance()
+					p.skipWhitespaceAndComments()
 					p.skipTypeAnnotation()
 				}
 				p.skipWhitespaceAndComments()
@@ -515,6 +532,7 @@ func (p *parser) parseInterfaceDeclaration() (ast.Declaration, error) {
 			p.skipWhitespaceAndComments()
 			if p.match(":") {
 				p.advance()
+				p.skipWhitespaceAndComments()
 				p.skipTypeAnnotation()
 			}
 			p.skipWhitespaceAndComments()
@@ -541,6 +559,7 @@ func (p *parser) parseInterfaceDeclaration() (ast.Declaration, error) {
 			p.skipWhitespaceAndComments()
 			if p.match(":") {
 				p.advance()
+				p.skipWhitespaceAndComments()
 				p.skipTypeAnnotation()
 			}
 			p.skipWhitespaceAndComments()
@@ -585,11 +604,13 @@ func (p *parser) parseInterfaceDeclaration() (ast.Declaration, error) {
 				p.skipWhitespaceAndComments()
 				if p.match(":") {
 					p.advance()
+					p.skipWhitespaceAndComments()
 					p.skipTypeAnnotation()
 				}
 			} else if p.match(":") {
 				// Property: name: Type
 				p.advance()
+				p.skipWhitespaceAndComments()
 				p.skipTypeAnnotation()
 			}
 

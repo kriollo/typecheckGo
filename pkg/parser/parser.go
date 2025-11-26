@@ -130,6 +130,15 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 	// Prevent infinite loops by tracking position
 	currentPos := p.pos
 
+	// Empty statement
+	if p.match(";") {
+		p.advance()
+		return &ast.EmptyStatement{
+			Position: p.currentPos(),
+			EndPos:   p.currentPos(),
+		}, nil
+	}
+
 	// Handle async function declarations
 	if p.matchKeyword("async") {
 		state := p.saveState()
