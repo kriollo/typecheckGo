@@ -33,6 +33,7 @@ type TypeChecker struct {
 	lazyLibMap         map[string]string        // Map of global symbol name -> lib file name
 	typescriptLibPath  string                   // Path to TypeScript lib directory
 	profiler           *PerformanceProfiler     // Performance profiler for initialization
+	conversionStack    map[ast.TypeNode]bool    // Track types being converted to prevent infinite recursion
 }
 
 // CompilerConfig holds the compiler options for type checking
@@ -92,6 +93,7 @@ func New() *TypeChecker {
 		loadStats:          &LoadStats{},
 		lazyLibMap:         getCommonGlobalMap(),
 		profiler:           NewPerformanceProfiler(),
+		conversionStack:    make(map[ast.TypeNode]bool),
 	}
 
 	return tc
@@ -145,6 +147,7 @@ func NewWithModuleResolver(rootDir string) *TypeChecker {
 		loadStats:          NewLoadStats(),
 		lazyLibMap:         getCommonGlobalMap(),
 		profiler:           NewPerformanceProfiler(),
+		conversionStack:    make(map[ast.TypeNode]bool),
 	}
 
 	// Start profiling if enabled
@@ -203,6 +206,7 @@ func NewWithSharedModuleResolver(resolver *modules.ModuleResolver) *TypeChecker 
 		loadStats:          NewLoadStats(),
 		loadedLibFiles:     make(map[string]bool),
 		profiler:           NewPerformanceProfiler(),
+		conversionStack:    make(map[ast.TypeNode]bool),
 	}
 
 	// Note: Types are NOT loaded here to avoid redundant I/O in worker threads.
@@ -1712,6 +1716,20 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 	if typeNode == nil {
 		return types.Unknown
 	}
+
+	// Prevent infinite recursion for recursive types
+	if tc.conversionStack[typeNode] {
+		// We're already converting this type node, return a placeholder
+		// This handles recursive types like: type JSONValue = ... | JSONValue[]
+		return types.Any
+	}
+
+	// Mark this type as being converted
+	tc.conversionStack[typeNode] = true
+	defer func() {
+		// Clean up after conversion
+		delete(tc.conversionStack, typeNode)
+	}()
 
 	switch t := typeNode.(type) {
 	case *ast.TupleType:
