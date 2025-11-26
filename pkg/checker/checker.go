@@ -1538,6 +1538,20 @@ func (tc *TypeChecker) isAssignableTo(sourceType, targetType *types.Type) bool {
 	if sourceType.Kind == types.LiteralType {
 		switch sourceType.Value.(type) {
 		case string:
+			// Check for BigInt literal (e.g., "100n")
+			if str, ok := sourceType.Value.(string); ok && strings.HasSuffix(str, "n") {
+				// Verify it contains only digits before 'n'
+				isBigInt := true
+				for _, ch := range str[:len(str)-1] {
+					if ch < '0' || ch > '9' {
+						isBigInt = false
+						break
+					}
+				}
+				if isBigInt {
+					return targetType.Kind == types.BigIntType
+				}
+			}
 			return targetType.Kind == types.StringType
 		case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
 			return targetType.Kind == types.NumberType
@@ -1805,6 +1819,8 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 			return types.Number
 		case "boolean":
 			return types.Boolean
+		case "bigint":
+			return types.BigInt
 		case "any":
 			return types.Any
 		case "unknown":

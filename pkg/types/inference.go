@@ -1,6 +1,7 @@
 package types
 
 import (
+	"strings"
 	"tstypechecker/pkg/ast"
 )
 
@@ -215,6 +216,10 @@ func (ti *TypeInferencer) inferLiteralType(lit *ast.Literal) *Type {
 			firstChar := lit.Raw[0]
 			// If it starts with a digit or minus, it's a number
 			if (firstChar >= '0' && firstChar <= '9') || firstChar == '-' {
+				// Check for BigInt suffix
+				if strings.HasSuffix(lit.Raw, "n") {
+					return BigInt
+				}
 				return Number
 			}
 			// If it starts with a quote, it's a string

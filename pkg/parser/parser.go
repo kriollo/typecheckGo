@@ -3216,6 +3216,13 @@ func (p *parser) advanceNumber() string {
 		num.WriteByte(p.source[p.pos])
 		p.advance()
 	}
+
+	// Check for BigInt suffix 'n'
+	if !p.isAtEnd() && p.source[p.pos] == 'n' {
+		num.WriteByte(p.source[p.pos])
+		p.advance()
+	}
+
 	return num.String()
 }
 
