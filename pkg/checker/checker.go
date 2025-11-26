@@ -1642,9 +1642,14 @@ func (tc *TypeChecker) isObjectAssignable(sourceType, targetType *types.Type) bo
 		return sourceType.Kind == types.ObjectType
 	}
 
-	// If source has no properties, it can't satisfy a target with required properties
+	// If source has no properties, check if all target properties are optional
 	if len(sourceType.Properties) == 0 {
-		return len(targetType.Properties) == 0
+		for _, targetPropType := range targetType.Properties {
+			if !tc.isPropertyOptional(targetPropType) {
+				return false
+			}
+		}
+		return true
 	}
 
 	// Check that source has all required properties of target
@@ -1832,6 +1837,10 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 				return types.Number
 			case "boolean":
 				return types.Boolean
+			case "true":
+				return types.NewLiteralType(true)
+			case "false":
+				return types.NewLiteralType(false)
 			case "bigint":
 				return types.BigInt
 			case "any":
