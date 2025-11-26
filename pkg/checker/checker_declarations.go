@@ -58,6 +58,18 @@ func (tc *TypeChecker) checkVariableDeclaration(decl *ast.VariableDeclaration, f
 						typeToCheck = tc.inferLiteralType(declarator.Init)
 					}
 
+					// Special handling for array literals assigned to tuple types
+					if declaredType.Kind == types.TupleType {
+						if arrayExpr, ok := declarator.Init.(*ast.ArrayExpression); ok {
+							// Re-infer as tuple
+							elementTypes := make([]*types.Type, len(arrayExpr.Elements))
+							for i, elem := range arrayExpr.Elements {
+								elementTypes[i] = tc.inferencer.InferType(elem)
+							}
+							typeToCheck = &types.Type{Kind: types.TupleType, Types: elementTypes}
+						}
+					}
+
 					if !tc.isAssignableTo(typeToCheck, declaredType) {
 						tc.addError(filename, declarator.Init.Pos().Line, declarator.Init.Pos().Column,
 							fmt.Sprintf("Type '%s' is not assignable to type '%s'.", typeToCheck.String(), declaredType.String()),

@@ -1464,9 +1464,11 @@ func (tc *TypeChecker) isAssignableTo(sourceType, targetType *types.Type) bool {
 	// accept any object type as compatible
 	if targetType.Kind == types.ObjectType && targetType.Name != "" {
 		// If target has no properties defined, it's likely an unresolved imported type
-		// Accept any object type as compatible
-		if len(targetType.Properties) == 0 && sourceType.Kind == types.ObjectType {
-			return true
+		// Accept any object type (including arrays and functions) as compatible
+		if len(targetType.Properties) == 0 && len(targetType.CallSignatures) == 0 {
+			if sourceType.Kind == types.ObjectType || sourceType.Kind == types.ArrayType || sourceType.Kind == types.FunctionType {
+				return true
+			}
 		}
 	}
 
