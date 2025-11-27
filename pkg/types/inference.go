@@ -177,14 +177,14 @@ func (ti *TypeInferencer) inferArrowFunctionReturnType(arrow *ast.ArrowFunctionE
 
 	// If the body is a block statement, look for return statements
 	if block, ok := arrow.Body.(*ast.BlockStatement); ok {
-		return ti.inferReturnTypeFromBlock(block)
+		return ti.InferReturnTypeFromBlock(block)
 	}
 
 	return Unknown
 }
 
-// inferReturnTypeFromBlock finds return statements in a block and infers the return type
-func (ti *TypeInferencer) inferReturnTypeFromBlock(block *ast.BlockStatement) *Type {
+// InferReturnTypeFromBlock finds return statements in a block and infers the return type
+func (ti *TypeInferencer) InferReturnTypeFromBlock(block *ast.BlockStatement) *Type {
 	for _, stmt := range block.Body {
 		if returnStmt, ok := stmt.(*ast.ReturnStatement); ok {
 			if returnStmt.Argument != nil {
@@ -196,7 +196,7 @@ func (ti *TypeInferencer) inferReturnTypeFromBlock(block *ast.BlockStatement) *T
 		// Recursively check nested blocks (if statements, etc.)
 		if ifStmt, ok := stmt.(*ast.IfStatement); ok {
 			if consequent, ok := ifStmt.Consequent.(*ast.BlockStatement); ok {
-				if returnType := ti.inferReturnTypeFromBlock(consequent); returnType.Kind != UnknownType {
+				if returnType := ti.InferReturnTypeFromBlock(consequent); returnType.Kind != UnknownType {
 					return returnType
 				}
 			}
