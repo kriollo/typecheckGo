@@ -323,6 +323,10 @@ func (b *Binder) bindExpression(expr ast.Expression) {
 		// For now, we don't bind the class body
 		// In a full implementation, we would bind class members
 		return
+	case *ast.SatisfiesExpression:
+		// Bind the expression being checked
+		b.bindExpression(e.Expression)
+		return
 	default:
 		// Unknown expression type
 		fmt.Printf("Warning: Unknown expression type: %T\n", expr)

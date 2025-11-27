@@ -2088,6 +2088,37 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 		}
 		return types.NewObjectType("", properties)
 
+	case *ast.IndexedAccessType:
+		// Handle indexed access types: T[K]
+		objectType := tc.convertTypeNode(t.ObjectType)
+		indexType := tc.convertTypeNode(t.IndexType)
+
+		fmt.Printf("DEBUG IndexedAccessType: objectType=%s (kind=%v), indexType=%s (kind=%v)\n",
+			objectType.String(), objectType.Kind, indexType.String(), indexType.Kind)
+		if objectType.Properties != nil {
+			fmt.Printf("  objectType.Properties: %v\n", len(objectType.Properties))
+			for k, v := range objectType.Properties {
+				fmt.Printf("    %s: %s\n", k, v.String())
+			}
+		}
+
+		// If indexType is a literal string, try to get that property from objectType
+		if indexType.Kind == types.LiteralType {
+			if propName, ok := indexType.Value.(string); ok {
+				fmt.Printf("  Looking for property '%s'\n", propName)
+				if objectType.Kind == types.ObjectType && objectType.Properties != nil {
+					if propType, exists := objectType.Properties[propName]; exists {
+						fmt.Printf("  Found property type: %s\n", propType.String())
+						return propType
+					}
+				}
+			}
+		}
+
+		// If we can't resolve it, return an IndexedAccessType
+		fmt.Printf("  Could not resolve, returning IndexedAccessType\n")
+		return types.NewIndexedAccessType(objectType, indexType)
+
 	default:
 		return types.Unknown
 	}

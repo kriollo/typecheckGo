@@ -186,13 +186,12 @@ func (p *parser) parseTypeAnnotationUnary() (ast.TypeNode, error) {
 			}
 			p.advance()
 
-			// TODO: Return IndexedAccessType
-			// For now return TypeReference
-			return &ast.TypeReference{
-				Name: "(indexed)",
-				// TypeArguments: []ast.TypeNode{firstType, indexType},
-				Position: startPos,
-				EndPos:   p.currentPos(),
+			// Return IndexedAccessType
+			return &ast.IndexedAccessType{
+				ObjectType: firstType,
+				IndexType:  indexType,
+				Position:   startPos,
+				EndPos:     p.currentPos(),
 			}, nil
 		}
 	}
@@ -433,18 +432,13 @@ func (p *parser) parseInterfaceDeclaration() (ast.Declaration, error) {
 
 	p.skipWhitespaceAndComments()
 
-	// Generics
+	// Parse type parameters (generics)
+	var typeParams []ast.TypeNode
 	if p.match("<") {
-		// Skip generics
-		depth := 1
-		p.advance()
-		for depth > 0 && !p.isAtEnd() {
-			if p.match("<") {
-				depth++
-			} else if p.match(">") {
-				depth--
-			}
-			p.advance()
+		var err error
+		typeParams, err = p.parseTypeParameters()
+		if err != nil {
+			return nil, err
 		}
 	}
 
@@ -728,10 +722,11 @@ func (p *parser) parseInterfaceDeclaration() (ast.Declaration, error) {
 	}
 
 	return &ast.InterfaceDeclaration{
-		ID:       id,
-		Members:  members,
-		Position: startPos,
-		EndPos:   p.currentPos(),
+		ID:             id,
+		Members:        members,
+		TypeParameters: typeParams,
+		Position:       startPos,
+		EndPos:         p.currentPos(),
 	}, nil
 }
 
