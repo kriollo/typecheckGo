@@ -342,9 +342,9 @@ func (p *parser) parseFunctionDeclarationInternal() (*ast.FunctionDeclaration, e
 		p.advance() // consume ':'
 		p.skipWhitespaceAndComments()
 
-		// Parse return type properly
+		// Parse return type properly using safe helper
 		var err error
-		returnType, err = p.parseTypeAnnotation()
+		returnType, err = p.parseReturnTypeAnnotation()
 		if err != nil {
 			return nil, err
 		}
@@ -405,14 +405,16 @@ func (p *parser) parseFunctionExpression() (*ast.FunctionExpression, error) {
 	p.skipWhitespaceAndComments()
 
 	// Handle return type annotation (: Type)
+	var returnType ast.TypeNode
 	if p.match(":") {
 		p.advance() // consume ':'
 		p.skipWhitespaceAndComments()
 
-		// Parse return type (simplified - just skip until we find '{')
-		// In a full implementation, we would parse the type properly
-		for !p.isAtEnd() && !p.match("{") {
-			p.advance()
+		// Parse return type properly using safe helper
+		var err error
+		returnType, err = p.parseReturnTypeAnnotation()
+		if err != nil {
+			return nil, err
 		}
 		p.skipWhitespaceAndComments()
 	}
@@ -423,13 +425,14 @@ func (p *parser) parseFunctionExpression() (*ast.FunctionExpression, error) {
 	}
 
 	return &ast.FunctionExpression{
-		ID:        name,
-		Params:    params,
-		Body:      body,
-		Async:     false,
-		Generator: false,
-		Position:  startPos,
-		EndPos:    p.currentPos(),
+		ID:         name,
+		Params:     params,
+		ReturnType: returnType,
+		Body:       body,
+		Async:      false,
+		Generator:  false,
+		Position:   startPos,
+		EndPos:     p.currentPos(),
 	}, nil
 }
 
@@ -462,14 +465,16 @@ func (p *parser) parseAsyncFunctionExpression() (*ast.FunctionExpression, error)
 	p.skipWhitespaceAndComments()
 
 	// Handle return type annotation (: Type)
+	var returnType ast.TypeNode
 	if p.match(":") {
 		p.advance() // consume ':'
 		p.skipWhitespaceAndComments()
 
-		// Parse return type (simplified - just skip until we find '{')
-		// In a full implementation, we would parse the type properly
-		for !p.isAtEnd() && !p.match("{") {
-			p.advance()
+		// Parse return type properly using safe helper
+		var err error
+		returnType, err = p.parseReturnTypeAnnotation()
+		if err != nil {
+			return nil, err
 		}
 		p.skipWhitespaceAndComments()
 	}
@@ -480,13 +485,14 @@ func (p *parser) parseAsyncFunctionExpression() (*ast.FunctionExpression, error)
 	}
 
 	return &ast.FunctionExpression{
-		ID:        name,
-		Params:    params,
-		Body:      body,
-		Async:     true, // This is an async function
-		Generator: false,
-		Position:  startPos,
-		EndPos:    p.currentPos(),
+		ID:         name,
+		Params:     params,
+		ReturnType: returnType,
+		Body:       body,
+		Async:      true, // This is an async function
+		Generator:  false,
+		Position:   startPos,
+		EndPos:     p.currentPos(),
 	}, nil
 }
 
@@ -5188,11 +5194,16 @@ func (p *parser) parseMethodDefinition(name *ast.Identifier, accessModifier stri
 	p.skipWhitespaceAndComments()
 
 	// Parse return type annotation if present
+	var returnType ast.TypeNode
 	if p.match(":") {
 		p.advance()
 		p.skipWhitespaceAndComments()
-		// Skip return type for now
-		p.skipTypeAnnotation()
+		// Parse return type properly using safe helper
+		var err error
+		returnType, err = p.parseReturnTypeAnnotation()
+		if err != nil {
+			return nil, err
+		}
 		p.skipWhitespaceAndComments()
 	}
 
@@ -5224,12 +5235,13 @@ func (p *parser) parseMethodDefinition(name *ast.Identifier, accessModifier stri
 	}
 
 	funcExpr := &ast.FunctionExpression{
-		ID:       name,
-		Params:   params,
-		Body:     body,
-		Async:    isAsync,
-		Position: startPos,
-		EndPos:   p.currentPos(),
+		ID:         name,
+		Params:     params,
+		ReturnType: returnType,
+		Body:       body,
+		Async:      isAsync,
+		Position:   startPos,
+		EndPos:     p.currentPos(),
 	}
 
 	return &ast.MethodDefinition{

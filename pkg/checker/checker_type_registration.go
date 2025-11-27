@@ -27,9 +27,11 @@ func (tc *TypeChecker) registerClassType(decl *ast.ClassDeclaration, filename st
 					}
 				}
 
-				// Infer return type from body if available
+				// Use declared return type if available, otherwise infer from body
 				var returnType *types.Type
-				if m.Value.Body != nil {
+				if m.Value.ReturnType != nil {
+					returnType = tc.convertTypeNode(m.Value.ReturnType)
+				} else if m.Value.Body != nil {
 					returnType = tc.inferencer.InferReturnTypeFromBlock(m.Value.Body)
 				} else {
 					returnType = types.Void
@@ -90,9 +92,11 @@ func (tc *TypeChecker) registerFunctionType(decl *ast.FunctionDeclaration, filen
 		}
 	}
 
-	// Infer return type from body if available
+	// Use declared return type if available, otherwise infer from body
 	var returnType *types.Type
-	if decl.Body != nil {
+	if decl.ReturnType != nil {
+		returnType = tc.convertTypeNode(decl.ReturnType)
+	} else if decl.Body != nil {
 		returnType = tc.inferencer.InferReturnTypeFromBlock(decl.Body)
 	} else {
 		returnType = types.Void
