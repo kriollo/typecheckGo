@@ -83,6 +83,14 @@ func (ti *TypeInferencer) InferType(expr ast.Expression) *Type {
 		return Void
 	case *ast.MemberExpression:
 		return ti.inferMemberExpressionType(e)
+	case *ast.NewExpression:
+		// new ClassName() should return the instance type
+		// The constructor type in varTypeCache is a FunctionType whose ReturnType is the instance
+		constructorType := ti.InferType(e.Callee)
+		if constructorType.Kind == FunctionType && constructorType.ReturnType != nil {
+			return constructorType.ReturnType
+		}
+		return Unknown
 	default:
 		return Unknown
 	}
