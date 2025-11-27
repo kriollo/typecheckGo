@@ -2108,6 +2108,12 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 				}
 			}
 
+			// Check if it's a type parameter (generic type variable)
+			// Simple heuristic: single uppercase letter (T, U, K, V, etc.)
+			if len(t.Name) == 1 && t.Name[0] >= 'A' && t.Name[0] <= 'Z' {
+				return types.NewTypeParameter(t.Name, nil, nil)
+			}
+
 			// Handle basic type references
 			switch t.Name {
 			case "string":

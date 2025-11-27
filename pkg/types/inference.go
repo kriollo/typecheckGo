@@ -142,8 +142,23 @@ func (ti *TypeInferencer) inferCallExpressionType(call *ast.CallExpression) *Typ
 	// Get the type of the callee
 	calleeType := ti.InferType(call.Callee)
 
-	// If it's a function type, return its return type
+	// If it's a function type, check if we need to infer generic types
 	if calleeType.Kind == FunctionType && calleeType.ReturnType != nil {
+		// Check if return type is a type parameter (generic)
+		if calleeType.ReturnType.Kind == TypeParameterType {
+			// Try to infer the type parameter from arguments
+			if len(call.Arguments) > 0 && len(calleeType.Parameters) > 0 {
+				// Simple case: if first parameter type matches return type parameter,
+				// infer from first argument
+				firstParamType := calleeType.Parameters[0]
+				if firstParamType.Kind == TypeParameterType &&
+					firstParamType.Name == calleeType.ReturnType.Name {
+					// Infer type from first argument
+					argType := ti.InferType(call.Arguments[0])
+					return argType
+				}
+			}
+		}
 		return calleeType.ReturnType
 	}
 
@@ -156,8 +171,21 @@ func (ti *TypeInferencer) inferCallExpressionType(call *ast.CallExpression) *Typ
 	if id, ok := call.Callee.(*ast.Identifier); ok {
 		// Check if we have the variable in cache
 		if varType, exists := ti.varTypeCache[id.Name]; exists {
-			// If it's a function type, return its return type
+			// If it's a function type, check for generics
 			if varType.Kind == FunctionType && varType.ReturnType != nil {
+				// Check if return type is a type parameter (generic)
+				if varType.ReturnType.Kind == TypeParameterType {
+					// Try to infer the type parameter from arguments
+					if len(call.Arguments) > 0 && len(varType.Parameters) > 0 {
+						firstParamType := varType.Parameters[0]
+						if firstParamType.Kind == TypeParameterType &&
+							firstParamType.Name == varType.ReturnType.Name {
+							// Infer type from first argument
+							argType := ti.InferType(call.Arguments[0])
+							return argType
+						}
+					}
+				}
 				return varType.ReturnType
 			}
 		}
