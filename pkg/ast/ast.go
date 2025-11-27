@@ -784,6 +784,7 @@ type ClassDeclaration struct {
 	Implements     []TypeNode  // implements clause
 	Body           []ClassMember
 	TypeParameters []TypeNode // Generic type parameters
+	Abstract       bool       // true if this is an abstract class
 	Position       Position
 	EndPos         Position
 }

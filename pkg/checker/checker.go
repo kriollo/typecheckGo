@@ -389,6 +389,33 @@ func (tc *TypeChecker) checkAssignmentExpression(assign *ast.AssignmentExpressio
 	// Check right side
 	tc.checkExpression(assign.Right, filename)
 
+	// Check for readonly assignment
+	if member, ok := assign.Left.(*ast.MemberExpression); ok {
+		objType := tc.getExpressionType(member.Object)
+
+		// Handle property access: obj.prop = val
+		if !member.Computed {
+			if prop, ok := member.Property.(*ast.Identifier); ok {
+				if objType.Kind == types.ObjectType {
+					if propType, ok := objType.Properties[prop.Name]; ok {
+						if propType.IsReadonly {
+							tc.addError(filename, assign.Left.Pos().Line, assign.Left.Pos().Column,
+								fmt.Sprintf("Cannot assign to '%s' because it is a read-only property.", prop.Name),
+								"TS2540", "error")
+						}
+					}
+				}
+			}
+		} else {
+			// Handle array index assignment: arr[0] = val
+			if objType.Kind == types.ArrayType && objType.IsReadonly {
+				tc.addError(filename, assign.Left.Pos().Line, assign.Left.Pos().Column,
+					"Index signature in type 'readonly any[]' only permits reading.",
+					"TS2542", "error")
+			}
+		}
+	}
+
 	// Type checking - verify that right is assignable to left (only for simple assignments)
 	if assign.Operator == "=" {
 		leftType := tc.getExpressionType(assign.Left)
@@ -1962,6 +1989,11 @@ func (tc *TypeChecker) checkNewExpression(expr *ast.NewExpression, filename stri
 		if symbol, exists := tc.symbolTable.ResolveSymbol(id.Name); exists {
 			// Check if it's a class with a constructor
 			if classDecl, ok := symbol.Node.(*ast.ClassDeclaration); ok && classDecl != nil {
+				// Check for abstract class instantiation
+				if classDecl.Abstract {
+					tc.addError(filename, expr.Pos().Line, expr.Pos().Column, fmt.Sprintf("Cannot create an instance of an abstract class '%s'.", id.Name), "TS2511", "error")
+				}
+
 				// Find the constructor method
 				for _, member := range classDecl.Body {
 					if method, ok := member.(*ast.MethodDefinition); ok {

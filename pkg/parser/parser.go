@@ -232,7 +232,7 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 		p.skipWhitespaceAndComments()
 
 		if p.matchKeyword("class") {
-			return p.parseClassDeclaration()
+			return p.parseClassDeclaration(true)
 		}
 
 		// If not a class, restore state (might be used elsewhere or invalid)
@@ -241,7 +241,7 @@ func (p *parser) parseStatement() (ast.Statement, error) {
 
 	// Class declaration
 	if p.matchKeyword("class") {
-		return p.parseClassDeclaration()
+		return p.parseClassDeclaration(false)
 	}
 
 	// Enum declaration
@@ -2086,7 +2086,7 @@ func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 	// class expression: class Name { ... } or class { ... }
 	if p.matchKeyword("class") {
 		// Parse as class declaration/expression
-		classDecl, err := p.parseClassDeclaration()
+		classDecl, err := p.parseClassDeclaration(false)
 		if err != nil {
 			return nil, err
 		}
@@ -2825,7 +2825,7 @@ func (p *parser) parseExportDeclaration() (*ast.ExportDeclaration, error) {
 			}
 			declaration = funcDecl
 		} else if p.matchKeyword("class") {
-			classDecl, err := p.parseClassDeclaration()
+			classDecl, err := p.parseClassDeclaration(false)
 			if err != nil {
 				return nil, err
 			}
@@ -3047,7 +3047,7 @@ func (p *parser) parseExportDeclaration() (*ast.ExportDeclaration, error) {
 	}
 
 	if p.matchKeyword("class") {
-		classDecl, err := p.parseClassDeclaration()
+		classDecl, err := p.parseClassDeclaration(false)
 		if err != nil {
 			return nil, err
 		}
@@ -4481,24 +4481,6 @@ func (p *parser) parseTypeAnnotationPrimary() (ast.TypeNode, error) {
 		}, nil
 	}
 
-	// readonly operator
-	if p.match("readonly") {
-		p.advanceString(8)
-		p.skipWhitespaceAndComments()
-
-		operand, err := p.parseTypeAnnotationPrimary()
-		if err != nil {
-			return nil, err
-		}
-
-		return &ast.TypeReference{
-			Name:          "readonly",
-			TypeArguments: []ast.TypeNode{operand},
-			Position:      startPos,
-			EndPos:        p.currentPos(),
-		}, nil
-	}
-
 	// Template literal type `prefix${T}suffix`
 	if p.match("`") {
 		return p.parseTemplateLiteralType()
@@ -4963,7 +4945,7 @@ func (p *parser) parseEnumDeclaration() (*ast.EnumDeclaration, error) {
 }
 
 // parseClassDeclaration parses a class declaration
-func (p *parser) parseClassDeclaration() (*ast.ClassDeclaration, error) {
+func (p *parser) parseClassDeclaration(isAbstract bool) (*ast.ClassDeclaration, error) {
 	startPos := p.currentPos()
 
 	// Consume 'class'
@@ -5073,6 +5055,7 @@ func (p *parser) parseClassDeclaration() (*ast.ClassDeclaration, error) {
 		Implements:     implements,
 		Body:           members,
 		TypeParameters: typeParameters,
+		Abstract:       isAbstract,
 		Position:       startPos,
 		EndPos:         p.currentPos(),
 	}, nil
