@@ -105,6 +105,11 @@ func (tc *TypeChecker) checkFunctionDeclaration(decl *ast.FunctionDeclaration, f
 			fmt.Sprintf("Invalid function name: '%s'", decl.ID.Name), "TS1003", "error")
 	}
 
+	// Ensure the function type is registered (in case this wasn't called in first pass)
+	if _, exists := tc.varTypeCache[decl.ID.Name]; !exists {
+		tc.registerFunctionType(decl, filename)
+	}
+
 	// Check if async function is used without Promise support
 	if decl.Async {
 		if !tc.globalEnv.HasGlobal("Promise") {
@@ -275,6 +280,11 @@ func (tc *TypeChecker) checkClassDeclaration(decl *ast.ClassDeclaration, filenam
 			fmt.Sprintf("Invalid class name: '%s'", decl.ID.Name), "TS1003", "error")
 	}
 
+	// Ensure the class type is registered (in case this wasn't called in first pass)
+	if _, exists := tc.varTypeCache[decl.ID.Name]; !exists {
+		tc.registerClassType(decl, filename)
+	}
+
 	// Find the class scope
 	classScope := tc.findScopeForNode(decl)
 	if classScope == nil {
@@ -288,11 +298,7 @@ func (tc *TypeChecker) checkClassDeclaration(decl *ast.ClassDeclaration, filenam
 	// Enter class scope
 	tc.symbolTable.Current = classScope
 
-	// Build instance type with method signatures
-	instanceProperties := make(map[string]*types.Type)
-	staticProperties := make(map[string]*types.Type)
-
-	// Check members and collect their types
+	// Check members
 	for _, member := range decl.Body {
 		switch m := member.(type) {
 		case *ast.MethodDefinition:
@@ -317,73 +323,16 @@ func (tc *TypeChecker) checkClassDeclaration(decl *ast.ClassDeclaration, filenam
 				}
 			}
 
-			// Build method type
-			if m.Value != nil {
-				paramTypes := make([]*types.Type, len(m.Value.Params))
-				for i, param := range m.Value.Params {
-					if param.ParamType != nil {
-						paramTypes[i] = tc.convertTypeNode(param.ParamType)
-					} else {
-						paramTypes[i] = types.Any
-					}
-				}
-
-				// Infer return type from body if available
-				var returnType *types.Type
-				if m.Value.Body != nil {
-					returnType = tc.inferencer.InferReturnTypeFromBlock(m.Value.Body)
-				} else {
-					returnType = types.Void
-				}
-
-				methodType := types.NewFunctionType(paramTypes, returnType)
-
-				// Add to appropriate properties map
-				if m.Static {
-					staticProperties[m.Key.Name] = methodType
-				} else {
-					instanceProperties[m.Key.Name] = methodType
-				}
-			}
-
 		case *ast.PropertyDefinition:
 			// Check property initializer
 			if m.Value != nil {
 				tc.checkExpression(m.Value, filename)
-			}
-
-			// Determine property type
-			var propType *types.Type
-			if m.TypeAnnotation != nil {
-				propType = tc.convertTypeNode(m.TypeAnnotation)
-			} else if m.Value != nil {
-				propType = tc.inferencer.InferType(m.Value)
-			} else {
-				propType = types.Any
-			}
-
-			// Add to appropriate properties map
-			if m.Static {
-				staticProperties[m.Key.Name] = propType
-			} else {
-				instanceProperties[m.Key.Name] = propType
 			}
 		}
 	}
 
 	// Restore original scope
 	tc.symbolTable.Current = originalScope
-
-	// Create and register instance type
-	instanceType := types.NewObjectType(decl.ID.Name, instanceProperties)
-
-	// Create constructor type (function that returns instance)
-	constructorType := types.NewFunctionType(nil, instanceType)
-	constructorType.Properties = staticProperties
-
-	// Register in cache so that 'new ClassName()' returns the instance type
-	tc.varTypeCache[decl.ID.Name] = constructorType
-	tc.typeCache[decl.ID] = constructorType
 }
 
 func (tc *TypeChecker) checkEnumDeclaration(decl *ast.EnumDeclaration, filename string) {

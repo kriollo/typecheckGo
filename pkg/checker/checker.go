@@ -265,6 +265,29 @@ func (tc *TypeChecker) CheckFile(filename string, file *ast.File) []TypeError {
 
 // checkFile performs type checking on a file
 func (tc *TypeChecker) checkFile(file *ast.File, filename string) {
+	// First pass: Register all class and function types
+	// This ensures that when we check variable declarations like "const x = new MyClass()",
+	// the type of MyClass is already available
+	for _, stmt := range file.Body {
+		switch s := stmt.(type) {
+		case *ast.ClassDeclaration:
+			tc.registerClassType(s, filename)
+		case *ast.FunctionDeclaration:
+			tc.registerFunctionType(s, filename)
+		case *ast.ExportDeclaration:
+			// Handle exported classes and functions
+			if s.Declaration != nil {
+				switch decl := s.Declaration.(type) {
+				case *ast.ClassDeclaration:
+					tc.registerClassType(decl, filename)
+				case *ast.FunctionDeclaration:
+					tc.registerFunctionType(decl, filename)
+				}
+			}
+		}
+	}
+
+	// Second pass: Full type checking
 	for _, stmt := range file.Body {
 		tc.checkStatement(stmt, filename)
 	}
