@@ -582,18 +582,20 @@ func (tc *TypeChecker) checkCallExpression(call *ast.CallExpression, filename st
 					tc.addError(filename, call.Pos().Line, call.Pos().Column, msg, "TS2349", "error")
 				}
 			} else {
-				// Check parameter count
+				// Check parameter count and types
 				// Skip validation for symbols from .d.ts files (they may have complex overloads)
 				if len(symbol.Params) > 0 && !symbol.FromDTS {
 					// Count required and total parameters from the AST node
 					requiredCount := len(symbol.Params)
 					totalCount := len(symbol.Params)
 					hasRest := false
+					var params []*ast.Parameter
 
 					// Try to get parameter info from the AST node
 					if funcDecl, ok := symbol.Node.(*ast.FunctionDeclaration); ok && funcDecl != nil {
 						requiredCount = 0
 						totalCount = len(funcDecl.Params)
+						params = funcDecl.Params
 						for _, param := range funcDecl.Params {
 							if param.Rest {
 								hasRest = true
@@ -608,6 +610,7 @@ func (tc *TypeChecker) checkCallExpression(call *ast.CallExpression, filename st
 						if arrowFunc, ok := varDeclarator.Init.(*ast.ArrowFunctionExpression); ok && arrowFunc != nil {
 							requiredCount = 0
 							totalCount = len(arrowFunc.Params)
+							params = arrowFunc.Params
 							for _, param := range arrowFunc.Params {
 								if param.Rest {
 									hasRest = true
@@ -648,8 +651,107 @@ func (tc *TypeChecker) checkCallExpression(call *ast.CallExpression, filename st
 						}
 						tc.addError(filename, call.Pos().Line, call.Pos().Column, msg, "TS2554", "error")
 					}
+
+					// Check argument types if we have parameter type information
+					if params != nil && actualCount > 0 {
+						tc.checkArgumentTypes(call.Arguments, params, filename, id.Name)
+					}
 				}
 			}
+		}
+	}
+}
+
+// checkArgumentTypes validates that argument types match parameter types
+func (tc *TypeChecker) checkArgumentTypes(args []ast.Expression, params []*ast.Parameter, filename string, funcName string) {
+	// Skip validation for function overload implementations
+	// In TypeScript, overload implementations typically have all parameters as 'any'
+	// Example: function add(a: any, b: any): any { ... } is the implementation for overloads
+	allAny := true
+	for _, param := range params {
+		if param.ParamType != nil {
+			if typeRef, ok := param.ParamType.(*ast.TypeReference); ok {
+				if typeRef.Name != "any" {
+					allAny = false
+					break
+				}
+			} else {
+				allAny = false
+				break
+			}
+		}
+	}
+	if allAny && len(params) > 0 {
+		// This is likely an overload implementation, skip validation
+		return
+	}
+
+	// Check each argument against its corresponding parameter
+	for i, arg := range args {
+		// Skip if we've run out of parameters (rest params or extra args already caught)
+		if i >= len(params) {
+			break
+		}
+
+		param := params[i]
+
+		// Skip rest parameters - they accept any number of arguments
+		if param.Rest {
+			break
+		}
+
+		// Skip if parameter has no type annotation
+		if param.ParamType == nil {
+			continue
+		}
+
+		// Skip generic type parameters (T, K, V, etc.) - these are inferred from arguments
+		// and we don't have the inference logic to validate them properly
+		if typeRef, ok := param.ParamType.(*ast.TypeReference); ok {
+			// Check if it's a simple generic type parameter (single uppercase letter or common generic names)
+			if len(typeRef.Name) <= 3 && (typeRef.Name == "T" || typeRef.Name == "K" || typeRef.Name == "V" ||
+				typeRef.Name == "U" || typeRef.Name == "R" || typeRef.Name == "E" || typeRef.Name == "P") {
+				continue
+			}
+		}
+
+		// Get the expected parameter type
+		expectedType := tc.convertTypeNode(param.ParamType)
+		if expectedType == nil || expectedType.Kind == types.AnyType {
+			continue
+		}
+
+		// Skip if the expected type is a generic type parameter
+		if expectedType.Kind == types.TypeParameterType {
+			continue
+		}
+
+		// Get the actual argument type
+		var actualType *types.Type
+		if tc.needsLiteralType(expectedType) {
+			actualType = tc.inferLiteralType(arg)
+		} else {
+			actualType = tc.inferencer.InferType(arg)
+		}
+
+		// Check if argument type is assignable to parameter type
+		if !tc.isAssignableTo(actualType, expectedType) {
+			paramName := "parameter"
+			if param.ID != nil {
+				paramName = fmt.Sprintf("parameter '%s'", param.ID.Name)
+			}
+
+			msg := fmt.Sprintf("Argument of type '%s' is not assignable to %s of type '%s'.",
+				actualType.String(), paramName, expectedType.String())
+
+			// Add helpful suggestions based on common mistakes
+			if expectedType.Kind == types.StringType && actualType.Kind == types.NumberType {
+				msg += "\n  Sugerencia: Convierte el número a string usando .toString() o String()"
+			} else if expectedType.Kind == types.NumberType && actualType.Kind == types.StringType {
+				msg += "\n  Sugerencia: Convierte el string a número usando Number() o parseInt()"
+			}
+
+			tc.addError(filename, arg.Pos().Line, arg.Pos().Column, msg, "TS2345", "error")
 		}
 	}
 }
@@ -1796,8 +1898,25 @@ func (tc *TypeChecker) checkNewExpression(expr *ast.NewExpression, filename stri
 		tc.checkExpression(arg, filename)
 	}
 
-	// TODO: Verify that the callee is actually a class/constructor
-	// TODO: Check argument types against constructor signature
+	// Check constructor argument types
+	if id, ok := expr.Callee.(*ast.Identifier); ok {
+		if symbol, exists := tc.symbolTable.ResolveSymbol(id.Name); exists {
+			// Check if it's a class with a constructor
+			if classDecl, ok := symbol.Node.(*ast.ClassDeclaration); ok && classDecl != nil {
+				// Find the constructor method
+				for _, member := range classDecl.Body {
+					if method, ok := member.(*ast.MethodDefinition); ok {
+						if method.Kind == "constructor" && method.Value != nil {
+							// Validate argument types against constructor parameters
+							if len(method.Value.Params) > 0 && len(expr.Arguments) > 0 {
+								tc.checkArgumentTypes(expr.Arguments, method.Value.Params, filename, id.Name)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
 }
 
 // convertTypeNode converts an AST TypeNode to a types.Type
