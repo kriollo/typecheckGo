@@ -1522,6 +1522,20 @@ func (tc *TypeChecker) isAssignableTo(sourceType, targetType *types.Type) bool {
 			}
 			return true
 		}
+		// For array types, check element type compatibility
+		if sourceType.Kind == types.ArrayType {
+			if sourceType.ElementType != nil && targetType.ElementType != nil {
+				// Check readonly compatibility
+				// Mutable (IsReadonly=false) is assignable to Readonly (IsReadonly=true)
+				// Readonly (IsReadonly=true) is NOT assignable to Mutable (IsReadonly=false)
+				if sourceType.IsReadonly && !targetType.IsReadonly {
+					return false
+				}
+
+				// Check element type compatibility (Covariance)
+				return tc.isAssignableTo(sourceType.ElementType, targetType.ElementType)
+			}
+		}
 		return true
 	}
 
@@ -1815,6 +1829,17 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 		}
 		return &types.Type{Kind: types.TupleType, Types: elementTypes}
 	case *ast.TypeReference:
+		// Handle readonly types
+		if t.Name == "readonly" && len(t.TypeArguments) == 1 {
+			innerType := tc.convertTypeNode(t.TypeArguments[0])
+			if innerType != nil {
+				newType := *innerType
+				newType.IsReadonly = true
+				return &newType
+			}
+			return types.Unknown
+		}
+
 		// Handle array types: Breadcrumb[] is parsed as TypeReference{Name: "(array)", TypeArguments: [Breadcrumb]}
 		if t.Name == "(array)" && len(t.TypeArguments) == 1 {
 			elementType := tc.convertTypeNode(t.TypeArguments[0])

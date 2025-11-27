@@ -100,6 +100,7 @@ type Type struct {
 	Value          interface{} // Para literal types
 	CallSignatures []*Type     // Para interfaces con call signatures
 	IsFunction     bool        // Indica si el tipo es una función callable
+	IsReadonly     bool        // Indica si el tipo es readonly (para arrays y propiedades)
 
 	// Para mapped types: { [K in keyof T]: U }
 	TypeParameter *Type // K
