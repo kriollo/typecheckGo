@@ -627,6 +627,14 @@ func (p *parser) parseInterfaceDeclaration() (ast.Declaration, error) {
 			continue
 		}
 
+		// Check for readonly modifier
+		isReadonly := false
+		if p.match("readonly") {
+			p.advanceString(8)
+			p.skipWhitespaceAndComments()
+			isReadonly = true
+		}
+
 		// Regular property or method
 		if p.matchIdentifier() || p.matchString() {
 			// Parse property name
@@ -687,6 +695,7 @@ func (p *parser) parseInterfaceDeclaration() (ast.Declaration, error) {
 					Key:      name,
 					Value:    funcType,
 					Optional: isOptional,
+					Readonly: isReadonly,
 					Position: memberStart,
 					EndPos:   p.currentPos(),
 				})
@@ -703,6 +712,7 @@ func (p *parser) parseInterfaceDeclaration() (ast.Declaration, error) {
 					Key:      name,
 					Value:    propType,
 					Optional: isOptional,
+					Readonly: isReadonly,
 					Position: memberStart,
 					EndPos:   p.currentPos(),
 				})
@@ -710,8 +720,9 @@ func (p *parser) parseInterfaceDeclaration() (ast.Declaration, error) {
 				// Property without type annotation (implicit any)
 				members = append(members, ast.InterfaceProperty{
 					Key:      name,
-					Value:    nil, // Will be treated as Unknown/Any
+					Value:    &ast.TypeReference{Name: "any"},
 					Optional: isOptional,
+					Readonly: isReadonly,
 					Position: memberStart,
 					EndPos:   p.currentPos(),
 				})

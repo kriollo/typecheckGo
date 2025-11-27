@@ -2099,6 +2099,15 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 				return resolvedType
 			}
 
+			// Check if it's a local interface
+			if symbol, exists := tc.symbolTable.ResolveSymbol(t.Name); exists {
+				if symbol.Type == symbols.InterfaceSymbol && symbol.Node != nil {
+					if interfaceDecl, ok := symbol.Node.(*ast.InterfaceDeclaration); ok {
+						return tc.convertInterfaceToType(interfaceDecl)
+					}
+				}
+			}
+
 			// Handle basic type references
 			switch t.Name {
 			case "string":
