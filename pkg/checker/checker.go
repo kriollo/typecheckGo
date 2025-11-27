@@ -1740,6 +1740,12 @@ func normalizeLiteralValue(value interface{}) interface{} {
 
 // isAssignableTo checks if sourceType can be assigned to targetType
 func (tc *TypeChecker) isAssignableTo(sourceType, targetType *types.Type) bool {
+	// Debug log for specific types
+	if os.Getenv("TSCHECK_DEBUG") == "1" {
+		fmt.Printf("DEBUG: isAssignableTo Source=%s (%s) Target=%s (%s)\n",
+			sourceType.String(), sourceType.Kind, targetType.String(), targetType.Kind)
+	}
+
 	// Any is assignable to and from anything
 	if targetType.Kind == types.AnyType || sourceType.Kind == types.AnyType {
 		return true
