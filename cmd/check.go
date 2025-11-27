@@ -27,10 +27,10 @@ var (
 )
 
 var checkCmd = &cobra.Command{
-	Use:   "check [path]",
+	Use:   "check [path...]",
 	Short: "Check TypeScript files for type errors",
 	Long:  `Analyze TypeScript files and report type errors, undefined variables, and function arity mismatches.`,
-	Args:  cobra.MaximumNArgs(1),
+	Args:  cobra.MinimumNArgs(1),
 	RunE:  runCheck,
 }
 
@@ -47,11 +47,17 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		return checkCodeInput(codeInput, filename)
 	}
 
-	// Otherwise, check file/directory path
+	// Otherwise, check file/directory path(s)
 	if len(args) == 0 {
 		return fmt.Errorf("path argument is required when --code flag is not used")
 	}
 
+	// If multiple paths are provided, process them individually
+	if len(args) > 1 {
+		return checkMultiplePaths(args)
+	}
+
+	// Single path - use existing logic
 	path := args[0]
 
 	// Resolve path
@@ -125,6 +131,132 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	} else {
 		return checkFile(typeChecker, absPath)
 	}
+}
+
+func checkMultiplePaths(paths []string) error {
+	// Resolve all paths and collect files
+	var filesToCheck []string
+	var rootDir string
+
+	for _, path := range paths {
+		absPath, err := filepath.Abs(path)
+		if err != nil {
+			return fmt.Errorf("invalid path %s: %w", path, err)
+		}
+
+		info, err := os.Stat(absPath)
+		if err != nil {
+			return fmt.Errorf("cannot access path %s: %w", path, err)
+		}
+
+		// Determine root directory from first path
+		if rootDir == "" {
+			if info.IsDir() {
+				rootDir = absPath
+			} else {
+				rootDir = filepath.Dir(absPath)
+			}
+		}
+
+		// If it's a directory, skip it (only process individual files)
+		if info.IsDir() {
+			return fmt.Errorf("cannot mix directories with individual files. Path %s is a directory", path)
+		}
+
+		filesToCheck = append(filesToCheck, absPath)
+	}
+
+	// Find tsconfig.json by walking up the directory tree from rootDir
+	configDir := rootDir
+	for {
+		configPath := filepath.Join(configDir, "tsconfig.json")
+		if _, err := os.Stat(configPath); err == nil {
+			rootDir = configDir
+			break
+		}
+
+		parent := filepath.Dir(configDir)
+		if parent == configDir {
+			// Reached root, no tsconfig.json found
+			break
+		}
+		configDir = parent
+	}
+
+	// Load tsconfig.json if it exists
+	tsConfig, err := config.LoadTSConfig(rootDir)
+	if err != nil {
+		// Silently use default configuration
+		tsConfig = config.GetDefaultConfig()
+	}
+
+	// Measure initialization time
+	initStart := time.Now()
+
+	// Create type checker with module resolution
+	typeChecker := checker.NewWithModuleResolver(rootDir)
+
+	// Configure type checker
+	configureChecker(typeChecker, tsConfig)
+
+	initDuration := time.Since(initStart)
+
+	// Show type loading stats (only in verbose mode)
+	if os.Getenv("TSCHECK_VERBOSE") == "1" {
+		defer typeChecker.PrintLoadStats()
+	}
+
+	// Show detailed performance profile (only when TSCHECK_PROFILE=1)
+	if os.Getenv("TSCHECK_PROFILE") == "1" {
+		defer typeChecker.PrintProfileReport()
+	}
+
+	// Check all files and collect errors
+	checkStart := time.Now()
+	var allErrors []checker.TypeError
+	filesWithErrors := 0
+
+	for _, file := range filesToCheck {
+		// Parse file
+		ast, parseErr := parser.ParseFile(file)
+		if parseErr != nil {
+			// Report parse error as a type error
+			allErrors = append(allErrors, parseErrorToTypeError(file, parseErr))
+			filesWithErrors++
+			continue
+		}
+
+		// Type check
+		errors := typeChecker.CheckFile(file, ast)
+		if len(errors) > 0 {
+			filesWithErrors++
+			allErrors = append(allErrors, errors...)
+		}
+	}
+
+	checkDuration := time.Since(checkStart)
+	totalDuration := initDuration + checkDuration
+
+	// Report results
+	if len(allErrors) > 0 {
+		switch outputFormat {
+		case "json":
+			reportErrorsJSON(allErrors)
+		case "toon":
+			reportErrorsTOON(allErrors)
+		default:
+			reportErrorsWithContext("", allErrors)
+			// Show timing info
+			fmt.Printf("\n%s[Timing] Initialization: %dms | Type checking: %dms | Total: %dms%s\n",
+				colorGray, initDuration.Milliseconds(), checkDuration.Milliseconds(), totalDuration.Milliseconds(), colorReset)
+		}
+		return fmt.Errorf("type checking failed")
+	}
+
+	fmt.Printf("\n%s[Timing] Initialization: %dms | Type checking: %dms | Total: %dms%s\n",
+		colorGray, initDuration.Milliseconds(), checkDuration.Milliseconds(), totalDuration.Milliseconds(), colorReset)
+	fmt.Printf("%s✓%s Checked %d files. No errors found.\n", colorGreen, colorReset, len(filesToCheck))
+	return nil
 }
 
 func configureChecker(typeChecker *checker.TypeChecker, tsConfig *config.TSConfig) {

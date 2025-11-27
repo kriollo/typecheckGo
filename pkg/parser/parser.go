@@ -337,14 +337,16 @@ func (p *parser) parseFunctionDeclarationInternal() (*ast.FunctionDeclaration, e
 	p.skipWhitespaceAndComments()
 
 	// Handle return type annotation (: Type)
+	var returnType ast.TypeNode
 	if p.match(":") {
 		p.advance() // consume ':'
 		p.skipWhitespaceAndComments()
 
-		// Parse return type (simplified - just skip until we find '{' or ';')
-		// In a full implementation, we would parse the type properly
-		for !p.isAtEnd() && !p.match("{") && !p.match(";") {
-			p.advance()
+		// Parse return type properly
+		var err error
+		returnType, err = p.parseTypeAnnotation()
+		if err != nil {
+			return nil, err
 		}
 		p.skipWhitespaceAndComments()
 	}
@@ -363,13 +365,14 @@ func (p *parser) parseFunctionDeclarationInternal() (*ast.FunctionDeclaration, e
 	}
 
 	return &ast.FunctionDeclaration{
-		ID:        name,
-		Params:    params,
-		Body:      body,
-		Async:     false,
-		Generator: isGenerator,
-		Position:  startPos,
-		EndPos:    p.currentPos(),
+		ID:         name,
+		Params:     params,
+		ReturnType: returnType,
+		Body:       body,
+		Async:      false,
+		Generator:  isGenerator,
+		Position:   startPos,
+		EndPos:     p.currentPos(),
 	}, nil
 }
 

@@ -73,13 +73,14 @@ func (v *VariableDeclarator) Pos() Position { return v.Position }
 func (v *VariableDeclarator) End() Position { return v.EndPos }
 
 type FunctionDeclaration struct {
-	ID        *Identifier
-	Params    []*Parameter
-	Body      *BlockStatement
-	Async     bool
-	Generator bool
-	Position  Position
-	EndPos    Position
+	ID         *Identifier
+	Params     []*Parameter
+	ReturnType TypeNode // Return type annotation if present
+	Body       *BlockStatement
+	Async      bool
+	Generator  bool
+	Position   Position
+	EndPos     Position
 }
 
 func (f *FunctionDeclaration) Type() string  { return "FunctionDeclaration" }
@@ -837,13 +838,14 @@ func (p *PropertyDefinition) classMemberNode() {}
 
 // FunctionExpression represents a function expression
 type FunctionExpression struct {
-	ID        *Identifier // can be nil for anonymous functions
-	Params    []*Parameter
-	Body      *BlockStatement
-	Async     bool
-	Generator bool
-	Position  Position
-	EndPos    Position
+	ID         *Identifier // can be nil for anonymous functions
+	Params     []*Parameter
+	ReturnType TypeNode // Return type annotation if present
+	Body       *BlockStatement
+	Async      bool
+	Generator  bool
+	Position   Position
+	EndPos     Position
 }
 
 func (f *FunctionExpression) Type() string  { return "FunctionExpression" }
