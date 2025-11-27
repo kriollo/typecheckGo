@@ -1,3 +1,3 @@
 import type { Breadcrumb } from './breadcrumb';
 
-const b: Breadcrumb = {};
+const b: Breadcrumb = { label: "Home" };
