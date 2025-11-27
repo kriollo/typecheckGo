@@ -341,17 +341,25 @@ func (p *parser) parseFunctionDeclarationInternal() (*ast.FunctionDeclaration, e
 		p.advance() // consume ':'
 		p.skipWhitespaceAndComments()
 
-		// Parse return type (simplified - just skip until we find '{')
+		// Parse return type (simplified - just skip until we find '{' or ';')
 		// In a full implementation, we would parse the type properly
-		for !p.isAtEnd() && !p.match("{") {
+		for !p.isAtEnd() && !p.match("{") && !p.match(";") {
 			p.advance()
 		}
 		p.skipWhitespaceAndComments()
 	}
 
-	body, err := p.parseBlockStatement()
-	if err != nil {
-		return nil, err
+	var body *ast.BlockStatement
+
+	// Check if we have a body or just a semicolon (overload signature)
+	if p.match(";") {
+		p.advance() // consume ';'
+		body = nil
+	} else {
+		body, err = p.parseBlockStatement()
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return &ast.FunctionDeclaration{

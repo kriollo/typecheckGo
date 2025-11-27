@@ -593,6 +593,11 @@ func (tc *TypeChecker) checkCallExpression(call *ast.CallExpression, filename st
 
 					// Try to get parameter info from the AST node
 					if funcDecl, ok := symbol.Node.(*ast.FunctionDeclaration); ok && funcDecl != nil {
+						// If function has no body (overload signature), skip validation
+						// because we might be matching against the wrong signature
+						if funcDecl.Body == nil {
+							return
+						}
 						requiredCount = 0
 						totalCount = len(funcDecl.Params)
 						params = funcDecl.Params
