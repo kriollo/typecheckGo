@@ -1982,6 +1982,33 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 					objType := types.NewObjectType(t.Name, properties)
 					objType.CallSignatures = callSignatures
 					return objType
+				} else if symbol.Type == symbols.ClassSymbol {
+					if symbol.Node == nil {
+						return types.Any
+					}
+					classDecl := symbol.Node.(*ast.ClassDeclaration)
+
+					// Convert class members
+					properties := make(map[string]*types.Type)
+
+					for _, member := range classDecl.Body {
+						switch m := member.(type) {
+						case *ast.PropertyDefinition:
+							propName := m.Key.Name
+							var propType *types.Type
+							if m.TypeAnnotation != nil {
+								propType = tc.convertTypeNode(m.TypeAnnotation)
+							} else {
+								propType = types.Any
+							}
+							properties[propName] = propType
+						case *ast.MethodDefinition:
+							methodName := m.Key.Name
+							// For now, just treat methods as Any
+							properties[methodName] = types.Any
+						}
+					}
+					return types.NewObjectType(t.Name, properties)
 				}
 			}
 		}

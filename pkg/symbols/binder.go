@@ -851,7 +851,7 @@ func (b *Binder) bindClassDeclaration(decl *ast.ClassDeclaration) {
 	// Add class to symbol table
 	symbol := &Symbol{
 		Name:       decl.ID.Name,
-		Type:       InterfaceSymbol, // Classes are types
+		Type:       ClassSymbol,
 		Node:       decl,
 		DeclSpan:   decl.Pos(),
 		IsFunction: false,
