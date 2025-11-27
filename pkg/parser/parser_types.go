@@ -78,6 +78,14 @@ func (p *parser) parseTypeAnnotationFull() (ast.TypeNode, error) {
 func (p *parser) parseTypeAnnotationUnary() (ast.TypeNode, error) {
 	startPos := p.currentPos()
 
+	// Handle readonly modifier
+	isReadonly := false
+	if p.match("readonly") {
+		p.advanceString(8)
+		p.skipWhitespaceAndComments()
+		isReadonly = true
+	}
+
 	// Parse first type
 	firstType, err := p.parseTypeAnnotationPrimary()
 	if err != nil {
@@ -140,7 +148,7 @@ func (p *parser) parseTypeAnnotationUnary() (ast.TypeNode, error) {
 				return nil, err
 			}
 
-			return &ast.ConditionalType{
+			res := &ast.ConditionalType{
 				CheckType:    firstType,
 				ExtendsType:  extendsType,
 				InferredType: inferredType,
@@ -148,7 +156,17 @@ func (p *parser) parseTypeAnnotationUnary() (ast.TypeNode, error) {
 				FalseType:    falseType,
 				Position:     startPos,
 				EndPos:       p.currentPos(),
-			}, nil
+			}
+
+			if isReadonly {
+				return &ast.TypeReference{
+					Name:          "readonly",
+					TypeArguments: []ast.TypeNode{res},
+					Position:      startPos,
+					EndPos:        p.currentPos(),
+				}, nil
+			}
+			return res, nil
 		} else {
 			// Not a conditional type, restore position
 			p.pos = savedPos
@@ -166,12 +184,22 @@ func (p *parser) parseTypeAnnotationUnary() (ast.TypeNode, error) {
 			p.advance()
 
 			// Convert firstType to array type by wrapping it
-			return &ast.TypeReference{
+			arrayType := &ast.TypeReference{
 				Name:          "(array)",
 				TypeArguments: []ast.TypeNode{firstType},
 				Position:      startPos,
 				EndPos:        p.currentPos(),
-			}, nil
+			}
+
+			if isReadonly {
+				return &ast.TypeReference{
+					Name:          "readonly",
+					TypeArguments: []ast.TypeNode{arrayType},
+					Position:      startPos,
+					EndPos:        p.currentPos(),
+				}, nil
+			}
+			return arrayType, nil
 		} else {
 			// Indexed access type T[K]
 			indexType, err := p.parseTypeAnnotationFull()
@@ -187,13 +215,32 @@ func (p *parser) parseTypeAnnotationUnary() (ast.TypeNode, error) {
 			p.advance()
 
 			// Return IndexedAccessType
-			return &ast.IndexedAccessType{
+			res := &ast.IndexedAccessType{
 				ObjectType: firstType,
 				IndexType:  indexType,
 				Position:   startPos,
 				EndPos:     p.currentPos(),
-			}, nil
+			}
+
+			if isReadonly {
+				return &ast.TypeReference{
+					Name:          "readonly",
+					TypeArguments: []ast.TypeNode{res},
+					Position:      startPos,
+					EndPos:        p.currentPos(),
+				}, nil
+			}
+			return res, nil
 		}
+	}
+
+	if isReadonly {
+		return &ast.TypeReference{
+			Name:          "readonly",
+			TypeArguments: []ast.TypeNode{firstType},
+			Position:      startPos,
+			EndPos:        p.currentPos(),
+		}, nil
 	}
 
 	return firstType, nil

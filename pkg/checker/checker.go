@@ -947,6 +947,19 @@ func (tc *TypeChecker) checkMemberExpression(member *ast.MemberExpression, filen
 							"TS2339", "error")
 					}
 				}
+			} else if objectType.Kind == types.ArrayType {
+				// Check for array methods on readonly arrays
+				if objectType.IsReadonly {
+					mutatorMethods := map[string]bool{
+						"push": true, "pop": true, "shift": true, "unshift": true,
+						"splice": true, "sort": true, "reverse": true, "fill": true, "copyWithin": true,
+					}
+					if mutatorMethods[id.Name] {
+						tc.addError(filename, id.Pos().Line, id.Pos().Column,
+							fmt.Sprintf("Property '%s' does not exist on type 'readonly %s[]'.", id.Name, objectType.ElementType.String()),
+							"TS2339", "error")
+					}
+				}
 			}
 		}
 	} else {
