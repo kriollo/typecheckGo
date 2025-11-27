@@ -105,6 +105,36 @@ func (ti *TypeInferencer) inferMemberExpressionType(expr *ast.MemberExpression) 
 		return Any
 	}
 
+	// Handle union types (e.g., for optional properties)
+	if objType.Kind == UnionType {
+		// For optional chaining on union types, we need to handle each type in the union
+		var resultTypes []*Type
+		for _, t := range objType.Types {
+			if t.Kind == ObjectType {
+				var propName string
+				if !expr.Computed {
+					if id, ok := expr.Property.(*ast.Identifier); ok {
+						propName = id.Name
+					}
+				}
+				if propName != "" {
+					if propType, exists := t.Properties[propName]; exists {
+						resultTypes = append(resultTypes, propType)
+					}
+				}
+			} else if t.Kind == UndefinedType || t.Kind == NullType {
+				// If one of the union members is undefined/null, the result includes undefined
+				resultTypes = append(resultTypes, Undefined)
+			}
+		}
+		if len(resultTypes) > 0 {
+			if len(resultTypes) == 1 {
+				return resultTypes[0]
+			}
+			return NewUnionType(resultTypes)
+		}
+	}
+
 	// Si es un objeto, buscar la propiedad
 	if objType.Kind == ObjectType {
 		var propName string
@@ -126,6 +156,10 @@ func (ti *TypeInferencer) inferMemberExpressionType(expr *ast.MemberExpression) 
 		if propName != "" {
 			// Buscar en las propiedades del objeto
 			if propType, exists := objType.Properties[propName]; exists {
+				// Si es optional chaining (?.),  el resultado es propType | undefined
+				if expr.Optional {
+					return NewUnionType([]*Type{propType, Undefined})
+				}
 				return propType
 			}
 

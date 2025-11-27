@@ -34,6 +34,13 @@ func (tc *TypeChecker) convertInterfaceToType(decl *ast.InterfaceDeclaration) *t
 		switch m := member.(type) {
 		case ast.InterfaceProperty:
 			propType := tc.convertTypeNode(m.Value)
+
+			// Handle optional properties: make them a union with undefined
+			if m.Optional && propType != nil {
+				propType = types.NewUnionType([]*types.Type{propType, types.Undefined})
+			}
+
+			// Handle readonly modifier
 			if m.Readonly && propType != nil {
 				// Create a copy to set IsReadonly
 				newType := *propType
