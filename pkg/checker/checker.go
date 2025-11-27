@@ -1560,6 +1560,23 @@ func (tc *TypeChecker) getExpressionType(expr ast.Expression) *types.Type {
 	return inferredType
 }
 
+// normalizeLiteralValue normalizes a literal value by removing surrounding quotes if present.
+// This handles the inconsistency where ast.Literal stores values without quotes ("red")
+// while ast.LiteralType stores values with quotes ("\"red\"").
+func normalizeLiteralValue(value interface{}) interface{} {
+	if str, ok := value.(string); ok {
+		// Check if the string is surrounded by quotes (single or double)
+		if len(str) >= 2 {
+			if (str[0] == '"' && str[len(str)-1] == '"') || (str[0] == '\'' && str[len(str)-1] == '\'') {
+				// Remove the surrounding quotes
+				return str[1 : len(str)-1]
+			}
+		}
+	}
+	// For non-string values or strings without quotes, return as-is
+	return value
+}
+
 // isAssignableTo checks if sourceType can be assigned to targetType
 func (tc *TypeChecker) isAssignableTo(sourceType, targetType *types.Type) bool {
 	// Any is assignable to and from anything
@@ -1613,6 +1630,15 @@ func (tc *TypeChecker) isAssignableTo(sourceType, targetType *types.Type) bool {
 
 	// Exact type match
 	if sourceType.Kind == targetType.Kind {
+		// For literal types, check value equality
+		if sourceType.Kind == types.LiteralType {
+			// Normalize both values to handle quote inconsistencies
+			// (ast.Literal stores "red", ast.LiteralType stores "\"red\"")
+			normalizedSource := normalizeLiteralValue(sourceType.Value)
+			normalizedTarget := normalizeLiteralValue(targetType.Value)
+			return normalizedSource == normalizedTarget
+		}
+
 		// For object types, check structural compatibility
 		if sourceType.Kind == types.ObjectType {
 			return tc.isObjectAssignable(sourceType, targetType)
@@ -1732,6 +1758,11 @@ func (tc *TypeChecker) isAssignableTo(sourceType, targetType *types.Type) bool {
 		}
 	}
 
+	if sourceType.Kind == types.LiteralType {
+		if sVal, ok := sourceType.Value.(string); ok && sVal == "pending" {
+			fmt.Printf("DEBUG: isAssignableTo returning false at end for pending\n")
+		}
+	}
 	return false
 }
 
