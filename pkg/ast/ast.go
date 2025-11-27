@@ -73,14 +73,15 @@ func (v *VariableDeclarator) Pos() Position { return v.Position }
 func (v *VariableDeclarator) End() Position { return v.EndPos }
 
 type FunctionDeclaration struct {
-	ID         *Identifier
-	Params     []*Parameter
-	ReturnType TypeNode // Return type annotation if present
-	Body       *BlockStatement
-	Async      bool
-	Generator  bool
-	Position   Position
-	EndPos     Position
+	ID             *Identifier
+	Params         []*Parameter
+	ReturnType     TypeNode // Return type annotation if present
+	Body           *BlockStatement
+	Async          bool
+	Generator      bool
+	TypeParameters []TypeNode // Generic type parameters
+	Position       Position
+	EndPos         Position
 }
 
 func (f *FunctionDeclaration) Type() string  { return "FunctionDeclaration" }
@@ -405,6 +406,10 @@ type Parameter struct {
 	Optional     bool
 	Rest         bool   // true if this is a rest parameter (...args)
 	OriginalName string // For destructuring: { prop: var } -> OriginalName="prop"
+	Public       bool   // Parameter property: public x: number
+	Private      bool   // Parameter property: private x: number
+	Protected    bool   // Parameter property: protected x: number
+	Readonly     bool   // Parameter property: readonly x: number
 	Position     Position
 	EndPos       Position
 }

@@ -312,16 +312,12 @@ func (p *parser) parseFunctionDeclarationInternal() (*ast.FunctionDeclaration, e
 	p.skipWhitespaceAndComments()
 
 	// Handle generic type parameters: function name<T, U>(...)
+	var typeParams []ast.TypeNode
 	if p.match("<") {
-		p.advance()
-		depth := 1
-		for depth > 0 && !p.isAtEnd() {
-			if p.match("<") {
-				depth++
-			} else if p.match(">") {
-				depth--
-			}
-			p.advance()
+		var err error
+		typeParams, err = p.parseTypeParameters()
+		if err != nil {
+			return nil, err
 		}
 		p.skipWhitespaceAndComments()
 	}
@@ -365,14 +361,15 @@ func (p *parser) parseFunctionDeclarationInternal() (*ast.FunctionDeclaration, e
 	}
 
 	return &ast.FunctionDeclaration{
-		ID:         name,
-		Params:     params,
-		ReturnType: returnType,
-		Body:       body,
-		Async:      false,
-		Generator:  isGenerator,
-		Position:   startPos,
-		EndPos:     p.currentPos(),
+		ID:             name,
+		Params:         params,
+		ReturnType:     returnType,
+		Body:           body,
+		Async:          false,
+		Generator:      isGenerator,
+		TypeParameters: typeParams,
+		Position:       startPos,
+		EndPos:         p.currentPos(),
 	}, nil
 }
 
@@ -5298,10 +5295,39 @@ func (p *parser) parsePropertyDefinition(name *ast.Identifier, accessModifier st
 func (p *parser) parseParameter() (*ast.Parameter, error) {
 	startPos := p.currentPos()
 
+	// Parse access modifiers (for constructor parameter properties)
+	isPublic := false
+	isPrivate := false
+	isProtected := false
+	isReadonly := false
+
+	if p.match("public") {
+		p.advanceString(6)
+		isPublic = true
+		p.skipWhitespaceAndComments()
+	} else if p.match("private") {
+		p.advanceString(7)
+		isPrivate = true
+		p.skipWhitespaceAndComments()
+	} else if p.match("protected") {
+		p.advanceString(9)
+		isProtected = true
+		p.skipWhitespaceAndComments()
+	}
+
+	// Parse readonly modifier
+	if p.match("readonly") {
+		p.advanceString(8)
+		isReadonly = true
+		p.skipWhitespaceAndComments()
+	}
+
+	isRest := false
 	// Check for rest parameter: ...identifier
 	if p.match("...") {
 		p.advanceString(3)
 		p.skipWhitespaceAndComments()
+		isRest = true
 	}
 
 	var paramName *ast.Identifier
@@ -5412,6 +5438,11 @@ func (p *parser) parseParameter() (*ast.Parameter, error) {
 		ID:        paramName,
 		ParamType: paramType,
 		Optional:  isOptional,
+		Rest:      isRest,
+		Public:    isPublic,
+		Private:   isPrivate,
+		Protected: isProtected,
+		Readonly:  isReadonly,
 		Position:  startPos,
 		EndPos:    p.currentPos(),
 	}, nil

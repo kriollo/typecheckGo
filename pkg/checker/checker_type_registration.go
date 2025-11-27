@@ -16,6 +16,32 @@ func (tc *TypeChecker) registerClassType(decl *ast.ClassDeclaration, filename st
 	for _, member := range decl.Body {
 		switch m := member.(type) {
 		case *ast.MethodDefinition:
+			// Check if it's a constructor to handle parameter properties
+			if m.Kind == "constructor" && m.Value != nil {
+				for _, param := range m.Value.Params {
+					// If parameter has access modifier or readonly, it's a parameter property
+					if param.Public || param.Private || param.Protected || param.Readonly {
+						if param.ID != nil {
+							var paramType *types.Type
+							if param.ParamType != nil {
+								paramType = tc.convertTypeNode(param.ParamType)
+							} else {
+								paramType = types.Any
+							}
+
+							if param.Readonly && paramType != nil {
+								// Create a copy to set IsReadonly
+								newType := *paramType
+								newType.IsReadonly = true
+								paramType = &newType
+							}
+
+							instanceProperties[param.ID.Name] = paramType
+						}
+					}
+				}
+			}
+
 			// Build method type
 			if m.Value != nil {
 				paramTypes := make([]*types.Type, len(m.Value.Params))
@@ -102,7 +128,24 @@ func (tc *TypeChecker) registerFunctionType(decl *ast.FunctionDeclaration, filen
 		returnType = types.Void
 	}
 
-	fnType := types.NewFunctionType(paramTypes, returnType)
+	var fnType *types.Type
+	if len(decl.TypeParameters) > 0 {
+		typeParams := make([]*types.Type, len(decl.TypeParameters))
+		for i, tp := range decl.TypeParameters {
+			// Convert AST TypeParameter to types.TypeParameter
+			if typeParam, ok := tp.(*ast.TypeParameter); ok {
+				var constraint *types.Type
+				if typeParam.Constraint != nil {
+					constraint = tc.convertTypeNode(typeParam.Constraint)
+				}
+				typeParams[i] = types.NewTypeParameter(typeParam.Name.Name, constraint, nil)
+			}
+		}
+		fnType = types.NewGenericFunctionType(typeParams, paramTypes, returnType)
+	} else {
+		fnType = types.NewFunctionType(paramTypes, returnType)
+	}
+
 	tc.varTypeCache[decl.ID.Name] = fnType
 	tc.typeCache[decl.ID] = fnType
 }

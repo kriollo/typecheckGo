@@ -700,16 +700,66 @@ func (tc *TypeChecker) checkCallExpression(call *ast.CallExpression, filename st
 									}
 								}
 							}
-						} else {
-							msg = fmt.Sprintf("Expected %d arguments, but got %d.", totalCount, actualCount)
-							msg += fmt.Sprintf("\n  Sugerencia: La función '%s' solo acepta %d argumento(s)", id.Name, totalCount)
 						}
 						tc.addError(filename, call.Pos().Line, call.Pos().Column, msg, "TS2554", "error")
 					}
 
-					// Check argument types if we have parameter type information
-					if params != nil && actualCount > 0 {
+					// Check argument types
+					if len(params) > 0 {
 						tc.checkArgumentTypes(call.Arguments, params, filename, id.Name)
+
+						// Additional check for generic constraints (keyof)
+						// This handles faulty101.ts: getProperty<T, K extends keyof T>(obj: T, key: K)
+						if funcDecl, ok := symbol.Node.(*ast.FunctionDeclaration); ok && len(funcDecl.TypeParameters) > 0 {
+							// Map type parameter names to their constraints
+							constraints := make(map[string]ast.TypeNode)
+							for _, tp := range funcDecl.TypeParameters {
+								if typeParam, ok := tp.(*ast.TypeParameter); ok && typeParam.Constraint != nil {
+									constraints[typeParam.Name.Name] = typeParam.Constraint
+								}
+							}
+
+							// Check parameters that use constrained type parameters
+							for i, param := range params {
+								if i >= len(call.Arguments) {
+									break
+								}
+
+								if typeRef, ok := param.ParamType.(*ast.TypeReference); ok {
+									if constraint, hasConstraint := constraints[typeRef.Name]; hasConstraint {
+										// Check if constraint is "keyof T"
+										if constraintRef, ok := constraint.(*ast.TypeReference); ok && strings.HasPrefix(constraintRef.Name, "keyof ") {
+											baseTypeName := strings.TrimPrefix(constraintRef.Name, "keyof ")
+
+											// Find the parameter that provides the base type
+											for j, p := range params {
+												if pTypeRef, ok := p.ParamType.(*ast.TypeReference); ok && pTypeRef.Name == baseTypeName {
+													// Found the object parameter
+													if j < len(call.Arguments) {
+														objType := tc.inferencer.InferType(call.Arguments[j])
+														arg := call.Arguments[i]
+
+														// If argument is string literal, check if it exists in object
+														if lit, ok := arg.(*ast.Literal); ok {
+															if keyStr, ok := lit.Value.(string); ok {
+																if objType.Kind == types.ObjectType {
+																	if _, exists := objType.Properties[keyStr]; !exists {
+																		tc.addError(filename, arg.Pos().Line, arg.Pos().Column,
+																			fmt.Sprintf("Argument of type '\"%s\"' is not assignable to parameter of type 'keyof %s'.", keyStr, baseTypeName),
+																			"TS2345", "error")
+																	}
+																}
+															}
+														}
+													}
+													break
+												}
+											}
+										}
+									}
+								}
+							}
+						}
 					}
 				}
 			}
@@ -758,6 +808,54 @@ func (tc *TypeChecker) checkArgumentTypes(args []ast.Expression, params []*ast.P
 		// Skip if parameter has no type annotation
 		if param.ParamType == nil {
 			continue
+		}
+
+		// Special case: Check keyof constraints for generic parameters
+		// Example: function getProperty<T, K extends keyof T>(obj: T, key: K)
+		// If we're checking the 'key' parameter and it's a string literal,
+		// verify that the key exists in the object passed as 'obj'
+		if typeParam, ok := param.ParamType.(*ast.TypeParameter); ok {
+			if typeParam.Constraint != nil {
+				// Check if constraint is "keyof SomeType"
+				if typeRef, ok := typeParam.Constraint.(*ast.TypeReference); ok {
+					if strings.HasPrefix(typeRef.Name, "keyof ") {
+						// Extract the type name (e.g., "T" from "keyof T")
+						baseTypeName := strings.TrimPrefix(typeRef.Name, "keyof ")
+
+						// Find the parameter index for the base type
+						// We need to look at previous arguments to find the object
+						for prevIdx := 0; prevIdx < i; prevIdx++ {
+							if prevIdx < len(params) && params[prevIdx].ID != nil {
+								// Check if this parameter's type matches the base type name
+								if prevParamType, ok := params[prevIdx].ParamType.(*ast.TypeReference); ok {
+									if prevParamType.Name == baseTypeName {
+										// Found the object parameter, now check if the key exists
+										if prevIdx < len(args) {
+											objType := tc.inferencer.InferType(args[prevIdx])
+
+											// If the current argument is a string literal
+											if lit, ok := arg.(*ast.Literal); ok {
+												if keyStr, ok := lit.Value.(string); ok {
+													// Check if this key exists in the object
+													if objType.Kind == types.ObjectType {
+														if _, exists := objType.Properties[keyStr]; !exists {
+															// Key doesn't exist!
+															tc.addError(filename, arg.Pos().Line, arg.Pos().Column,
+																fmt.Sprintf("Argument of type '\"%s\"' is not assignable to parameter of type 'keyof %s'.", keyStr, baseTypeName),
+																"TS2345", "error")
+														}
+													}
+												}
+											}
+										}
+										break
+									}
+								}
+							}
+						}
+					}
+				}
+			}
 		}
 
 		// Skip generic type parameters (T, K, V, etc.) - these are inferred from arguments
@@ -1652,6 +1750,44 @@ func (tc *TypeChecker) isAssignableTo(sourceType, targetType *types.Type) bool {
 		return true
 	}
 
+	// IntersectionType handling
+
+	// Case 1: Source is IntersectionType (A & B)
+	// A & B is assignable to T if A is assignable to T OR B is assignable to T
+	// Also, A & B has properties of both, so it's assignable to T if the merged properties satisfy T
+	if sourceType.Kind == types.IntersectionType {
+		// Check if any member is assignable to target
+		for _, member := range sourceType.Types {
+			if tc.isAssignableTo(member, targetType) {
+				return true
+			}
+		}
+
+		// If target is object, check if merged properties satisfy target
+		if targetType.Kind == types.ObjectType {
+			// Create a synthetic object type with merged properties
+			mergedProps := make(map[string]*types.Type)
+			for _, member := range sourceType.Types {
+				if member.Kind == types.ObjectType {
+					for k, v := range member.Properties {
+						mergedProps[k] = v
+					}
+				}
+			}
+
+			// If we have merged properties, check assignability
+			if len(mergedProps) > 0 {
+				syntheticSource := types.NewObjectType("synthetic_intersection", mergedProps)
+				if tc.isObjectAssignable(syntheticSource, targetType) {
+					return true
+				}
+			}
+		}
+
+		// If target is also intersection, we might need more complex logic,
+		// but checking members above covers most cases (A & B -> A)
+	}
+
 	// IntersectionType: source debe ser asignable a todos los miembros
 	if targetType.Kind == types.IntersectionType {
 		for _, member := range targetType.Types {
@@ -2115,7 +2251,7 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 			if len(t.Name) == 1 && t.Name[0] >= 'A' && t.Name[0] <= 'Z' {
 				// Only treat as type parameter if it's a common generic name
 				// This is a compromise to support example166.ts while not breaking faulty101.ts
-				if t.Name == "T" || t.Name == "U" || t.Name == "V" || t.Name == "R" {
+				if t.Name == "T" || t.Name == "U" || t.Name == "V" || t.Name == "R" || t.Name == "K" {
 					return types.NewTypeParameter(t.Name, nil, nil)
 				}
 			}

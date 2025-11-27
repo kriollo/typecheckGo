@@ -94,7 +94,8 @@ type Type struct {
 	Name           string
 	Properties     map[string]*Type
 	ElementType    *Type       // Para arrays
-	Parameters     []*Type     // Para funciones y type parameters
+	Parameters     []*Type     // Para funciones (argumentos)
+	TypeParameters []*Type     // Para funciones genéricas y clases
 	ReturnType     *Type       // Para funciones
 	Types          []*Type     // Para unions/intersections
 	Value          interface{} // Para literal types
@@ -149,6 +150,15 @@ func NewFunctionType(params []*Type, returnType *Type) *Type {
 		Kind:       FunctionType,
 		Parameters: params,
 		ReturnType: returnType,
+	}
+}
+
+func NewGenericFunctionType(typeParams []*Type, params []*Type, returnType *Type) *Type {
+	return &Type{
+		Kind:           FunctionType,
+		TypeParameters: typeParams,
+		Parameters:     params,
+		ReturnType:     returnType,
 	}
 }
 
