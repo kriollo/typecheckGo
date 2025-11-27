@@ -274,6 +274,8 @@ func (tc *TypeChecker) checkFile(file *ast.File, filename string) {
 			tc.registerClassType(s, filename)
 		case *ast.FunctionDeclaration:
 			tc.registerFunctionType(s, filename)
+		case *ast.TypeAliasDeclaration:
+			tc.checkTypeAliasDeclaration(s, filename)
 		case *ast.ExportDeclaration:
 			// Handle exported classes and functions
 			if s.Declaration != nil {
@@ -282,6 +284,8 @@ func (tc *TypeChecker) checkFile(file *ast.File, filename string) {
 					tc.registerClassType(decl, filename)
 				case *ast.FunctionDeclaration:
 					tc.registerFunctionType(decl, filename)
+				case *ast.TypeAliasDeclaration:
+					tc.checkTypeAliasDeclaration(decl, filename)
 				}
 			}
 		}
@@ -1740,18 +1744,10 @@ func normalizeLiteralValue(value interface{}) interface{} {
 
 // isAssignableTo checks if sourceType can be assigned to targetType
 func (tc *TypeChecker) isAssignableTo(sourceType, targetType *types.Type) bool {
-	// Debug log for specific types
-	if os.Getenv("TSCHECK_DEBUG") == "1" {
-		fmt.Printf("DEBUG: isAssignableTo Source=%s (%s) Target=%s (%s)\n",
-			sourceType.String(), sourceType.Kind, targetType.String(), targetType.Kind)
-	}
-
 	// Any is assignable to and from anything
 	if targetType.Kind == types.AnyType || sourceType.Kind == types.AnyType {
 		return true
 	}
-
-	// Unknown is the top type: anything is assignable TO unknown
 	if targetType.Kind == types.UnknownType {
 		return true
 	}
