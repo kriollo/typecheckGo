@@ -491,13 +491,27 @@ func (p *parser) parseInterfaceDeclaration() (ast.Declaration, error) {
 
 	p.skipWhitespaceAndComments()
 
-	// Extends
+	// Parse extends clause
+	var extends []ast.TypeNode
 	if p.match("extends") {
 		p.advanceString(7)
 		p.skipWhitespaceAndComments()
-		// Skip extends clause
-		for !p.match("{") && !p.isAtEnd() {
-			p.advance()
+
+		// Parse comma-separated list of extended types
+		for {
+			extendType, err := p.parseTypeAnnotationPrimary()
+			if err != nil {
+				return nil, err
+			}
+			extends = append(extends, extendType)
+
+			p.skipWhitespaceAndComments()
+			if p.match(",") {
+				p.advance()
+				p.skipWhitespaceAndComments()
+			} else {
+				break
+			}
 		}
 	}
 
@@ -782,6 +796,7 @@ func (p *parser) parseInterfaceDeclaration() (ast.Declaration, error) {
 	return &ast.InterfaceDeclaration{
 		ID:             id,
 		Members:        members,
+		Extends:        extends,
 		TypeParameters: typeParams,
 		Position:       startPos,
 		EndPos:         p.currentPos(),
