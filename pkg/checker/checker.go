@@ -2190,6 +2190,9 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 		}
 		return &types.Type{Kind: types.TupleType, Types: elementTypes}
 	case *ast.TypeReference:
+		if t.Name == "StringMap" && os.Getenv("TSCHECK_DEBUG") == "1" {
+			fmt.Fprintf(os.Stderr, "DEBUG: Converting TypeReference StringMap, has TypeArgs=%v\n", len(t.TypeArguments) > 0)
+		}
 		// Handle readonly types
 		if t.Name == "readonly" && len(t.TypeArguments) == 1 {
 			innerType := tc.convertTypeNode(t.TypeArguments[0])
@@ -2359,6 +2362,8 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 					// Convert interface members
 					properties := make(map[string]*types.Type)
 					var callSignatures []*types.Type
+					var stringIndexType *types.Type
+					var numberIndexType *types.Type
 
 					for _, member := range interfaceDecl.Members {
 						switch m := member.(type) {
@@ -2383,11 +2388,31 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 							}
 							returnType := tc.convertTypeNode(m.ReturnType)
 							callSignatures = append(callSignatures, types.NewFunctionType(params, returnType))
+						case *ast.IndexSignature:
+							valueType := tc.convertTypeNode(m.ValueType)
+							keyType := tc.convertTypeNode(m.KeyType)
+
+							// Apply substitutions
+							if len(substitutions) > 0 {
+								valueType = tc.substituteType(valueType, substitutions)
+							}
+
+							if keyType.Kind == types.StringType {
+								stringIndexType = valueType
+							} else if keyType.Kind == types.NumberType {
+								numberIndexType = valueType
+							}
 						}
+					}
+
+					if t.Name == "StringMap" && os.Getenv("TSCHECK_DEBUG") == "1" {
+						fmt.Fprintf(os.Stderr, "DEBUG: Processing StringMap - StringIndexType: %v, Members: %d\n", stringIndexType != nil, len(interfaceDecl.Members))
 					}
 
 					objType := types.NewObjectType(t.Name, properties)
 					objType.CallSignatures = callSignatures
+					objType.StringIndexType = stringIndexType
+					objType.NumberIndexType = numberIndexType
 					return objType
 				} else if symbol.Type == symbols.ClassSymbol {
 					if symbol.Node == nil {
@@ -2423,6 +2448,9 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 		// For other type references without type arguments, check if it's an interface
 		// and convert its members (including call signatures)
 		if symbol, exists := tc.symbolTable.ResolveSymbol(t.Name); exists {
+			if t.Name == "StringMap" && os.Getenv("TSCHECK_DEBUG") == "1" {
+				fmt.Fprintf(os.Stderr, "DEBUG: Found StringMap symbol, type=%v, hasNode=%v\n", symbol.Type, symbol.Node != nil)
+			}
 			if symbol.Type == symbols.InterfaceSymbol {
 				if symbol.Node != nil {
 					if interfaceDecl, ok := symbol.Node.(*ast.InterfaceDeclaration); ok {
@@ -2430,6 +2458,8 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 						// Convert interface members
 						properties := make(map[string]*types.Type)
 						var callSignatures []*types.Type
+						var stringIndexType *types.Type
+						var numberIndexType *types.Type
 
 						for _, member := range interfaceDecl.Members {
 							switch m := member.(type) {
@@ -2448,11 +2478,22 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 								}
 								returnType := tc.convertTypeNode(m.ReturnType)
 								callSignatures = append(callSignatures, types.NewFunctionType(params, returnType))
+							case *ast.IndexSignature:
+								valueType := tc.convertTypeNode(m.ValueType)
+								keyType := tc.convertTypeNode(m.KeyType)
+
+								if keyType.Kind == types.StringType {
+									stringIndexType = valueType
+								} else if keyType.Kind == types.NumberType {
+									numberIndexType = valueType
+								}
 							}
 						}
 
 						objType := types.NewObjectType(t.Name, properties)
 						objType.CallSignatures = callSignatures
+						objType.StringIndexType = stringIndexType
+						objType.NumberIndexType = numberIndexType
 						return objType
 					}
 				}
@@ -2509,18 +2550,33 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 	case *ast.ObjectTypeLiteral:
 		// Convert object type literal to Type
 		properties := make(map[string]*types.Type)
+		var stringIndexType *types.Type
+		var numberIndexType *types.Type
+
 		for _, member := range t.Members {
-			// TypeMember is an interface, need to type assert to InterfaceProperty
-			if prop, ok := member.(ast.InterfaceProperty); ok {
-				propType := tc.convertTypeNode(prop.Value)
+			switch m := member.(type) {
+			case ast.InterfaceProperty:
+				propType := tc.convertTypeNode(m.Value)
 				// If the member is optional, wrap it in a union with undefined
-				if prop.Optional {
+				if m.Optional {
 					propType = types.NewUnionType([]*types.Type{propType, types.Undefined})
 				}
-				properties[prop.Key.Name] = propType
+				properties[m.Key.Name] = propType
+			case *ast.IndexSignature:
+				valueType := tc.convertTypeNode(m.ValueType)
+				keyType := tc.convertTypeNode(m.KeyType)
+
+				if keyType.Kind == types.StringType {
+					stringIndexType = valueType
+				} else if keyType.Kind == types.NumberType {
+					numberIndexType = valueType
+				}
 			}
 		}
-		return types.NewObjectType("", properties)
+		objType := types.NewObjectType("", properties)
+		objType.StringIndexType = stringIndexType
+		objType.NumberIndexType = numberIndexType
+		return objType
 
 	case *ast.IndexedAccessType:
 		// Handle indexed access types: T[K]
@@ -2545,6 +2601,25 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 
 		// If we can't resolve it, return an IndexedAccessType
 		return types.NewIndexedAccessType(objectType, indexType)
+
+	case *ast.TypeQuery:
+		// Handle typeof expr
+		// We need to infer the type of the expression
+		if ident, ok := t.ExprName.(*ast.Identifier); ok {
+			// First check if this is a variable/const declaration
+			if varType, ok := tc.varTypeCache[ident.Name]; ok && varType != nil {
+				return varType
+			}
+
+			// Then check symbol table
+			if symbol, exists := tc.symbolTable.ResolveSymbol(ident.Name); exists {
+				if symbol.ResolvedType != nil {
+					return symbol.ResolvedType
+				}
+			}
+		}
+		// Fallback: try to infer from the expression
+		return tc.inferencer.InferType(t.ExprName)
 
 	default:
 		return types.Unknown

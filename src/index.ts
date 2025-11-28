@@ -28,10 +28,10 @@ export class GoTypeChecker {
 
   constructor(binPath?: string) {
     // Detectar si estamos en Windows y usar tscheck.exe
-    const defaultBin = process.platform === 'win32'
-      ? path.resolve(process.cwd(), 'tscheck.exe')
-      : path.resolve(process.cwd(), 'tscheck');
-    this.binPath = binPath || defaultBin;
+    const localBin = process.platform === 'win32'
+      ? path.resolve(__dirname, '../tscheck.exe')
+      : path.resolve(__dirname, '../tscheck');
+    this.binPath = binPath || process.env.TSCHECK_BIN || localBin;
   }
 
   async checkFile(filePath: string, options: TypeCheckOptions = {}): Promise<TypeCheckResult> {

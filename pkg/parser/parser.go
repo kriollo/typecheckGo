@@ -5539,40 +5539,96 @@ func (p *parser) parseObjectTypeLiteral() (ast.TypeNode, error) {
 			p.skipWhitespaceAndComments()
 		}
 
-		// Check if this is a mapped type: [P in keyof T]
+		// Check if this is a mapped type or index signature: [P in keyof T] or [key: string]: Type
 		if p.match("[") {
-			// Skip the entire mapped type construct
-			depth := 1
+			startPos := p.currentPos()
 			p.advance() // consume [
-			for depth > 0 && !p.isAtEnd() {
-				if p.match("[") {
-					depth++
-				} else if p.match("]") {
-					depth--
+			p.skipWhitespaceAndComments()
+
+			// Parse identifier
+			id, err := p.parseIdentifier()
+			if err != nil {
+				return nil, err
+			}
+			p.skipWhitespaceAndComments()
+
+			// Check for 'in' (mapped type) or ':' (index signature)
+			if p.matchKeyword("in") {
+				// Mapped type - skip for now as it's handled elsewhere or complex
+				// We need to consume until ]
+				depth := 1
+				for depth > 0 && !p.isAtEnd() {
+					if p.match("[") {
+						depth++
+					} else if p.match("]") {
+						depth--
+					}
+					p.advance()
 				}
-				p.advance()
-			}
-			p.skipWhitespaceAndComments()
-			// Skip optional modifiers
-			if p.match("-") || p.match("+") {
-				p.advance()
-			}
-			if p.match("?") {
-				p.advance()
+				// Skip rest of mapped type
 				p.skipWhitespaceAndComments()
-			}
-			// Skip : Type
-			if p.match(":") {
-				p.advance()
+				if p.match("-") || p.match("+") {
+					p.advance()
+					if p.match("?") {
+						p.advance()
+					}
+				}
+				if p.match("?") {
+					p.advance()
+				}
+				if p.match(":") {
+					p.advance()
+					p.skipTypeAnnotation()
+				}
+				if p.match(";") || p.match(",") {
+					p.advance()
+				}
+				continue
+			} else if p.match(":") {
+				// Index signature: [key: string]: Type
+				p.advance() // consume :
 				p.skipWhitespaceAndComments()
-				p.skipTypeAnnotation()
-			}
-			p.skipWhitespaceAndComments()
-			if p.match(";") || p.match(",") {
-				p.advance()
+
+				keyType, err := p.parseTypeAnnotationFull()
+				if err != nil {
+					return nil, err
+				}
+
 				p.skipWhitespaceAndComments()
+				if !p.match("]") {
+					return nil, fmt.Errorf("expected ']' in index signature")
+				}
+				p.advance() // consume ]
+				p.skipWhitespaceAndComments()
+
+				if !p.match(":") {
+					return nil, fmt.Errorf("expected ':' after index signature")
+				}
+				p.advance() // consume :
+				p.skipWhitespaceAndComments()
+
+				valueType, err := p.parseTypeAnnotationFull()
+				if err != nil {
+					return nil, err
+				}
+
+				members = append(members, &ast.IndexSignature{
+					KeyName:   id.Name,
+					KeyType:   keyType,
+					ValueType: valueType,
+					Readonly:  readonly,
+					Position:  startPos,
+					EndPos:    p.currentPos(),
+				})
+
+				p.skipWhitespaceAndComments()
+				if p.match(";") || p.match(",") {
+					p.advance()
+				}
+				continue
+			} else {
+				return nil, fmt.Errorf("expected 'in' or ':' in indexer")
 			}
-			continue
 		}
 
 		var key *ast.Identifier

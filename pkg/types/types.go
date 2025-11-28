@@ -125,6 +125,10 @@ type Type struct {
 
 	// Para type parameters con constraints
 	Default *Type // Tipo por defecto
+
+	// Index signatures
+	StringIndexType *Type // [key: string]: T
+	NumberIndexType *Type // [key: number]: T
 }
 
 // NewPrimitiveType crea un tipo primitivo

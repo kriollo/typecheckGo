@@ -296,6 +296,21 @@ func (c *CallSignature) typeMember()   {}
 // PropertySignature is an alias for InterfaceProperty for consistency
 type PropertySignature = InterfaceProperty
 
+// IndexSignature represents an index signature: [key: Type]: Type
+type IndexSignature struct {
+	KeyName   string
+	KeyType   TypeNode
+	ValueType TypeNode
+	Readonly  bool
+	Position  Position
+	EndPos    Position
+}
+
+func (i *IndexSignature) Type() string  { return "IndexSignature" }
+func (i *IndexSignature) Pos() Position { return i.Position }
+func (i *IndexSignature) End() Position { return i.EndPos }
+func (i *IndexSignature) typeMember()   {}
+
 // ModuleDeclaration represents an ambient module declaration (declare module 'name' { ... })
 type ModuleDeclaration struct {
 	Name     string // Module name (from string literal)
@@ -995,6 +1010,7 @@ type TypeQuery struct {
 	EndPos   Position
 }
 
+func (t *TypeQuery) Type() string  { return "TypeQuery" }
 func (t *TypeQuery) Pos() Position { return t.Position }
 func (t *TypeQuery) End() Position { return t.EndPos }
 func (t *TypeQuery) typeNode()     {}

@@ -53,6 +53,37 @@ func (tc *TypeChecker) checkVariableDeclaration(decl *ast.VariableDeclaration, f
 
 				// If there's a type annotation, check compatibility with initializer type
 				if declaredType != nil {
+					// Excess property checking for object literals
+					// When assigning an object literal to a typed variable, check for extra properties
+					if objLit, ok := declarator.Init.(*ast.ObjectExpression); ok && declaredType.Kind == types.ObjectType {
+						// Check for properties in the literal that don't exist in the declared type
+						for _, propNode := range objLit.Properties {
+							if prop, ok := propNode.(*ast.Property); ok && prop.Key != nil {
+								// Get property name from the key
+								var propName string
+								if ident, ok := prop.Key.(*ast.Identifier); ok {
+									propName = ident.Name
+								} else if lit, ok := prop.Key.(*ast.Literal); ok {
+									propName = fmt.Sprintf("%v", lit.Value)
+								}
+
+								if propName != "" {
+									// If the type has a string index signature, any property name is valid
+									// (we should check if the value matches the index type, but that's a separate check)
+									if declaredType.StringIndexType != nil {
+										continue
+									}
+
+									if _, exists := declaredType.Properties[propName]; !exists {
+										tc.addError(filename, prop.Key.Pos().Line, prop.Key.Pos().Column,
+											fmt.Sprintf("Object literal may only specify known properties, and '%s' does not exist in type '%s'.", propName, declaredType.String()),
+											"TS2353", "error")
+									}
+								}
+							}
+						}
+					}
+
 					// Special handling for literal assignments to union types
 					typeToCheck := inferredType
 					if tc.needsLiteralType(declaredType) {

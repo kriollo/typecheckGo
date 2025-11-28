@@ -616,29 +616,84 @@ func (p *parser) parseInterfaceDeclaration() (ast.Declaration, error) {
 
 		// Check for index signature: [key: Type]: Type
 		if p.match("[") {
-			// Skip index signature
-			depth := 1
-			p.advance()
-			for depth > 0 && !p.isAtEnd() {
-				if p.match("[") {
-					depth++
-				} else if p.match("]") {
-					depth--
-				}
-				p.advance()
+			indexStart := p.currentPos()
+			p.advance() // consume [
+			p.skipWhitespaceAndComments()
+
+			// Parse identifier
+			id, err := p.parseIdentifier()
+			if err != nil {
+				return nil, err
 			}
 			p.skipWhitespaceAndComments()
+
+			// Should have : for index signature
 			if p.match(":") {
-				p.advance()
+				p.advance() // consume :
 				p.skipWhitespaceAndComments()
-				p.skipTypeAnnotation()
+
+				keyType, err := p.parseTypeAnnotationFull()
+				if err != nil {
+					return nil, err
+				}
+
+				p.skipWhitespaceAndComments()
+				if !p.match("]") {
+					return nil, fmt.Errorf("expected ']' in index signature")
+				}
+				p.advance() // consume ]
+				p.skipWhitespaceAndComments()
+
+				if !p.match(":") {
+					return nil, fmt.Errorf("expected ':' after index signature")
+				}
+				p.advance() // consume :
+				p.skipWhitespaceAndComments()
+
+				valueType, err := p.parseTypeAnnotationFull()
+				if err != nil {
+					return nil, err
+				}
+
+				members = append(members, &ast.IndexSignature{
+					KeyName:   id.Name,
+					KeyType:   keyType,
+					ValueType: valueType,
+					Readonly:  false, // TODO: check for readonly modifier
+					Position:  indexStart,
+					EndPos:    p.currentPos(),
+				})
+
+				p.skipWhitespaceAndComments()
+				if p.match(";") || p.match(",") {
+					p.advance()
+				}
+				p.skipWhitespaceAndComments()
+				continue
+			} else {
+				// Not an index signature, skip it
+				depth := 1
+				for depth > 0 && !p.isAtEnd() {
+					if p.match("[") {
+						depth++
+					} else if p.match("]") {
+						depth--
+					}
+					p.advance()
+				}
+				p.skipWhitespaceAndComments()
+				if p.match(":") {
+					p.advance()
+					p.skipWhitespaceAndComments()
+					p.skipTypeAnnotation()
+				}
+				p.skipWhitespaceAndComments()
+				if p.match(";") || p.match(",") {
+					p.advance()
+				}
+				p.skipWhitespaceAndComments()
+				continue
 			}
-			p.skipWhitespaceAndComments()
-			if p.match(";") || p.match(",") {
-				p.advance()
-			}
-			p.skipWhitespaceAndComments()
-			continue
 		}
 
 		// Check for readonly modifier

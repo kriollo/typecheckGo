@@ -9,6 +9,9 @@ import (
 // convertInterfaceToType converts an interface declaration to a types.Type
 func (tc *TypeChecker) convertInterfaceToType(decl *ast.InterfaceDeclaration) *types.Type {
 	properties := make(map[string]*types.Type)
+	var callSignatures []*types.Type
+	var stringIndexType *types.Type
+	var numberIndexType *types.Type
 
 	// First, process extended interfaces to inherit their properties
 	for _, extendType := range decl.Extends {
@@ -22,6 +25,14 @@ func (tc *TypeChecker) convertInterfaceToType(decl *ast.InterfaceDeclaration) *t
 						// Copy all properties from parent
 						for propName, propType := range parentType.Properties {
 							properties[propName] = propType
+						}
+						// Copy call signatures and index signatures
+						callSignatures = append(callSignatures, parentType.CallSignatures...)
+						if parentType.StringIndexType != nil {
+							stringIndexType = parentType.StringIndexType
+						}
+						if parentType.NumberIndexType != nil {
+							numberIndexType = parentType.NumberIndexType
 						}
 					}
 				}
@@ -48,7 +59,29 @@ func (tc *TypeChecker) convertInterfaceToType(decl *ast.InterfaceDeclaration) *t
 				propType = &newType
 			}
 			properties[m.Key.Name] = propType
+		case *ast.CallSignature:
+			// Convert call signature to FunctionType
+			params := make([]*types.Type, len(m.Parameters))
+			for i := range m.Parameters {
+				params[i] = types.Any
+			}
+			returnType := tc.convertTypeNode(m.ReturnType)
+			callSignatures = append(callSignatures, types.NewFunctionType(params, returnType))
+		case *ast.IndexSignature:
+			valueType := tc.convertTypeNode(m.ValueType)
+			keyType := tc.convertTypeNode(m.KeyType)
+
+			if keyType.Kind == types.StringType {
+				stringIndexType = valueType
+			} else if keyType.Kind == types.NumberType {
+				numberIndexType = valueType
+			}
 		}
 	}
-	return types.NewObjectType(decl.ID.Name, properties)
+
+	objType := types.NewObjectType(decl.ID.Name, properties)
+	objType.CallSignatures = callSignatures
+	objType.StringIndexType = stringIndexType
+	objType.NumberIndexType = numberIndexType
+	return objType
 }
