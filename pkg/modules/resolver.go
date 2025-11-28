@@ -322,9 +322,15 @@ func (r *ModuleResolver) resolveFromTypeRoots(specifier string) (string, error) 
 			if strings.Contains(path, "**") {
 				baseDir := filepath.Dir(strings.Split(path, "**")[0])
 				if found := r.findFileRecursive(baseDir, specifier+".d.ts"); found != "" {
+					if os.Getenv("TSCHECK_DEBUG") == "1" {
+						fmt.Fprintf(os.Stderr, "DEBUG: Resolved '%s' from typeRoots: %s\n", specifier, found)
+					}
 					return found, nil
 				}
 			} else if r.fileExists(path) {
+				if os.Getenv("TSCHECK_DEBUG") == "1" {
+					fmt.Fprintf(os.Stderr, "DEBUG: Resolved '%s' from typeRoots: %s\n", specifier, path)
+				}
 				return path, nil
 			}
 		}

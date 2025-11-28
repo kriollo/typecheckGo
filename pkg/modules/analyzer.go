@@ -62,6 +62,16 @@ func (a *ModuleAnalyzer) analyzeStatement(module *ResolvedModule, stmt ast.State
 				}
 			}
 		}
+	case *ast.ModuleDeclaration:
+		// Process statements inside declare module blocks
+		// This handles files like: declare module 'foo' { export type Bar = ... }
+		if s.Body != nil {
+			for _, innerStmt := range s.Body {
+				if err := a.analyzeStatement(module, innerStmt); err != nil {
+					return err
+				}
+			}
+		}
 	}
 
 	return nil
