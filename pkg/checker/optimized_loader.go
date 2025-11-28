@@ -143,6 +143,12 @@ func (oll *OptimizedLibLoader) LoadLibFileOptimized(filePath string) error {
 			// Fast path: Extract type aliases
 			if strings.HasPrefix(trimmed, "type ") || strings.HasPrefix(trimmed, "export type ") {
 				if name := extractTypeAliasName(trimmed); name != "" {
+					// Skip if this type alias already exists with a node (e.g., from loadBuiltinTypes)
+					// This prevents overwriting properly parsed builtin types with Any
+					if existing, ok := oll.tc.symbolTable.ResolveSymbol(name); ok && existing.Node != nil {
+						continue
+					}
+
 					symbol := oll.tc.symbolTable.DefineSymbol(name, symbols.TypeAliasSymbol, nil, false)
 					symbol.FromDTS = true
 					// Assign Any to avoid false positives with utility types like Partial, Pick, etc.

@@ -16,6 +16,11 @@ func (tc *TypeChecker) LoadTypeScriptLibsWithSnapshot(libs []string) {
 		defer tc.profiler.EndPhase("TypeScript Libs Loading")
 	}
 
+	// Load essential builtin utility types first (NonNullable, Partial, etc.)
+	// This must happen before any other library loading to ensure these types
+	// are properly parsed with their conditional type definitions
+	tc.loadBuiltinTypes()
+
 	// Get root directory
 	var rootDir string
 	if tc.moduleResolver != nil {

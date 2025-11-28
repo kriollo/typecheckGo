@@ -5,6 +5,7 @@ import (
 
 	"tstypechecker/pkg/ast"
 	"tstypechecker/pkg/modules"
+	"tstypechecker/pkg/symbols"
 	"tstypechecker/pkg/types"
 )
 
@@ -254,6 +255,23 @@ func (tc *TypeChecker) checkTypeAliasDeclaration(decl *ast.TypeAliasDeclaration,
 			tc.addError(filename, decl.ID.Pos().Line, decl.ID.Pos().Column,
 				fmt.Sprintf("Invalid type name: '%s'", decl.ID.Name), "TS1003", "error")
 		}
+
+		// Ensure the symbol exists and has the AST node attached
+		// This is critical for generic type aliases which need the node for instantiation
+		// Only do this for builtin types to avoid interfering with user code
+		if filename == "builtins.d.ts" {
+			symbol, exists := tc.symbolTable.ResolveSymbol(decl.ID.Name)
+			if !exists {
+				// Symbol doesn't exist yet, create it with the node
+				// This happens for builtin types loaded before the binder runs
+				tc.symbolTable.DefineSymbol(decl.ID.Name, symbols.TypeAliasSymbol, decl, false)
+			} else if symbol.Node == nil {
+				// Symbol exists (from optimized loader) but doesn't have a node
+				// Attach the node so generic instantiation works
+				symbol.Node = decl
+			}
+		}
+		// For user code, the binder will have already created the symbol with the node
 
 		// For non-generic type aliases, resolve and cache them.
 		// Generic ones are resolved on instantiation.

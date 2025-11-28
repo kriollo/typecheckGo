@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"tstypechecker/pkg/ast"
+	"tstypechecker/pkg/parser"
 	"tstypechecker/pkg/symbols"
 	"tstypechecker/pkg/types"
 )
@@ -781,6 +783,41 @@ func (tc *TypeChecker) checkIfTypeIsCallable(symbol *symbols.Symbol, typeName st
 					break
 				}
 			}
+		}
+	}
+}
+
+// loadBuiltinTypes loads essential TypeScript utility types with full parsing
+// This ensures types like NonNullable, Partial, etc. work correctly
+func (tc *TypeChecker) loadBuiltinTypes() {
+	// Define only the most essential utility types that are commonly used
+	// We use parentheses around union types in extends clauses for better parsing
+	builtinTypes := `
+type NonNullable<T> = T extends (null | undefined) ? never : T;
+type Partial<T> = { [P in keyof T]?: T[P] };
+type Readonly<T> = { readonly [P in keyof T]: T[P] };
+type Pick<T, K extends keyof T> = { [P in K]: T[P] };
+type Record<K extends keyof any, T> = { [P in K]: T };
+type Exclude<T, U> = T extends U ? never : T;
+type Extract<T, U> = T extends U ? T : never;
+`
+
+	// Parse the builtin types
+	file, err := parser.ParseCode(builtinTypes, "builtins.d.ts")
+	if err != nil {
+		// If parsing fails, log but don't crash - the optimized loader will provide fallbacks
+		fmt.Fprintf(os.Stderr, "Warning: Failed to parse builtin types: %v\n", err)
+		return
+	}
+
+	// Register each type alias
+	for _, stmt := range file.Body {
+		if typeAlias, ok := stmt.(*ast.TypeAliasDeclaration); ok {
+			if os.Getenv("TSCHECK_DEBUG") == "1" {
+				fmt.Fprintf(os.Stderr, "DEBUG: Registering builtin type: %s\n", typeAlias.ID.Name)
+			}
+			// Register the type alias - this will add it to the symbol table with the AST node
+			tc.checkTypeAliasDeclaration(typeAlias, "builtins.d.ts")
 		}
 	}
 }
