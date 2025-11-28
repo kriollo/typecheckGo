@@ -1,50 +1,41 @@
 {
     "compilerOptions": {
         "target": "ES2020",
-        "module": "nodenext",
+        "module": "commonjs",
         "declaration": true,
         "lib": [
-            "ES2020",
-            "DOM"
+            "ES2020"
         ],
         "outDir": "./dist",
-        "rootDir": "./",
+        "rootDir": "./src",
         "baseUrl": "./",
         "paths": {
             "@/*": [
                 "./src/*"
-            ],
-            "P@/*": [
-                "./public/*"
-            ],
-            "N@/*": [
-                "./node_modules/*"
             ]
         },
         "strict": true,
         "noImplicitAny": false,
         "strictNullChecks": true,
-        "noUnusedLocals": false,
-        "noUnusedParameters": false,
-        "noImplicitReturns": false,
+        "noUnusedLocals": true,
+        "noUnusedParameters": true,
+        "noImplicitReturns": true,
         "skipLibCheck": true,
         "allowJs": false,
         "checkJs": false,
-        "moduleResolution": "nodenext",
-        "typeRoots": [
-            "./node_modules/@types",
-            "./types",
-            "./src/jscontrollers/types",
-            "./src/types"
-        ]
+        "moduleResolution": "node",
+        "esModuleInterop": true,
+        "allowSyntheticDefaultImports": true,
+        "forceConsistentCasingInFileNames": true,
+        "resolveJsonModule": true
     },
     "include": [
-        "test/**/*",
-        "pkg/**/*"
+        "src/**/*"
     ],
     "exclude": [
         "node_modules",
         "dist",
+        "**/*.test.ts",
         "**/*.spec.ts"
     ]
 }

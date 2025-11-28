@@ -1,3 +1,22 @@
+## Compilar el Binario Go
+
+Antes de publicar o instalar el paquete npm, debes compilar el binario Go para tu plataforma:
+
+### Windows
+```bash
+go build -o tscheck.exe
+```
+
+### Linux/macOS
+```bash
+go build -o tscheck
+```
+
+Coloca el binario generado (`tscheck.exe` o `tscheck`) en la raíz del proyecto, junto a `package.json`.
+
+Cuando ejecutes el CLI o uses la API, el wrapper Node.js detectará automáticamente el binario correcto según tu sistema operativo.
+
+Si quieres publicar para varias plataformas, incluye ambos binarios en la raíz antes de ejecutar `npm publish`.
 # Verificador de Tipos TypeScript en Go
 
 [![English](https://img.shields.io/badge/Language-English-blue)](README.md)
@@ -178,3 +197,41 @@ go test ./...
 ## Licencia
 
 Licencia MIT - Ver archivo LICENSE para detalles.
+
+## Uso con Node.js & npm
+
+### Ejemplo de API Node.js
+
+```js
+const { GoTypeChecker } = require('go-typechecker');
+const checker = new GoTypeChecker(); // detecta automáticamente tscheck(.exe)
+
+(async () => {
+  // Verificar un archivo
+  const resultado = await checker.checkFile('src/index.ts');
+  console.log(resultado.errors);
+
+  // Verificar código desde string
+  const codigo = 'let x: number = "hola";';
+  const resultado2 = await checker.checkCode(codigo, { filename: 'test.ts' });
+  console.log(resultado2.errors);
+})();
+```
+
+### Ejemplo CLI
+
+```bash
+npx go-typecheck check src/index.ts
+npx go-typecheck check-code "let x: number = 'hola'" --filename test.ts
+echo "let y: string = 123;" | npx go-typecheck check-stdin --filename test2.ts
+```
+
+### Notas Multiplataforma
+
+- Debes compilar el binario Go (`tscheck.exe` para Windows, `tscheck` para Unix) y colocarlo en la raíz del proyecto o en tu PATH.
+- El wrapper Node.js detecta automáticamente el binario correcto según tu sistema operativo.
+- Todas las funciones del CLI y la API funcionan en Windows, Linux y macOS.
+
+### Publicación en npm
+
+- El paquete incluye el wrapper Node.js y el CLI. Debes proveer el binario Go para tu plataforma.

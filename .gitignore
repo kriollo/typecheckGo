@@ -9,7 +9,7 @@ dist
 
 .tscheck_cache
 public
-src
+testProject
 
 ts*.exe
 type*.exe

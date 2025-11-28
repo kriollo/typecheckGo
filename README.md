@@ -1,3 +1,22 @@
+## Building the Go Binary
+
+Before publishing or installing the npm package, you must build the Go binary for your platform:
+
+### Windows
+```bash
+go build -o tscheck.exe
+```
+
+### Linux/macOS
+```bash
+go build -o tscheck
+```
+
+Place the resulting binary (`tscheck.exe` or `tscheck`) in the project root, next to `package.json`.
+
+When you run the CLI or use the API, the Node.js wrapper will automatically detect and use the correct binary for your OS.
+
+If you want to publish for multiple platforms, include both binaries in the root before running `npm publish`.
 # TypeScript Type Checker in Go
 
 [![English](https://img.shields.io/badge/Language-English-blue)](README.md)
@@ -178,3 +197,41 @@ go test ./...
 ## License
 
 MIT License - See LICENSE file for details.
+
+## Node.js & npm Usage
+
+### Node.js API Example
+
+```js
+const { GoTypeChecker } = require('go-typechecker');
+const checker = new GoTypeChecker(); // auto-detects tscheck(.exe)
+
+(async () => {
+  // Check a file
+  const result = await checker.checkFile('src/index.ts');
+  console.log(result.errors);
+
+  // Check code from string
+  const code = 'let x: number = "hello";';
+  const result2 = await checker.checkCode(code, { filename: 'test.ts' });
+  console.log(result2.errors);
+})();
+```
+
+### CLI Example
+
+```bash
+npx go-typecheck check src/index.ts
+npx go-typecheck check-code "let x: number = 'hola'" --filename test.ts
+echo "let y: string = 123;" | npx go-typecheck check-stdin --filename test2.ts
+```
+
+### Multiplatform Notes
+
+- You must build the Go binary (`tscheck.exe` for Windows, `tscheck` for Unix) and place it in the project root or in your PATH.
+- The Node.js wrapper will auto-detect the correct binary for your OS.
+- All CLI and API features work on Windows, Linux, and macOS.
+
+### Publishing to npm
+
+- The package includes the Node.js wrapper and CLI. You must provide the Go binary for your platform.

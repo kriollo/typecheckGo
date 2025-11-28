@@ -1,42 +1,63 @@
 {
-  "name": "typecheker",
+  "name": "go-typechecker",
   "version": "1.0.0",
-  "description": "A **production-ready** TypeScript type checker written in Go that covers ~75% of TypeScript features used in real-world projects.",
-  "main": "index.js",
+  "description": "A type checker for Go written in TypeScript, providing static analysis for Go code.",
+  "main": "dist/index.js",
+  "bin": {
+    "go-typecheck": "./dist/cli.js"
+  },
   "directories": {
     "test": "test"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "tsc": "tsc --noEmit",
-    "tsc:file": "tsc --noEmit",
-    "check": "go run . check",
-    "compare": "npm run tsc && npm run check",
-    "compare:file": "tsc --noEmit $npm_config_file && go run . check $npm_config_file"
+    "build": "tsc",
+    "start": "node dist/cli.js",
+    "test": "jest",
+    "dev": "ts-node src/cli.ts",
+    "clean": "rm -rf dist",
+    "go:build:win": "go build -o tscheck.exe",
+    "go:build:unix": "go build -o tscheck",
+    "go:build:all": "npm run go:build:win && npm run go:build:unix",
+    "release": "npm run build && npm run go:build:all",
+    "version:patch": "npm version patch && npm run release",
+    "version:minor": "npm version minor && npm run release",
+    "version:major": "npm version major && npm run release",
+    "publish:all": "npm run release && npm publish"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/kriollo/typecheckGo.git"
+    "url": "git+https://github.com/kriollo/go-typechecker.git"
   },
-  "keywords": [],
+  "keywords": [
+    "go",
+    "golang",
+    "typechecker",
+    "static-analysis",
+    "typescript"
+  ],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
+  "files": [
+    "dist",
+    "tscheck.exe",
+    "tscheck"
+  ],
   "bugs": {
-    "url": "https://github.com/kriollo/typecheckGo/issues"
+    "url": "https://github.com/kriollo/go-typechecker/issues"
   },
-  "homepage": "https://github.com/kriollo/typecheckGo#readme",
+  "homepage": "https://github.com/kriollo/go-typechecker#readme",
   "devDependencies": {
-    "@types/jquery": "^3.5.33",
+    "@types/execa": "^0.9.0",
+    "@types/jest": "^29.5.0",
     "@types/node": "^24.10.1",
-    "@types/vue": "^2.0.0",
-    "@typescript/native-preview": "^7.0.0-dev.20251117.1",
-    "code-tag": "^1.2.0",
-    "express": "^5.1.0",
-    "oxlint": "^1.29.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.0",
+    "ts-node": "^10.9.0",
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "sweetalert2": "^11.26.3"
+    "commander": "^12.0.0",
+    "execa": "^9.6.0"
   }
 }
