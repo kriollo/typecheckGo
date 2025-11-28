@@ -149,6 +149,13 @@ func (st *SymbolTable) ExitScope() {
 func (st *SymbolTable) DefineSymbol(name string, symbolType SymbolType, node ast.Node, mutable bool) *Symbol {
 	// Check if symbol already exists in current scope
 	if existing, exists := st.Current.Symbols[name]; exists {
+		// If the new call has no node but existing has one, preserve the existing node
+		// This prevents optimized loaders from overwriting properly parsed symbols
+		if node == nil && existing.Node != nil {
+			// Just return the existing symbol without modification
+			return existing
+		}
+
 		// Only add error if node is not nil
 		if node != nil {
 			st.addError(fmt.Sprintf("'%s' is already defined", name),
