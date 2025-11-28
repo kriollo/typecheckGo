@@ -306,9 +306,12 @@ func (tc *TypeChecker) checkTypeAliasDeclaration(decl *ast.TypeAliasDeclaration,
 
 		// For non-generic type aliases, resolve and cache them.
 		// Generic ones are resolved on instantiation.
+		// Also skip TypeQuery (typeof) as it might depend on variables not yet checked.
 		if len(decl.TypeParameters) == 0 {
-			resolvedType := tc.convertTypeNode(decl.TypeAnnotation)
-			tc.typeAliasCache[decl.ID.Name] = resolvedType
+			if _, isTypeQuery := decl.TypeAnnotation.(*ast.TypeQuery); !isTypeQuery {
+				resolvedType := tc.convertTypeNode(decl.TypeAnnotation)
+				tc.typeAliasCache[decl.ID.Name] = resolvedType
+			}
 		}
 	}
 }

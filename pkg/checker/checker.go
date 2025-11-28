@@ -2240,11 +2240,17 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 				return resolvedType
 			}
 
-			// Check if it's a local interface
+			// Check if it's a local interface or type alias (lazy resolution)
 			if symbol, exists := tc.symbolTable.ResolveSymbol(t.Name); exists {
 				if symbol.Type == symbols.InterfaceSymbol && symbol.Node != nil {
 					if interfaceDecl, ok := symbol.Node.(*ast.InterfaceDeclaration); ok {
 						return tc.convertInterfaceToType(interfaceDecl)
+					}
+				} else if symbol.Type == symbols.TypeAliasSymbol && symbol.Node != nil {
+					if aliasDecl, ok := symbol.Node.(*ast.TypeAliasDeclaration); ok {
+						// Resolve lazily - this handles cases like 'typeof' where the type
+						// depends on variables that might not have been checked during the first pass
+						return tc.convertTypeNode(aliasDecl.TypeAnnotation)
 					}
 				}
 			}
