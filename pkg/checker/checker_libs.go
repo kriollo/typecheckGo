@@ -815,19 +815,10 @@ interface Promise<T> {}
 	for _, stmt := range file.Body {
 		switch decl := stmt.(type) {
 		case *ast.TypeAliasDeclaration:
-			if os.Getenv("TSCHECK_DEBUG") == "1" {
-				fmt.Fprintf(os.Stderr, "DEBUG: Registering builtin type: %s\n", decl.ID.Name)
-			}
 			tc.checkTypeAliasDeclaration(decl, "builtins.d.ts")
 		case *ast.InterfaceDeclaration:
-			if os.Getenv("TSCHECK_DEBUG") == "1" {
-				fmt.Fprintf(os.Stderr, "DEBUG: Registering builtin interface: %s\n", decl.ID.Name)
-			}
 			// Manually register interface symbol since checkInterfaceDeclaration doesn't do it
-			sym := tc.symbolTable.DefineSymbol(decl.ID.Name, symbols.InterfaceSymbol, decl, false)
-			if os.Getenv("TSCHECK_DEBUG") == "1" {
-				fmt.Fprintf(os.Stderr, "DEBUG: Created Promise symbol at %p\n", sym)
-			}
+			tc.symbolTable.DefineSymbol(decl.ID.Name, symbols.InterfaceSymbol, decl, false)
 		}
 	}
 }
