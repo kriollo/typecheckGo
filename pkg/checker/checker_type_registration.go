@@ -1,6 +1,8 @@
 package checker
 
 import (
+	"fmt"
+	"os"
 	"tstypechecker/pkg/ast"
 	"tstypechecker/pkg/types"
 )
@@ -122,6 +124,13 @@ func (tc *TypeChecker) registerFunctionType(decl *ast.FunctionDeclaration, filen
 	var returnType *types.Type
 	if decl.ReturnType != nil {
 		returnType = tc.convertTypeNode(decl.ReturnType)
+		if decl.Async && os.Getenv("TSCHECK_DEBUG") == "1" {
+			fmt.Printf("DEBUG: Async function return type: Kind=%s, Name=%s, TypeParameters=%d, Properties=%d\n",
+				returnType.Kind, returnType.Name, len(returnType.TypeParameters), len(returnType.Properties))
+			if len(returnType.TypeParameters) > 0 {
+				fmt.Printf("DEBUG: TypeParameter[0]: Kind=%s, Name=%s\n", returnType.TypeParameters[0].Kind, returnType.TypeParameters[0].Name)
+			}
+		}
 	} else if decl.Body != nil {
 		returnType = tc.inferencer.InferReturnTypeFromBlock(decl.Body)
 	} else {

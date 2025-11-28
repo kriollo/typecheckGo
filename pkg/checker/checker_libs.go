@@ -800,6 +800,7 @@ type Pick<T, K extends keyof T> = { [P in K]: T[P] };
 type Record<K extends keyof any, T> = { [P in K]: T };
 type Exclude<T, U> = T extends U ? never : T;
 type Extract<T, U> = T extends U ? T : never;
+interface Promise<T> {}
 `
 
 	// Parse the builtin types
@@ -810,14 +811,23 @@ type Extract<T, U> = T extends U ? T : never;
 		return
 	}
 
-	// Register each type alias
+	// Register each type alias and interface
 	for _, stmt := range file.Body {
-		if typeAlias, ok := stmt.(*ast.TypeAliasDeclaration); ok {
+		switch decl := stmt.(type) {
+		case *ast.TypeAliasDeclaration:
 			if os.Getenv("TSCHECK_DEBUG") == "1" {
-				fmt.Fprintf(os.Stderr, "DEBUG: Registering builtin type: %s\n", typeAlias.ID.Name)
+				fmt.Fprintf(os.Stderr, "DEBUG: Registering builtin type: %s\n", decl.ID.Name)
 			}
-			// Register the type alias - this will add it to the symbol table with the AST node
-			tc.checkTypeAliasDeclaration(typeAlias, "builtins.d.ts")
+			tc.checkTypeAliasDeclaration(decl, "builtins.d.ts")
+		case *ast.InterfaceDeclaration:
+			if os.Getenv("TSCHECK_DEBUG") == "1" {
+				fmt.Fprintf(os.Stderr, "DEBUG: Registering builtin interface: %s\n", decl.ID.Name)
+			}
+			// Manually register interface symbol since checkInterfaceDeclaration doesn't do it
+			sym := tc.symbolTable.DefineSymbol(decl.ID.Name, symbols.InterfaceSymbol, decl, false)
+			if os.Getenv("TSCHECK_DEBUG") == "1" {
+				fmt.Fprintf(os.Stderr, "DEBUG: Created Promise symbol at %p\n", sym)
+			}
 		}
 	}
 }

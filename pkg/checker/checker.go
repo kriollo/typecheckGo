@@ -2339,7 +2339,13 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 					return resolvedType
 				} else if symbol.Type == symbols.InterfaceSymbol {
 					if symbol.Node == nil {
+						if t.Name == "Promise" && os.Getenv("TSCHECK_DEBUG") == "1" {
+							fmt.Printf("DEBUG: Promise symbol found but Node is nil! Scope Level: %d, Symbol Address: %p. Returning Any.\n", tc.symbolTable.Current.Level, symbol)
+						}
 						return types.Any
+					}
+					if t.Name == "Promise" && os.Getenv("TSCHECK_DEBUG") == "1" {
+						fmt.Printf("DEBUG: Promise symbol found with Node. Processing... Scope Level: %d\n", tc.symbolTable.Current.Level)
 					}
 					interfaceDecl := symbol.Node.(*ast.InterfaceDeclaration)
 

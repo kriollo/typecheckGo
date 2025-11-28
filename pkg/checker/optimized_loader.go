@@ -126,6 +126,18 @@ func (oll *OptimizedLibLoader) LoadLibFileOptimized(filePath string) error {
 			// Fast path: Extract global variables
 			if strings.HasPrefix(trimmed, "declare const ") || strings.HasPrefix(trimmed, "declare var ") || strings.HasPrefix(trimmed, "declare let ") {
 				if name, typeName := extractVarName(trimmed); name != "" {
+					// Special case for Promise: don't overwrite the interface definition with the variable definition
+					// This ensures Promise<T> works correctly.
+					// In a full implementation we would support merged declarations.
+					if name == "Promise" {
+						if existing, ok := oll.tc.symbolTable.ResolveSymbol(name); ok && existing.Type == symbols.InterfaceSymbol {
+							if os.Getenv("TSCHECK_DEBUG") == "1" {
+								fmt.Printf("DEBUG: OptimizedLibLoader skipping var Promise to preserve interface Promise\n")
+							}
+							continue
+						}
+					}
+
 					symbol := oll.tc.symbolTable.DefineSymbol(name, symbols.VariableSymbol, nil, false)
 					symbol.FromDTS = true
 
@@ -196,6 +208,19 @@ func (oll *OptimizedLibLoader) LoadLibFileOptimized(filePath string) error {
 
 				// End of interface
 				if blockDepth <= 0 && interfaceName != "" {
+					// Skip if this interface already exists with a node (e.g., from loadBuiltinTypes)
+					if existing, ok := oll.tc.symbolTable.ResolveSymbol(interfaceName); ok && existing.Node != nil {
+						if interfaceName == "Promise" && os.Getenv("TSCHECK_DEBUG") == "1" {
+							fmt.Printf("DEBUG: OptimizedLibLoader skipping Promise because it already has a node\n")
+						}
+						inInterfaceBlock = false
+						interfaceName = ""
+						continue
+					}
+
+					if interfaceName == "Promise" && os.Getenv("TSCHECK_DEBUG") == "1" {
+						fmt.Printf("DEBUG: OptimizedLibLoader defining Promise (overwriting or new)\n")
+					}
 					symbol := oll.tc.symbolTable.DefineSymbol(interfaceName, symbols.InterfaceSymbol, nil, false)
 					symbol.FromDTS = true
 
