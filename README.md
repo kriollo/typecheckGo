@@ -1,5 +1,8 @@
 # TypeScript Type Checker in Go
 
+[![English](https://img.shields.io/badge/Language-English-blue)](README.md)
+[![Español](https://img.shields.io/badge/Language-Español-red)](README_es.md)
+
 A **production-ready** TypeScript type checker written in Go that covers ~85% of TypeScript features used in real-world projects.
 
 ## 🎯 Quick Start
