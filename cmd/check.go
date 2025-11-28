@@ -100,6 +100,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	// Load tsconfig.json if it exists
 	tsConfig, err := config.LoadTSConfig(rootDir)
 	if err != nil {
+		fmt.Printf("%s⚠%s Failed to load tsconfig.json: %v. Using default configuration.\n", colorYellow, colorReset, err)
 		// Silently use default configuration
 		tsConfig = config.GetDefaultConfig()
 	}
