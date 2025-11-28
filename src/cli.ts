@@ -13,20 +13,47 @@ program
 
 program
   .command('check <file>')
-  .description('Check a Go file for type errors')
-  .action(async (file: string) => {
+  .description('Check a Go file or directory for type errors')
+  .option('-t, --timeout <ms>', 'Timeout in milliseconds (default: 10000)', '10000')
+  .allowUnknownOption()
+  .action(async (file: string, options: { timeout: string }, command) => {
     const checker = new GoTypeChecker();
-    const result = await checker.checkFile(file);
-    reportResult(result);
+    const timeout = parseInt(options.timeout, 10) || 10000;
+    // Recoger opciones adicionales y filtrar --timeout
+    let extraArgs = command.parent.rawArgs.slice(command.parent.rawArgs.indexOf('check') + 2);
+    extraArgs = extraArgs.filter((arg, idx, arr) => {
+      if (arg === '--timeout') return false;
+      if (arr[idx - 1] === '--timeout') return false;
+      return true;
+    });
+    // Ejecutar el checker y mostrar la salida tal cual
+    const args = ['check', file, ...extraArgs];
+    try {
+      const proc = await checker['runChecker'](args, timeout);
+      // Mostrar la salida tal cual
+      console.log(proc);
+    } catch (err: any) {
+      // Si el checker retorna exit code 1, mostrar solo la salida del checker
+      if (err.stdout) {
+        console.log(err.stdout);
+        process.exit(1);
+      } else {
+        // Si es otro error, mostrar el stacktrace
+        console.error(err);
+        process.exit(2);
+      }
+    }
   });
 
 program
   .command('check-code <code>')
   .description('Check Go code from string')
   .option('-n, --filename <filename>', 'Filename to use for error reporting', 'stdin.go')
-  .action(async (code: string, options: { filename: string }) => {
+  .option('-t, --timeout <ms>', 'Timeout in milliseconds (default: 10000)', '10000')
+  .action(async (code: string, options: { filename: string, timeout: string }) => {
     const checker = new GoTypeChecker();
-    const result = await checker.checkCode(code, { filename: options.filename });
+    const timeout = parseInt(options.timeout, 10) || 10000;
+    const result = await checker.checkCode(code, { filename: options.filename, timeout });
     reportResult(result);
   });
 
@@ -34,10 +61,12 @@ program
   .command('check-stdin')
   .description('Check Go code from stdin')
   .option('-n, --filename <filename>', 'Filename to use for error reporting', 'stdin.go')
-  .action(async (options: { filename: string }) => {
+  .option('-t, --timeout <ms>', 'Timeout in milliseconds (default: 10000)', '10000')
+  .action(async (options: { filename: string, timeout: string }) => {
     const code = readFileSync(0, 'utf-8'); // Read from stdin
     const checker = new GoTypeChecker();
-    const result = await checker.checkCode(code, { filename: options.filename });
+    const timeout = parseInt(options.timeout, 10) || 10000;
+    const result = await checker.checkCode(code, { filename: options.filename, timeout });
     reportResult(result);
   });
 
