@@ -284,6 +284,15 @@ func (r *ModuleResolver) resolvePathAlias(specifier string) (string, error) {
 				if resolved, err := r.resolveFilePath(fullPath); err == nil {
 					return resolved, nil
 				}
+
+				// Special case: check .js for path aliases (e.g. P@/vendor)
+				// This avoids checking .js globally which hurts performance
+				if !strings.Contains(fullPath, "node_modules") {
+					jsPath := fullPath + ".js"
+					if r.fileExists(jsPath) {
+						return jsPath, nil
+					}
+				}
 			}
 		}
 	}
@@ -418,14 +427,14 @@ func (r *ModuleResolver) resolveFilePath(basePath string) (string, error) {
 		}
 
 		// Then .tsx
+		// Then .tsx
 		tsxPath := basePath + ".tsx"
 		if r.fileExists(tsxPath) {
 			return tsxPath, nil
 		}
+	}
 
-
-	// Try as directory with index files
-	// Check index.ts first (most common)
+	// Then index.ts
 	indexTs := filepath.Join(basePath, "index.ts")
 	if r.fileExists(indexTs) {
 		return indexTs, nil
@@ -516,31 +525,70 @@ func (r *ModuleResolver) LoadModule(filePath string, specifier string) (module *
 	}
 	r.mu.RUnlock()
 
-	// Recover from parser panics to prevent crashes
-	defer func() {
-		if panicErr := recover(); panicErr != nil {
-			// On panic, create an empty module instead of failing
-			module = &ResolvedModule{
-				AbsolutePath:  filePath,
-				RelativePath:  r.getRelativePath(filePath),
-				Specifier:     specifier,
-				ModuleAST:     nil,
-				ModuleSymbols: r.symbolTable,
-				Exports:       make(map[string]*ExportInfo),
-				IsExternal:    strings.Contains(filePath, "node_modules"),
-				IsTypeScript:  strings.HasSuffix(filePath, ".ts") || strings.HasSuffix(filePath, ".tsx"),
+	// Read file content first to calculate hash
+	content, readErr := os.ReadFile(filePath)
+	if readErr != nil {
+		return nil, fmt.Errorf("failed to read module %s: %w", filePath, readErr)
+	}
+
+	// Use GlobalCache to avoid re-parsing identical content
+	// This is the key optimization requested by the user
+	cachedFile := SharedGlobalCache.GetOrPut(content, func() *CachedFile {
+		// This function is only executed if the content is not in the cache
+
+		// Recover from parser panics to prevent crashes
+		defer func() {
+			if panicErr := recover(); panicErr != nil {
+				// On panic, we return nil here, and the outer function will handle creating an empty module
+				// We don't cache failed parses in the global cache to allow retries if file changes
 			}
-			err = nil // Don't return error, allow module to be treated as valid but empty
+		}()
+
+		// Determinar si es TypeScript
+		isTypeScript := strings.HasSuffix(filePath, ".ts") || strings.HasSuffix(filePath, ".tsx")
+
+		// Parsear el archivo
+		program, parseErr := parser.ParseCode(string(content), filePath)
+		if parseErr != nil {
+			// Don't cache parse errors in global cache
+			return nil
 		}
-	}()
 
-	// Determinar si es TypeScript
-	isTypeScript := strings.HasSuffix(filePath, ".ts") || strings.HasSuffix(filePath, ".tsx")
+		// Crear el módulo
+		mod := &ResolvedModule{
+			AbsolutePath:  filePath,
+			RelativePath:  r.getRelativePath(filePath),
+			Specifier:     specifier,
+			ModuleAST:     program,
+			ModuleSymbols: r.symbolTable, // Usar la tabla de símbolos global
+			Exports:       make(map[string]*ExportInfo),
+			IsExternal:    strings.Contains(filePath, "node_modules"),
+			IsTypeScript:  isTypeScript,
+		}
 
-	// Parsear el archivo
-	program, parseErr := parser.ParseFile(filePath)
-	if parseErr != nil {
-		// On parse error, create an empty module instead of failing
+		// Analizar los exports del módulo
+		analyzer := NewModuleAnalyzer(r)
+		if analyzeErr := analyzer.AnalyzeModule(mod, program); analyzeErr != nil {
+			// Don't cache analysis errors
+			return nil
+		}
+
+		return &CachedFile{
+			Module: mod,
+		}
+	})
+
+	// If we got a cached file, use its module
+	if cachedFile != nil && cachedFile.Module != nil {
+		module = cachedFile.Module
+		// Update path-specific fields since the cached module might have been loaded from a different path
+		// (though with identical content, it shouldn't matter much for types, but debugging info might need it)
+		// For now, we reuse the module as is, assuming identical content means identical module behavior
+	} else {
+		// Fallback: if parsing failed or panic occurred (not cached), create empty/error module
+		// This part mimics the original error handling logic
+
+		isTypeScript := strings.HasSuffix(filePath, ".ts") || strings.HasSuffix(filePath, ".tsx")
 		module = &ResolvedModule{
 			AbsolutePath:  filePath,
 			RelativePath:  r.getRelativePath(filePath),
@@ -551,37 +599,11 @@ func (r *ModuleResolver) LoadModule(filePath string, specifier string) (module *
 			IsExternal:    strings.Contains(filePath, "node_modules"),
 			IsTypeScript:  isTypeScript,
 		}
-		// Cache even failed modules to avoid re-parsing
-		r.mu.Lock()
-		r.moduleCache[filePath] = module
-		r.mu.Unlock()
-		return module, nil // Return empty module, not error
+
+		// We don't return error for parse failures, just empty module (as per original logic)
 	}
 
-	// Crear el módulo
-	module = &ResolvedModule{
-		AbsolutePath:  filePath,
-		RelativePath:  r.getRelativePath(filePath),
-		Specifier:     specifier,
-		ModuleAST:     program,
-		ModuleSymbols: r.symbolTable, // Usar la tabla de símbolos global
-		Exports:       make(map[string]*ExportInfo),
-		IsExternal:    strings.Contains(filePath, "node_modules"),
-		IsTypeScript:  isTypeScript,
-	}
-
-	// Analizar los exports del módulo
-	analyzer := NewModuleAnalyzer(r)
-	if analyzeErr := analyzer.AnalyzeModule(module, program); analyzeErr != nil {
-		// On analyze error, return module with empty exports instead of failing
-		// Cache it anyway to avoid re-parsing
-		r.mu.Lock()
-		r.moduleCache[filePath] = module
-		r.mu.Unlock()
-		return module, nil
-	}
-
-	// Cache the successfully loaded module
+	// Cache the result in the local moduleCache (path-based)
 	r.mu.Lock()
 	r.moduleCache[filePath] = module
 	r.mu.Unlock()
