@@ -438,7 +438,8 @@ func checkDirectory(templateTc *checker.TypeChecker, dir string, tsConfig *confi
 			reportErrorsTOON(allErrors)
 		default:
 			reportErrorsWithContext("", allErrors)
-			// Show timing info
+			// Show timing info and file count
+			fmt.Printf("\n%sFound %d errors in %d file(s) out of %d checked.%s\n", colorRed, len(allErrors), filesWithErrors, filesChecked, colorReset)
 			fmt.Printf("\n%s[Timing] Initialization: %dms | Type checking: %dms | Total: %dms%s\n",
 				colorGray, initDuration.Milliseconds(), checkDuration.Milliseconds(), totalDuration.Milliseconds(), colorReset)
 		}
