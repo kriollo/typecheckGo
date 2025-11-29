@@ -218,13 +218,19 @@ const checker = new GoTypeChecker(); // detecta automáticamente tscheck(.exe)
 })();
 ```
 
+
 ### Ejemplo CLI
 
 ```bash
-npx go-typecheck check src/index.ts
-npx go-typecheck check-code "let x: number = 'hola'" --filename test.ts
-echo "let y: string = 123;" | npx go-typecheck check-stdin --filename test2.ts
+npx go-typecheck check src/index.ts --timeout 60000
+npx go-typecheck check-code "let x: number = 'hola'" --filename test.ts --timeout 60000
+echo "let y: string = 123;" | npx go-typecheck check-stdin --filename test2.ts --timeout 60000
 ```
+
+#### Opción Timeout
+
+- Usa `--timeout <ms>` para definir el tiempo máximo de ejecución en milisegundos (por defecto: 10000).
+- Aumenta este valor para proyectos grandes o entornos lentos.
 
 ### Notas Multiplataforma
 

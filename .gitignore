@@ -13,3 +13,5 @@ testProject
 
 ts*.exe
 type*.exe
+
+*.tgz
