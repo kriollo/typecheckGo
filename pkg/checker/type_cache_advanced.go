@@ -105,7 +105,7 @@ func computeTypeHash(t *types.Type) string {
 
 	// For union/intersection, include parts
 	if t.Kind == types.UnionType || t.Kind == types.IntersectionType {
-		for _, part := range t.Parts {
+		for _, part := range t.Types {
 			h.Write([]byte(computeTypeHash(part)))
 		}
 	}
