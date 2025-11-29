@@ -428,6 +428,12 @@ func (r *ModuleResolver) resolveFilePath(basePath string) (string, error) {
 		if r.fileExists(dtsPath) {
 			return dtsPath, nil
 		}
+
+		// Then .js (for JavaScript modules)
+		jsPath := basePath + ".js"
+		if r.fileExists(jsPath) {
+			return jsPath, nil
+		}
 	}
 
 	// Try as directory with index files
