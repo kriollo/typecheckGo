@@ -26,16 +26,31 @@ func (tc *TypeChecker) loadTypeScriptLibs(libs []string) {
 		rootDir = "."
 	}
 
-	// Try to find TypeScript installation
-	typescriptLibPath := filepath.Join(rootDir, "node_modules", "typescript", "lib")
+	// Try to find TypeScript installation in multiple locations
+	var typescriptLibPath string
+	searchPaths := []string{
+		filepath.Join(rootDir, "node_modules", "typescript", "lib"),                              // Project's node_modules
+		filepath.Join(".", "node_modules", "typescript", "lib"),                                  // Current directory
+		filepath.Join(rootDir, "node_modules", "@typescript", "native-preview-win32-x64", "lib"), // Alternative path
+		filepath.Join(".", "node_modules", "@typescript", "native-preview-win32-x64", "lib"),     // Alternative in current dir
+	}
 
-	// Check if TypeScript lib directory exists
-	if _, err := os.Stat(typescriptLibPath); os.IsNotExist(err) {
-		// Try alternative path (@typescript/native-preview)
-		typescriptLibPath = filepath.Join(rootDir, "node_modules", "@typescript", "native-preview-win32-x64", "lib")
-		if _, err := os.Stat(typescriptLibPath); os.IsNotExist(err) {
-			return
+	for _, path := range searchPaths {
+		if _, err := os.Stat(path); err == nil {
+			typescriptLibPath = path
+			break
 		}
+	}
+
+	if typescriptLibPath == "" {
+		if os.Getenv("DEBUG_LIB_LOADING") == "1" {
+			fmt.Fprintf(os.Stderr, "⚠ TypeScript lib directory not found in any search path\n")
+		}
+		return
+	}
+
+	if os.Getenv("DEBUG_LIB_LOADING") == "1" {
+		fmt.Fprintf(os.Stderr, "✓ Found TypeScript libs at: %s\n", typescriptLibPath)
 	}
 
 	// Store the path for lazy loading

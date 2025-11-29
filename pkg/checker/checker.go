@@ -248,14 +248,11 @@ func (tc *TypeChecker) CheckFile(filename string, file *ast.File) []TypeError {
 
 	// Load TypeScript lib files on first check (lazy loading)
 	// This ensures standard JavaScript globals like Intl, Promise, etc. are available
-	// IMPORTANT: Only load if we haven't copied types from another checker (worker scenario)
-	// Workers get types via CopyGlobalTypesFrom() and should NOT reload libs
 	if len(tc.loadedLibFiles) == 0 {
-		// Check if we have global types already (copied from template checker)
-		// If globalEnv has objects, it means types were copied, so skip loading
-		if tc.globalEnv.ObjectCount() == 0 {
-			tc.LoadTypeScriptLibsWithSnapshot([]string{"ES2020", "DOM"})
+		if os.Getenv("DEBUG_LIB_LOADING") == "1" {
+			fmt.Fprintf(os.Stderr, "→ CheckFile: loadedLibFiles=%d, loading TypeScript libs...\n", len(tc.loadedLibFiles))
 		}
+		tc.LoadTypeScriptLibsWithSnapshot([]string{"ES2020", "DOM"})
 	}
 
 	// Process imports and add imported symbols to the symbol table
