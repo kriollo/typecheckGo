@@ -9,6 +9,10 @@ import (
 	"tstypechecker/pkg/types"
 )
 
+// Cache DEBUG_PARSER environment variable to avoid expensive os.Getenv calls
+// This was consuming 84% of CPU time according to profiling
+var debugParserEnabled = os.Getenv("DEBUG_PARSER") == "1"
+
 // Binder visits AST nodes and builds the symbol table
 type Binder struct {
 	table               *SymbolTable
@@ -741,7 +745,7 @@ func (b *Binder) bindArrowFunction(arrow *ast.ArrowFunctionExpression) {
 	b.table.EnterScope(arrow)
 
 	// Debug logging
-	if os.Getenv("TSCHECK_DEBUG_SCOPE") == "1" {
+	if debugParserEnabled {
 		debugFile, err := os.OpenFile("debug_scope.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if err == nil {
 			if b.table.Current.Parent != nil {

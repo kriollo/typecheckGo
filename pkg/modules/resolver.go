@@ -12,6 +12,10 @@ import (
 	"tstypechecker/pkg/types"
 )
 
+// Cache DEBUG_PARSER environment variable to avoid expensive os.Getenv calls
+// This was consuming 84% of CPU time according to profiling
+var debugParserEnabled = os.Getenv("TSCHECK_DEBUG") == "1"
+
 // ModuleResolver maneja la resolución de módulos ES/TS
 type ModuleResolver struct {
 	// Cache de módulos ya resueltos para evitar recálculos
@@ -331,13 +335,13 @@ func (r *ModuleResolver) resolveFromTypeRoots(specifier string) (string, error) 
 			if strings.Contains(path, "**") {
 				baseDir := filepath.Dir(strings.Split(path, "**")[0])
 				if found := r.findFileRecursive(baseDir, specifier+".d.ts"); found != "" {
-					if os.Getenv("TSCHECK_DEBUG") == "1" {
+					if debugParserEnabled {
 						fmt.Fprintf(os.Stderr, "DEBUG: Resolved '%s' from typeRoots: %s\n", specifier, found)
 					}
 					return found, nil
 				}
 			} else if r.fileExists(path) {
-				if os.Getenv("TSCHECK_DEBUG") == "1" {
+				if debugParserEnabled {
 					fmt.Fprintf(os.Stderr, "DEBUG: Resolved '%s' from typeRoots: %s\n", specifier, path)
 				}
 				return path, nil

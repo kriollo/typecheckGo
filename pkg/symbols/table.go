@@ -36,6 +36,7 @@ const (
 	TypeAliasSymbol
 	EnumSymbol
 	ClassSymbol
+	TypeParameterSymbol
 )
 
 func (st SymbolType) String() string {
@@ -56,6 +57,8 @@ func (st SymbolType) String() string {
 		return "enum"
 	case ClassSymbol:
 		return "class"
+	case TypeParameterSymbol:
+		return "type parameter"
 	default:
 		return "unknown"
 	}

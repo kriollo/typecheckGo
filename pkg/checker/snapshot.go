@@ -14,6 +14,10 @@ import (
 	"tstypechecker/pkg/types"
 )
 
+// Cache DEBUG_LIB_LOADING environment variable to avoid expensive os.Getenv calls
+// This was consuming 84% of CPU time according to profiling
+var debugLibLoadingEnabled = os.Getenv("DEBUG_LIB_LOADING") == "1"
+
 // LibSnapshot represents a serialized snapshot of TypeScript library definitions
 type LibSnapshot struct {
 	Version       string                 // Snapshot format version
@@ -151,7 +155,7 @@ func (sm *SnapshotManager) SaveSnapshot(tc *TypeChecker, libs []string, snapshot
 		return fmt.Errorf("failed to encode snapshot: %w", err)
 	}
 
-	if os.Getenv("DEBUG_LIB_LOADING") == "1" {
+	if debugLibLoadingEnabled {
 		fmt.Fprintf(os.Stderr, "Saved snapshot to %s (%d objects, %d types, %d symbols)\n",
 			snapshotPath, len(snapshot.GlobalObjects), len(snapshot.GlobalTypes), len(snapshot.Symbols))
 	}
@@ -179,7 +183,7 @@ func (sm *SnapshotManager) LoadSnapshot(tc *TypeChecker, snapshotPath string) er
 	}
 	decodeTime := time.Since(startTime)
 
-	if os.Getenv("DEBUG_LIB_LOADING") == "1" {
+	if debugLibLoadingEnabled {
 		fmt.Fprintf(os.Stderr, "Snapshot decode time: %v\n", decodeTime)
 	}
 
@@ -207,7 +211,7 @@ func (sm *SnapshotManager) LoadSnapshot(tc *TypeChecker, snapshotPath string) er
 		}
 	}
 
-	if os.Getenv("DEBUG_LIB_LOADING") == "1" {
+	if debugLibLoadingEnabled {
 		fmt.Fprintf(os.Stderr, "Loaded snapshot from %s (%d objects, %d types, %d symbols)\n",
 			snapshotPath, len(snapshot.GlobalObjects), len(snapshot.GlobalTypes), len(snapshot.Symbols))
 	}

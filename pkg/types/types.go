@@ -175,10 +175,41 @@ func NewArrayType(elementType *Type) *Type {
 }
 
 // NewUnionType crea un tipo union
-func NewUnionType(types []*Type) *Type {
+func NewUnionType(typesList []*Type) *Type {
+	var uniqueTypes []*Type
+	seen := make(map[string]bool)
+
+	for _, t := range typesList {
+		if t.Kind == NeverType {
+			continue
+		}
+		if t.Kind == UnionType {
+			for _, subT := range t.Types {
+				str := subT.String()
+				if !seen[str] {
+					uniqueTypes = append(uniqueTypes, subT)
+					seen[str] = true
+				}
+			}
+		} else {
+			str := t.String()
+			if !seen[str] {
+				uniqueTypes = append(uniqueTypes, t)
+				seen[str] = true
+			}
+		}
+	}
+
+	if len(uniqueTypes) == 0 {
+		return Never
+	}
+	if len(uniqueTypes) == 1 {
+		return uniqueTypes[0]
+	}
+
 	return &Type{
 		Kind:  UnionType,
-		Types: types,
+		Types: uniqueTypes,
 	}
 }
 
