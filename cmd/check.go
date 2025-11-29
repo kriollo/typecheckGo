@@ -935,8 +935,8 @@ func reportErrorsWithContext(filename string, errors []checker.TypeError) {
 		fmt.Printf("%sFound %d warnings in %d file(s).%s\n",
 			colorYellow, totalWarnings, filesWithErrors, colorReset)
 	} else {
-		fmt.Printf("%sFound %d errors in %d file(s).%s\n",
-			colorRed, totalErrors, filesWithErrors, colorReset)
+		// fmt.Printf("%sFound %d errors in %d file(s).%s\n",
+		// 	colorRed, totalErrors, filesWithErrors, colorReset)
 	}
 }
 
