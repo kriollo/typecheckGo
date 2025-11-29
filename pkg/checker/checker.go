@@ -816,8 +816,8 @@ func (tc *TypeChecker) checkArgumentTypes(args []ast.Expression, params []*ast.P
 
 		// Special case: Check keyof constraints for generic parameters
 		// Example: function getProperty<T, K extends keyof T>(obj: T, key: K)
-		// If we're checking the 'key' parameter and it's a string literal,
-		// verify that the key exists in the object passed as 'obj'
+		// Special case: Check keyof constraints for generic parameters
+		// Example: function getProperty<T, K extends keyof T>(obj: T, key: K)
 		if typeParam, ok := param.ParamType.(*ast.TypeParameter); ok {
 			if typeParam.Constraint != nil {
 				// Check if constraint is "keyof SomeType"
@@ -1565,12 +1565,20 @@ func (tc *TypeChecker) processImportWithModule(importDecl *ast.ImportDeclaration
 		if (symbol.Type == symbols.TypeAliasSymbol || symbol.Type == symbols.InterfaceSymbol) && symbol.Node != nil {
 			if symbol.ResolvedType != nil {
 				tc.typeAliasCache[name] = symbol.ResolvedType
+				if name == "actionsType" && os.Getenv("TSCHECK_DEBUG") == "1" {
+					fmt.Fprintf(os.Stderr, "DEBUG: Imported actionsType with pre-resolved type (StringIndexType=%v)\n",
+						symbol.ResolvedType.StringIndexType != nil)
+				}
 			} else {
 				if typeAliasDecl, ok := symbol.Node.(*ast.TypeAliasDeclaration); ok {
 					// Resolve the type annotation
 					resolvedType := tc.convertTypeNode(typeAliasDecl.TypeAnnotation)
 					// Cache the resolved type so it can be found when referenced
 					tc.typeAliasCache[name] = resolvedType
+					if name == "actionsType" && os.Getenv("TSCHECK_DEBUG") == "1" {
+						fmt.Fprintf(os.Stderr, "DEBUG: Resolved imported actionsType from AST (StringIndexType=%v)\n",
+							resolvedType.StringIndexType != nil)
+					}
 					if symbol.UpdateCache != nil {
 						symbol.UpdateCache(resolvedType)
 					}
@@ -2210,6 +2218,39 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 			return types.NewArrayType(elementType)
 		}
 
+		// Handle Record<K, T> utility type
+		if t.Name == "Record" && len(t.TypeArguments) == 2 {
+			keyType := tc.convertTypeNode(t.TypeArguments[0])
+			valueType := tc.convertTypeNode(t.TypeArguments[1])
+
+			// Create object type with index signature
+			objType := types.NewObjectType("Record", nil)
+
+			if keyType.Kind == types.StringType {
+				objType.StringIndexType = valueType
+			} else if keyType.Kind == types.NumberType {
+				objType.NumberIndexType = valueType
+			} else if keyType.Kind == types.UnionType {
+				// Handle Record<"a" | "b", T> -> { a: T, b: T }
+				properties := make(map[string]*types.Type)
+				for _, subtype := range keyType.Types {
+					if subtype.Kind == types.LiteralType {
+						if strVal, ok := subtype.Value.(string); ok {
+							properties[strVal] = valueType
+						}
+					} else if subtype.Kind == types.StringType {
+						// If union contains string, it becomes a string index signature
+						objType.StringIndexType = valueType
+					}
+				}
+				if len(properties) > 0 {
+					objType.Properties = properties
+				}
+			}
+
+			return objType
+		}
+
 		// Handle keyof operator (parsed as TypeReference with name starting with "keyof ")
 		if strings.HasPrefix(t.Name, "keyof ") {
 			typeName := strings.TrimPrefix(t.Name, "keyof ")
@@ -2250,7 +2291,12 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 					if aliasDecl, ok := symbol.Node.(*ast.TypeAliasDeclaration); ok {
 						// Resolve lazily - this handles cases like 'typeof' where the type
 						// depends on variables that might not have been checked during the first pass
-						return tc.convertTypeNode(aliasDecl.TypeAnnotation)
+						resolvedType := tc.convertTypeNode(aliasDecl.TypeAnnotation)
+						if os.Getenv("TSCHECK_DEBUG") == "1" {
+							fmt.Fprintf(os.Stderr, "DEBUG: Resolved type alias '%s': Kind=%v, Name=%s, Properties=%d\n",
+								t.Name, resolvedType.Kind, resolvedType.Name, len(resolvedType.Properties))
+						}
+						return resolvedType
 					}
 				}
 			}
@@ -2614,18 +2660,31 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 		if ident, ok := t.ExprName.(*ast.Identifier); ok {
 			// First check if this is a variable/const declaration
 			if varType, ok := tc.varTypeCache[ident.Name]; ok && varType != nil {
+				if os.Getenv("TSCHECK_DEBUG") == "1" {
+					fmt.Fprintf(os.Stderr, "DEBUG: TypeQuery for '%s' resolved from varTypeCache: Kind=%v, Name=%s\n",
+						ident.Name, varType.Kind, varType.Name)
+				}
 				return varType
 			}
 
 			// Then check symbol table
 			if symbol, exists := tc.symbolTable.ResolveSymbol(ident.Name); exists {
 				if symbol.ResolvedType != nil {
+					if os.Getenv("TSCHECK_DEBUG") == "1" {
+						fmt.Fprintf(os.Stderr, "DEBUG: TypeQuery for '%s' resolved from symbol.ResolvedType: Kind=%v, Name=%s\n",
+							ident.Name, symbol.ResolvedType.Kind, symbol.ResolvedType.Name)
+					}
 					return symbol.ResolvedType
 				}
 			}
 		}
 		// Fallback: try to infer from the expression
-		return tc.inferencer.InferType(t.ExprName)
+		inferredType := tc.inferencer.InferType(t.ExprName)
+		if os.Getenv("TSCHECK_DEBUG") == "1" {
+			fmt.Fprintf(os.Stderr, "DEBUG: TypeQuery fallback inference: Kind=%v, Name=%s\n",
+				inferredType.Kind, inferredType.Name)
+		}
+		return inferredType
 
 	default:
 		return types.Unknown
