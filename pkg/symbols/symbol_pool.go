@@ -52,29 +52,14 @@ func (st *SymbolTable) Reset() {
 	// Clear all scopes except global
 	st.Current = st.Global
 
-	// Clear global scope symbols (but keep it allocated)
-	st.Global.Symbols = make(map[string]*Symbol)
-	st.Global.Children = nil
+	// Clear global scope symbols using Go 1.21 clear() for efficiency
+	// This reuses the map memory instead of reallocating
+	clear(st.Global.Symbols)
+
+	// Reuse children slice capacity
+	st.Global.Children = st.Global.Children[:0]
 	st.Global.Level = 0
 
 	// Clear errors
 	st.Errors = nil
-}
-
-// Size returns the current number of symbol tables in the pool
-func (p *SymbolTablePool) Size() int {
-	return len(p.pool)
-}
-
-// Drain empties the pool (useful for testing or cleanup)
-func (p *SymbolTablePool) Drain() {
-	for {
-		select {
-		case <-p.pool:
-			// Drained one
-		default:
-			// Pool is empty
-			return
-		}
-	}
 }

@@ -1,99 +1,78 @@
 package checker
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"tstypechecker/pkg/parser"
 )
 
-// BenchmarkTypeCheckerBasic benchmarks basic type checking operations
-func BenchmarkTypeCheckerBasic(b *testing.B) {
-	code := `
-		const x: number = 42;
-		const y: string = "hello";
-		function add(a: number, b: number): number {
-			return a + b;
+// BenchmarkCheckFile benchmarks type checking a single file
+func BenchmarkCheckFile(b *testing.B) {
+	// Use a real file from the project
+	testFile := filepath.Join("..", "..", "testProject", "jscontrollers", "bodega", "masters", "salida_express", "item.ts")
+
+	// Check if file exists
+	if _, err := os.Stat(testFile); os.IsNotExist(err) {
+		b.Skip("Test file not found")
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		// Create a new checker for each iteration
+		rootDir := filepath.Join("..", "..", "testProject")
+		tc := NewWithModuleResolver(rootDir)
+
+		// Parse the file
+		ast, err := parser.ParseFile(testFile)
+		if err != nil {
+			b.Fatalf("Failed to parse file: %v", err)
 		}
-		const result = add(x, 10);
-	`
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		file, _ := parser.ParseCode(code, "bench.ts")
-		tc := New()
-		tc.CheckFile("bench.ts", file)
+		// Type check
+		_ = tc.CheckFile(testFile, ast)
 	}
 }
 
-/*
-// BenchmarkTypeCheckerComplex benchmarks complex type checking with imports
-func BenchmarkTypeCheckerComplex(b *testing.B) {
-	code := `
-		type Point = { x: number; y: number };
-		interface Shape {
-			area(): number;
+// BenchmarkParseFile benchmarks just the parsing step
+func BenchmarkParseFile(b *testing.B) {
+	testFile := filepath.Join("..", "..", "testProject", "jscontrollers", "bodega", "masters", "salida_express", "item.ts")
+
+	if _, err := os.Stat(testFile); os.IsNotExist(err) {
+		b.Skip("Test file not found")
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := parser.ParseFile(testFile)
+		if err != nil {
+			b.Fatalf("Failed to parse file: %v", err)
 		}
-		class Circle implements Shape {
-			radius: number;
-			constructor(r: number) {
-				this.radius = r;
-			}
-			area(): number {
-				return Math.PI * this.radius * this.radius;
-			}
-		}
-		const points: Point[] = [
-			{ x: 1, y: 2 },
-			{ x: 3, y: 4 }
-		];
-		const circle = new Circle(5);
-	`
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		file, _ := parser.ParseCode(code, "bench.ts")
-		symbolTable := symbols.NewSymbolTable()
-		globalEnv := types.NewGlobalEnvironment()
-		tc := NewTypeChecker(symbolTable, globalEnv, nil)
-		tc.CheckFile("bench.ts", file)
 	}
 }
 
-// BenchmarkTypeInference benchmarks type inference
-func BenchmarkTypeInference(b *testing.B) {
-	code := `
-		const arr = [1, 2, 3, 4, 5];
-		const obj = { name: "test", value: 42 };
-		const nested = { a: { b: { c: 10 } } };
-	`
+// BenchmarkTypeCheckOnly benchmarks just the type checking step (no parsing)
+func BenchmarkTypeCheckOnly(b *testing.B) {
+	testFile := filepath.Join("..", "..", "testProject", "jscontrollers", "bodega", "masters", "salida_express", "item.ts")
+
+	if _, err := os.Stat(testFile); os.IsNotExist(err) {
+		b.Skip("Test file not found")
+	}
+
+	// Parse once
+	ast, err := parser.ParseFile(testFile)
+	if err != nil {
+		b.Fatalf("Failed to parse file: %v", err)
+	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		file, _ := parser.ParseCode(code, "bench.ts")
-		symbolTable := symbols.NewSymbolTable()
-		globalEnv := types.NewGlobalEnvironment()
-		tc := NewTypeChecker(symbolTable, globalEnv, nil)
-		tc.CheckFile("bench.ts", file)
+		// Create a new checker for each iteration
+		rootDir := filepath.Join("..", "..", "testProject")
+		tc := NewWithModuleResolver(rootDir)
+
+		// Type check only
+		_ = tc.CheckFile(testFile, ast)
 	}
 }
-
-// BenchmarkMemoryAllocation benchmarks memory allocation patterns
-func BenchmarkMemoryAllocation(b *testing.B) {
-	code := `
-		const x: number = 42;
-		const y: string = "test";
-	`
-
-	b.ReportAllocs()
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		file, _ := parser.ParseCode(code, "bench.ts")
-		symbolTable := symbols.NewSymbolTable()
-		globalEnv := types.NewGlobalEnvironment()
-		tc := NewTypeChecker(symbolTable, globalEnv, nil)
-		tc.CheckFile("bench.ts", file)
-		tc.Clear() // Test memory cleanup
-	}
-}
-*/

@@ -15,6 +15,7 @@ import (
 	"tstypechecker/pkg/checker"
 	"tstypechecker/pkg/config"
 	"tstypechecker/pkg/parser"
+	"tstypechecker/pkg/symbols"
 
 	"github.com/spf13/cobra"
 )
@@ -351,6 +352,9 @@ func checkDirectory(templateTc *checker.TypeChecker, dir string, tsConfig *confi
 	// Get shared resolver from template
 	sharedResolver := templateTc.GetModuleResolver()
 
+	// Create symbol table pool to reduce allocations
+	symbolPool := symbols.NewSymbolTablePool(numWorkers)
+
 	// Start workers
 	for i := 0; i < numWorkers; i++ {
 		wg.Add(1)
@@ -358,9 +362,12 @@ func checkDirectory(templateTc *checker.TypeChecker, dir string, tsConfig *confi
 			defer wg.Done()
 
 			for path := range jobs {
-				// Create a new checker for this file to ensure isolation
+				// Get a reusable symbol table from the pool
+				st := symbolPool.Get()
+
+				// Create a new checker for this file using the pooled symbol table
 				// This prevents symbols from one file polluting another (e.g. multiple files defining 'interface Person')
-				tc := checker.NewWithSharedModuleResolver(sharedResolver)
+				tc := checker.NewForWorker(sharedResolver, st)
 
 				// Copy global types from the template checker (node_modules, libs, etc.)
 				tc.CopyGlobalTypesFrom(templateTc)
@@ -399,6 +406,9 @@ func checkDirectory(templateTc *checker.TypeChecker, dir string, tsConfig *confi
 				// Type check
 				errors := tc.CheckFile(path, ast)
 				results <- errors
+
+				// Return symbol table to pool for reuse
+				symbolPool.Put(st)
 			}
 		}()
 	}

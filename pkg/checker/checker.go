@@ -142,6 +142,7 @@ func NewWithModuleResolver(rootDir string) *TypeChecker {
 		config:             getDefaultConfig(),
 		varTypeCache:       varTypeCache,
 		typeAliasCache:     make(map[string]*types.Type),
+		exprCache:          NewTypeExpressionCache(),
 		inferencer:         inferencer,
 		destructuringInfer: destructuringInfer,
 		typeGuards:         make(map[string]bool),
