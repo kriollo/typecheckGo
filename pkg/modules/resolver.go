@@ -368,6 +368,7 @@ func (r *ModuleResolver) findFileRecursive(dir string, filename string) string {
 }
 
 // fileExists checks if a file exists, using a cache to avoid repeated os.Stat calls
+// Returns true only for files, not directories
 func (r *ModuleResolver) fileExists(path string) bool {
 	r.mu.RLock()
 	if exists, ok := r.fileCache[path]; ok {
@@ -378,8 +379,9 @@ func (r *ModuleResolver) fileExists(path string) bool {
 	r.mu.RUnlock()
 
 	// Cache miss - need to check filesystem
-	_, err := os.Stat(path)
-	exists := err == nil
+	info, err := os.Stat(path)
+	// Only return true if it exists AND is a file (not a directory)
+	exists := err == nil && !info.IsDir()
 
 	r.mu.Lock()
 	if r.fileCache == nil {
