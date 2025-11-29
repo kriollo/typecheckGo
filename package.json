@@ -50,6 +50,7 @@
   "devDependencies": {
     "@types/execa": "^0.9.0",
     "@types/jest": "^29.5.0",
+    "@types/jquery": "^3.5.33",
     "@types/node": "^24.10.1",
     "@types/vue": "^1.0.31",
     "go-typechecker": "file:go-typechecker-1.0.0.tgz",
