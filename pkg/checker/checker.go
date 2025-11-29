@@ -22,6 +22,7 @@ type TypeChecker struct {
 	typeCache          map[ast.Node]*types.Type
 	varTypeCache       map[string]*types.Type // Cache types by variable name
 	typeAliasCache     map[string]*types.Type // Cache for resolved type aliases
+	exprCache          *TypeExpressionCache   // Advanced cache for type expressions and assignability
 	inferencer         *types.TypeInferencer
 	destructuringInfer *DestructuringInferencer // Inferencer for destructured parameters
 	currentFunction    *ast.FunctionDeclaration // Track current function for return type checking
@@ -85,6 +86,7 @@ func New() *TypeChecker {
 		typeCache:          typeCache,
 		varTypeCache:       varTypeCache,
 		typeAliasCache:     make(map[string]*types.Type),
+		exprCache:          NewTypeExpressionCache(),
 		inferencer:         inferencer,
 		destructuringInfer: destructuringInfer,
 		config:             getDefaultConfig(),
@@ -1749,6 +1751,24 @@ func normalizeLiteralValue(value interface{}) interface{} {
 
 // isAssignableTo checks if sourceType can be assigned to targetType
 func (tc *TypeChecker) isAssignableTo(sourceType, targetType *types.Type) bool {
+	// Check cache first for performance
+	sourceHash := tc.exprCache.GetTypeHash(sourceType)
+	targetHash := tc.exprCache.GetTypeHash(targetType)
+	if cached, exists := tc.exprCache.GetAssignable(sourceHash, targetHash); exists {
+		return cached
+	}
+
+	// Compute assignability
+	result := tc.isAssignableToUncached(sourceType, targetType)
+
+	// Cache the result
+	tc.exprCache.SetAssignable(sourceHash, targetHash, result)
+
+	return result
+}
+
+// isAssignableToUncached performs the actual assignability check without caching
+func (tc *TypeChecker) isAssignableToUncached(sourceType, targetType *types.Type) bool {
 	// Any is assignable to and from anything
 	if targetType.Kind == types.AnyType || sourceType.Kind == types.AnyType {
 		return true
