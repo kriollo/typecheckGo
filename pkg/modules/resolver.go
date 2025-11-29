@@ -427,10 +427,15 @@ func (r *ModuleResolver) resolveFilePath(basePath string) (string, error) {
 		}
 
 		// Then .tsx
-		// Then .tsx
 		tsxPath := basePath + ".tsx"
 		if r.fileExists(tsxPath) {
 			return tsxPath, nil
+		}
+
+		// Then .d.ts (for type-only imports)
+		dtsPath := basePath + ".d.ts"
+		if r.fileExists(dtsPath) {
+			return dtsPath, nil
 		}
 	}
 
