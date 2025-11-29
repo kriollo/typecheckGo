@@ -48,6 +48,10 @@ const (
 	maxNestedDepth      = 1000
 )
 
+// Cache DEBUG_PARSER environment variable to avoid expensive os.Getenv calls
+// This was consuming 84% of CPU time according to profiling
+var debugParserEnabled = os.Getenv("DEBUG_PARSER") == "1"
+
 type parser struct {
 	source   string
 	filename string
@@ -2216,11 +2220,11 @@ func (p *parser) parsePrimaryExpression() (ast.Expression, error) {
 	// Boolean literal
 	if p.matchKeyword("true", "false") {
 		startPos := p.currentPos()
-		if os.Getenv("DEBUG_PARSER") == "1" {
+		if debugParserEnabled {
 			fmt.Fprintf(os.Stderr, "DEBUG: Boolean found at pos=%d, line=%d, col=%d\n", p.pos, p.line, p.column)
 		}
 		valStr := p.advanceWord()
-		if os.Getenv("DEBUG_PARSER") == "1" {
+		if debugParserEnabled {
 			fmt.Fprintf(os.Stderr, "DEBUG: After advanceWord pos=%d, line=%d, col=%d\n", p.pos, p.line, p.column)
 		}
 		// Convert string to bool
@@ -3094,7 +3098,7 @@ func (p *parser) advance() string {
 		p.column++
 	}
 
-	if os.Getenv("DEBUG_PARSER") == "1" {
+	if debugParserEnabled {
 		fmt.Fprintf(os.Stderr, "ADVANCE: char='%c' pos=%d col=%d\n", r, p.pos, p.column)
 	}
 
@@ -3187,7 +3191,7 @@ func (p *parser) peekWord() string {
 	word := p.source[start:p.pos]
 	p.pos = start // Reset position
 
-	if os.Getenv("DEBUG_PARSER") == "1" {
+	if debugParserEnabled {
 		fmt.Fprintf(os.Stderr, "PEEKWORD: start=%d restored=%d word='%s'\n", start, p.pos, word)
 	}
 
