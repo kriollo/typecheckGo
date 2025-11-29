@@ -2,7 +2,7 @@ package checker
 
 import (
 	"crypto/sha256"
-	"encoding/json"
+	"encoding/gob"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -48,7 +48,7 @@ func (tc *TypeCache) GetCacheKey(packagePath string) string {
 // Load loads cached types for a package
 func (tc *TypeCache) Load(packagePath string) (*TypeCacheEntry, error) {
 	cacheKey := tc.GetCacheKey(packagePath)
-	cacheFile := filepath.Join(tc.cacheDir, cacheKey+".json")
+	cacheFile := filepath.Join(tc.cacheDir, cacheKey+".gob")
 
 	// Check if cache file exists
 	if _, err := os.Stat(cacheFile); os.IsNotExist(err) {
@@ -56,13 +56,15 @@ func (tc *TypeCache) Load(packagePath string) (*TypeCacheEntry, error) {
 	}
 
 	// Read cache file
-	data, err := os.ReadFile(cacheFile)
+	file, err := os.Open(cacheFile)
 	if err != nil {
 		return nil, err
 	}
+	defer file.Close()
 
 	var entry TypeCacheEntry
-	if err := json.Unmarshal(data, &entry); err != nil {
+	decoder := gob.NewDecoder(file)
+	if err := decoder.Decode(&entry); err != nil {
 		return nil, err
 	}
 
@@ -81,7 +83,7 @@ func (tc *TypeCache) Load(packagePath string) (*TypeCacheEntry, error) {
 // Save saves types to cache
 func (tc *TypeCache) Save(packagePath string, types map[string]*types.Type, interfaces map[string]*types.Type) error {
 	cacheKey := tc.GetCacheKey(packagePath)
-	cacheFile := filepath.Join(tc.cacheDir, cacheKey+".json")
+	cacheFile := filepath.Join(tc.cacheDir, cacheKey+".gob")
 
 	// Get file modification time
 	fileInfo, err := os.Stat(packagePath)
@@ -101,12 +103,14 @@ func (tc *TypeCache) Save(packagePath string, types map[string]*types.Type, inte
 		FileChecksum: tc.calculateChecksum(packagePath),
 	}
 
-	data, err := json.Marshal(entry)
+	file, err := os.Create(cacheFile)
 	if err != nil {
 		return err
 	}
+	defer file.Close()
 
-	return os.WriteFile(cacheFile, data, 0644)
+	encoder := gob.NewEncoder(file)
+	return encoder.Encode(entry)
 }
 
 // calculateChecksum calculates a checksum for a file

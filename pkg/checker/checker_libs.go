@@ -417,63 +417,6 @@ func (tc *TypeChecker) loadDeclarationFiles(dir string) {
 	}
 }
 
-// extractVariablesUsingPatterns extracts variable and function declarations (Pass 2)
-func (tc *TypeChecker) extractVariablesUsingPatterns(text string) {
-	lines := strings.Split(text, "\n")
-
-	// Track context
-	inDeclareBlock := false
-	blockDepth := 0
-
-	for i, line := range lines {
-		trimmed := strings.TrimSpace(line)
-
-		// Extract global namespaces FIRST (before inDeclareBlock check)
-		// Pattern: declare namespace NAME { ... }
-		// This is how Intl and other global namespaces are defined
-		if strings.HasPrefix(trimmed, "declare namespace ") {
-			parts := strings.Fields(trimmed)
-			if len(parts) >= 3 {
-				name := parts[2]
-				// Remove { if present
-				name = strings.TrimSuffix(name, "{")
-				name = strings.TrimSpace(name)
-
-				if name != "" && isValidIdentifier(name) {
-					// Register the namespace as a global object
-					tc.globalEnv.Objects[name] = types.Any
-
-					// Also add to symbol table
-					symbol := tc.symbolTable.DefineSymbol(name, symbols.VariableSymbol, nil, false)
-					symbol.FromDTS = true
-
-					if os.Getenv("DEBUG_LIB_LOADING") == "1" {
-						fmt.Fprintf(os.Stderr, "Extracted namespace: %s\n", name)
-					}
-				}
-			}
-		}
-
-		// Track declare module/namespace blocks
-		if strings.HasPrefix(trimmed, "declare module") || strings.HasPrefix(trimmed, "declare namespace") {
-			inDeclareBlock = true
-			blockDepth = 0
-		}
-
-		// Count braces
-		blockDepth += strings.Count(line, "{") - strings.Count(line, "}")
-
-		if inDeclareBlock && blockDepth <= 0 {
-			inDeclareBlock = false
-		}
-
-		// Only extract global declarations (not inside declare module blocks)
-		if !inDeclareBlock {
-			tc.extractGlobalDeclarationFromLine(trimmed, i, lines)
-		}
-	}
-}
-
 // extractTypeAliasFromLine extracts type alias declarations
 func (tc *TypeChecker) extractTypeAliasFromLine(line string) {
 	// Pattern: type NAME = ...

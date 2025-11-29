@@ -1,6 +1,7 @@
 package checker
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,125 +57,45 @@ func (tc *TypeChecker) extractVariablesFromFile(filePath string) {
 
 // extractInterfacesUsingPatterns extracts interface and type declarations (Pass 1)
 func (tc *TypeChecker) extractInterfacesUsingPatterns(text string) {
-	lines := strings.Split(text, "\n")
+	interfaces := parseInterfacesFromText(text)
 
-	// Track context
-	inDeclareBlock := false
-	blockDepth := 0
+	for _, iface := range interfaces {
+		// Add to global types immediately so it can be referenced
+		tc.globalEnv.Types[iface.Name] = iface.Type
 
-	// Interface parsing state
-	var currentInterface *types.Type
-	interfaceDepth := 0
+		// Also register as a symbol
+		symbol := tc.symbolTable.DefineSymbol(iface.Name, symbols.InterfaceSymbol, nil, false)
+		symbol.FromDTS = true
+	}
 
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
+	// Process type aliases outside of declare module blocks
+	// Note: parseInterfacesFromText doesn't handle type aliases yet, so we keep this call
+	// Ideally we should move type alias parsing to parser_parallel.go too
+	tc.extractTypeAliasFromLine(text)
+}
 
-		// Skip comments
-		if strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "/*") || strings.HasPrefix(trimmed, "*") {
-			continue
-		}
+// extractVariablesUsingPatterns extracts variable and function declarations (Pass 2)
+func (tc *TypeChecker) extractVariablesUsingPatterns(text string) {
+	globals := parseGlobalsFromText(text)
 
-		// Track declare module/namespace blocks
-		if strings.HasPrefix(trimmed, "declare module") || strings.HasPrefix(trimmed, "declare namespace") {
-			inDeclareBlock = true
-			blockDepth = 0
-		}
-
-		// Start of interface declaration
-		if (strings.HasPrefix(trimmed, "interface ") || strings.HasPrefix(trimmed, "export interface ")) && currentInterface == nil {
-			parts := strings.Fields(trimmed)
-			for j, part := range parts {
-				if part == "interface" && j+1 < len(parts) {
-					interfaceName := parts[j+1]
-					// Clean interface name (remove generics <T>, extends, {)
-					if idx := strings.IndexAny(interfaceName, "<{"); idx != -1 {
-						interfaceName = interfaceName[:idx]
-					}
-					interfaceName = strings.TrimSpace(interfaceName)
-
-					if isValidIdentifier(interfaceName) {
-						currentInterface = types.NewObjectType(interfaceName, make(map[string]*types.Type))
-
-						// Add to global types immediately so it can be referenced
-						tc.globalEnv.Types[interfaceName] = currentInterface
-
-						// Also register as a symbol
-						symbol := tc.symbolTable.DefineSymbol(interfaceName, symbols.InterfaceSymbol, nil, false)
-						symbol.FromDTS = true
-
-						interfaceDepth = 0
-					}
-					break
-				}
+	for _, global := range globals {
+		if global.IsNamespace {
+			tc.globalEnv.Objects[global.Name] = types.Any
+			symbol := tc.symbolTable.DefineSymbol(global.Name, symbols.VariableSymbol, nil, false)
+			symbol.FromDTS = true
+			if os.Getenv("DEBUG_LIB_LOADING") == "1" {
+				fmt.Fprintf(os.Stderr, "Extracted namespace: %s\n", global.Name)
 			}
-		}
-
-		// Count braces to track nesting
-		openBraces := strings.Count(line, "{")
-		closeBraces := strings.Count(line, "}")
-
-		if inDeclareBlock {
-			blockDepth += openBraces - closeBraces
-			if blockDepth <= 0 {
-				inDeclareBlock = false
-			}
-		}
-
-		// Inside an interface
-		if currentInterface != nil {
-			interfaceDepth += openBraces - closeBraces
-
-			// Parse members if we are directly inside the interface (depth 1)
-			if interfaceDepth == 1 && !strings.HasPrefix(trimmed, "interface ") && !strings.HasPrefix(trimmed, "export interface ") {
-				memberLine := trimmed
-				if strings.HasPrefix(memberLine, "readonly ") {
-					memberLine = strings.TrimPrefix(memberLine, "readonly ")
-				}
-
-				// Extract name
-				var name string
-				isMethod := false
-
-				// Check for method: name(
-				if idx := strings.Index(memberLine, "("); idx != -1 {
-					colonIdx := strings.Index(memberLine, ":")
-					if colonIdx == -1 || colonIdx > idx {
-						name = memberLine[:idx]
-						name = strings.TrimSuffix(name, "?")
-						name = strings.TrimSpace(name)
-						isMethod = true
-					}
-				}
-
-				// Check for property: name: Type;
-				if name == "" {
-					if idx := strings.Index(memberLine, ":"); idx != -1 {
-						name = memberLine[:idx]
-						name = strings.TrimSuffix(name, "?")
-						name = strings.TrimSpace(name)
-					}
-				}
-
-				if name != "" && isValidIdentifier(name) {
-					var memberType *types.Type
-					if isMethod {
-						memberType = types.NewFunctionType([]*types.Type{}, types.Any)
-					} else {
-						memberType = types.Any
-					}
-					currentInterface.Properties[name] = memberType
-				}
-			}
-
-			// End of interface
-			if interfaceDepth <= 0 {
-				currentInterface = nil
-			}
-		}
-
-		// Process type aliases outside of declare module blocks
-		if !inDeclareBlock && currentInterface == nil {
-			tc.extractTypeAliasFromLine(trimmed)
+		} else if global.IsFunction {
+			tc.globalEnv.Objects[global.Name] = types.Any
+			symbol := tc.symbolTable.DefineSymbol(global.Name, symbols.FunctionSymbol, nil, false)
+			symbol.IsFunction = true
+			symbol.FromDTS = true
+		} else {
+			// Variable
+			tc.globalEnv.Objects[global.Name] = types.Any
+			symbol := tc.symbolTable.DefineSymbol(global.Name, symbols.VariableSymbol, nil, false)
+			symbol.FromDTS = true
 		}
 	}
 }

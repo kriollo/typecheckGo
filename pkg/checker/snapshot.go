@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"tstypechecker/pkg/symbols"
@@ -69,12 +70,36 @@ func (sm *SnapshotManager) computeLibsHash(libs []string, typescriptLibPath stri
 	// Include TypeScript lib path (version indicator)
 	h.Write([]byte(typescriptLibPath))
 
-	// Check modification time of key lib files to detect updates
-	keyFiles := []string{"lib.es5.d.ts", "lib.dom.d.ts"}
-	for _, file := range keyFiles {
-		fullPath := filepath.Join(typescriptLibPath, file)
-		if info, err := os.Stat(fullPath); err == nil {
-			h.Write([]byte(info.ModTime().String()))
+	// Check modification time of ALL requested lib files
+	// We map the lib names to actual files using the same logic as checker_libs.go
+	libFileMap := map[string]string{
+		"es5":          "lib.es5.d.ts",
+		"es6":          "lib.es2015.d.ts",
+		"es2015":       "lib.es2015.d.ts",
+		"es2016":       "lib.es2016.d.ts",
+		"es2017":       "lib.es2017.d.ts",
+		"es2018":       "lib.es2018.d.ts",
+		"es2019":       "lib.es2019.d.ts",
+		"es2020":       "lib.es2020.d.ts",
+		"es2020.intl":  "lib.es2020.intl.d.ts",
+		"es2021":       "lib.es2021.d.ts",
+		"es2022":       "lib.es2022.d.ts",
+		"es2023":       "lib.es2023.d.ts",
+		"esnext":       "lib.esnext.d.ts",
+		"dom":          "lib.dom.d.ts",
+		"dom.iterable": "lib.dom.iterable.d.ts",
+		"webworker":    "lib.webworker.d.ts",
+		"scripthost":   "lib.scripthost.d.ts",
+	}
+
+	for _, lib := range libs {
+		libLower := strings.ToLower(lib)
+		if fileName, ok := libFileMap[libLower]; ok {
+			fullPath := filepath.Join(typescriptLibPath, fileName)
+			if info, err := os.Stat(fullPath); err == nil {
+				h.Write([]byte(info.ModTime().String()))
+				h.Write([]byte(fmt.Sprintf("%d", info.Size())))
+			}
 		}
 	}
 
@@ -145,11 +170,17 @@ func (sm *SnapshotManager) LoadSnapshot(tc *TypeChecker, snapshotPath string) er
 	decoder := gob.NewDecoder(file)
 	snapshot := &LibSnapshot{}
 
+	startTime := time.Now()
 	if err := decoder.Decode(snapshot); err != nil {
 		if err == io.EOF {
 			return fmt.Errorf("snapshot file is empty or corrupted")
 		}
 		return fmt.Errorf("failed to decode snapshot: %w", err)
+	}
+	decodeTime := time.Since(startTime)
+
+	if os.Getenv("DEBUG_LIB_LOADING") == "1" {
+		fmt.Fprintf(os.Stderr, "Snapshot decode time: %v\n", decodeTime)
 	}
 
 	// Restore global environment

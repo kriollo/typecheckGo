@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
 
+	"tstypechecker/pkg/symbols"
 	"tstypechecker/pkg/types"
 )
 
@@ -108,7 +110,8 @@ func (pll *ParallelLibLoader) LoadTypeScriptLibsParallel(libs []string, typescri
 // extractInterfacesParallel extracts interfaces from multiple files in parallel
 func (pll *ParallelLibLoader) extractInterfacesParallel(files []string) {
 	var wg sync.WaitGroup
-	numWorkers := 4 // Use 4 workers for parallel extraction
+	var mu sync.Mutex              // Protect writes to global environment
+	numWorkers := runtime.NumCPU() // Use all available CPU cores
 
 	jobs := make(chan string, len(files))
 
@@ -128,7 +131,20 @@ func (pll *ParallelLibLoader) extractInterfacesParallel(files []string) {
 					continue
 				}
 
-				pll.tc.extractInterfacesUsingPatterns(string(content))
+				// Parse content (CPU intensive, done in parallel)
+				interfaces := parseInterfacesFromText(string(content))
+
+				// Write to global environment (fast, protected by mutex)
+				mu.Lock()
+				for _, iface := range interfaces {
+					// Add to global types
+					pll.tc.globalEnv.Types[iface.Name] = iface.Type
+
+					// Register symbol
+					symbol := pll.tc.symbolTable.DefineSymbol(iface.Name, symbols.InterfaceSymbol, nil, false)
+					symbol.FromDTS = true
+				}
+				mu.Unlock()
 
 				if pll.profiler.IsEnabled() {
 					pll.profiler.RecordFileLoad(filePath, "TypeScript Libs (Parallel)", time.Since(startTime), int64(len(content)), false, nil)
@@ -152,7 +168,7 @@ func (pll *ParallelLibLoader) extractVariablesParallel(files []string) {
 	var wg sync.WaitGroup
 	var mu sync.Mutex // Protect writes to global environment
 
-	numWorkers := 4
+	numWorkers := runtime.NumCPU()
 	jobs := make(chan string, len(files))
 
 	// Start workers
@@ -171,35 +187,36 @@ func (pll *ParallelLibLoader) extractVariablesParallel(files []string) {
 					continue
 				}
 
-				// Extract to local maps first
-				localGlobals := make(map[string]*types.Type)
-				localSymbols := make(map[string]interface{})
+				// Parse content (CPU intensive, done in parallel)
+				globals := parseGlobalsFromText(string(content))
 
-				// Parse the content (this is the slow part, can be done in parallel)
-				lines := strings.Split(string(content), "\n")
-
-				// Extract variables using patterns (simplified version that writes to local maps)
-				// In a full implementation, we'd refactor extractVariablesUsingPatterns to return results
-				// instead of writing directly to global state
-
-				// For now, we'll use a mutex to protect the write
+				// Write to global environment (fast, protected by mutex)
 				mu.Lock()
-				pll.tc.extractVariablesUsingPatterns(string(content))
+				for _, global := range globals {
+					if global.IsNamespace {
+						pll.tc.globalEnv.Objects[global.Name] = types.Any
+						symbol := pll.tc.symbolTable.DefineSymbol(global.Name, symbols.VariableSymbol, nil, false)
+						symbol.FromDTS = true
+						if os.Getenv("DEBUG_LIB_LOADING") == "1" {
+							fmt.Fprintf(os.Stderr, "Extracted namespace: %s\n", global.Name)
+						}
+					} else if global.IsFunction {
+						pll.tc.globalEnv.Objects[global.Name] = types.Any
+						symbol := pll.tc.symbolTable.DefineSymbol(global.Name, symbols.FunctionSymbol, nil, false)
+						symbol.IsFunction = true
+						symbol.FromDTS = true
+					} else {
+						// Variable
+						pll.tc.globalEnv.Objects[global.Name] = types.Any
+						symbol := pll.tc.symbolTable.DefineSymbol(global.Name, symbols.VariableSymbol, nil, false)
+						symbol.FromDTS = true
+					}
+				}
 				mu.Unlock()
 
 				if pll.profiler.IsEnabled() {
 					pll.profiler.RecordFileLoad(filePath, "TypeScript Libs (Parallel)", time.Since(startTime), int64(len(content)), false, nil)
 				}
-
-				// Merge local results into global environment (protected by mutex)
-				mu.Lock()
-				for name, typ := range localGlobals {
-					pll.tc.globalEnv.Objects[name] = typ
-				}
-				mu.Unlock()
-
-				_ = localSymbols // Placeholder for future use
-				_ = lines        // Placeholder for future use
 			}
 		}()
 	}
@@ -258,7 +275,7 @@ func (pll *ParallelLibLoader) loadTypesPackagesParallel(nodeModulesDir string) {
 	}
 
 	var wg sync.WaitGroup
-	numWorkers := 4
+	numWorkers := runtime.NumCPU()
 	jobs := make(chan string, len(entries))
 
 	// Start workers
@@ -350,7 +367,7 @@ func (pll *ParallelLibLoader) loadBundledTypesParallel(nodeModulesDir string) {
 
 	// Load packages in parallel
 	var wg sync.WaitGroup
-	numWorkers := 4
+	numWorkers := runtime.NumCPU()
 	jobs := make(chan struct {
 		dir  string
 		name string
