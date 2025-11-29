@@ -371,6 +371,9 @@ func (r *ModuleResolver) fileExists(path string) bool {
 	exists := err == nil
 
 	r.mu.Lock()
+	if r.fileCache == nil {
+		r.fileCache = make(map[string]bool)
+	}
 	r.fileCache[path] = exists
 	r.mu.Unlock()
 
