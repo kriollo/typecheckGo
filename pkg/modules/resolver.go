@@ -363,10 +363,12 @@ func (r *ModuleResolver) fileExists(path string) bool {
 	r.mu.RLock()
 	if exists, ok := r.fileCache[path]; ok {
 		r.mu.RUnlock()
+		// Cache hit - no I/O needed
 		return exists
 	}
 	r.mu.RUnlock()
 
+	// Cache miss - need to check filesystem
 	_, err := os.Stat(path)
 	exists := err == nil
 
@@ -382,44 +384,69 @@ func (r *ModuleResolver) fileExists(path string) bool {
 
 // resolveFilePath intenta resolver un archivo probando diferentes extensiones
 func (r *ModuleResolver) resolveFilePath(basePath string) (string, error) {
-	// Si el path tiene extensión .js, .jsx, o .mjs, intentar reemplazarla con .ts/.tsx
+	// Fast path: check if file exists as-is first (most common case)
+	if r.fileExists(basePath) {
+		return basePath, nil
+	}
+
+	// Get extension once
 	ext := filepath.Ext(basePath)
+
+	// If it has .js/.jsx/.mjs extension, try TypeScript equivalents
 	if ext == ".js" || ext == ".jsx" || ext == ".mjs" {
-		// Quitar la extensión JS y probar con TS
 		baseWithoutExt := basePath[:len(basePath)-len(ext)]
 
-		// Probar con .ts primero
+		// Try .ts first (most common)
 		tsPath := baseWithoutExt + ".ts"
 		if r.fileExists(tsPath) {
 			return tsPath, nil
 		}
 
-		// Probar con .tsx
+		// Try .tsx
 		tsxPath := baseWithoutExt + ".tsx"
 		if r.fileExists(tsxPath) {
 			return tsxPath, nil
 		}
 	}
 
-	// Primero verificar si el archivo existe tal cual
-	if r.fileExists(basePath) {
-		return basePath, nil
-	}
+	// Try with extensions (.ts, .tsx, .d.ts are most common for TypeScript projects)
+	// Check .ts first as it's most common
+	if ext == "" {
+		tsPath := basePath + ".ts"
+		if r.fileExists(tsPath) {
+			return tsPath, nil
+		}
 
-	// Intentar con diferentes extensiones
-	for _, extension := range r.extensions {
-		pathWithExt := basePath + extension
-		if r.fileExists(pathWithExt) {
-			return pathWithExt, nil
+		// Then .tsx
+		tsxPath := basePath + ".tsx"
+		if r.fileExists(tsxPath) {
+			return tsxPath, nil
+		}
+
+		// Then .d.ts
+		dtsPath := basePath + ".d.ts"
+		if r.fileExists(dtsPath) {
+			return dtsPath, nil
 		}
 	}
 
-	// Intentar como directorio con index
-	for _, extension := range r.extensions {
-		indexPath := filepath.Join(basePath, "index"+extension)
-		if r.fileExists(indexPath) {
-			return indexPath, nil
-		}
+	// Try as directory with index files
+	// Check index.ts first (most common)
+	indexTs := filepath.Join(basePath, "index.ts")
+	if r.fileExists(indexTs) {
+		return indexTs, nil
+	}
+
+	// Then index.tsx
+	indexTsx := filepath.Join(basePath, "index.tsx")
+	if r.fileExists(indexTsx) {
+		return indexTsx, nil
+	}
+
+	// Then index.d.ts
+	indexDts := filepath.Join(basePath, "index.d.ts")
+	if r.fileExists(indexDts) {
+		return indexDts, nil
 	}
 
 	return "", fmt.Errorf("file not found: %s", basePath)
