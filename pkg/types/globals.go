@@ -6,6 +6,7 @@ import (
 
 // GlobalEnvironment contiene los tipos y símbolos globales de JavaScript/TypeScript
 type GlobalEnvironment struct {
+	Parent  *GlobalEnvironment // Shared read-only parent environment
 	Types   map[string]*Type
 	Objects map[string]*Type
 }
@@ -227,21 +228,117 @@ func NewGlobalEnvironmentWithLibs(libs []string) *GlobalEnvironment {
 	}
 
 	if hasDOM {
-		_ = hasDOM // Variable used for conditional compilation, placeholder for future DOM loading
+		_ = hasDOM // Variable used for conditional compilation
 
+		// Element type
+		elementType := NewObjectType("Element", map[string]*Type{
+			"tagName": String,
+		})
+		env.Types["Element"] = elementType
+
+		// HTMLElement type
+		htmlElementType := NewObjectType("HTMLElement", map[string]*Type{
+			"tagName": String,
+			"style":   Any,
+		})
+		// Inherit from Element (simplified)
+		for k, v := range elementType.Properties {
+			htmlElementType.Properties[k] = v
+		}
+		env.Types["HTMLElement"] = htmlElementType
+
+		// HTMLInputElement type
+		htmlInputElement := NewObjectType("HTMLInputElement", map[string]*Type{
+			"value":    String,
+			"checked":  Boolean,
+			"disabled": Boolean,
+			"type":     String,
+			"name":     String,
+			"src":      String,
+		})
+		// Inherit from HTMLElement
+		for k, v := range htmlElementType.Properties {
+			htmlInputElement.Properties[k] = v
+		}
+		env.Types["HTMLInputElement"] = htmlInputElement
+
+		// Blob type
+		blobType := NewObjectType("Blob", map[string]*Type{
+			"size": Number,
+			"type": String,
+		})
+		env.Types["Blob"] = blobType
+		env.Objects["Blob"] = blobType // Constructor
+
+		// File type
+		fileType := NewObjectType("File", map[string]*Type{
+			"name": String,
+			"size": Number,
+			"type": String,
+		})
+		// Inherit from Blob
+		for k, v := range blobType.Properties {
+			fileType.Properties[k] = v
+		}
+		env.Types["File"] = fileType
+		env.Objects["File"] = fileType // Constructor
+
+		// FormData type
+		formDataType := NewObjectType("FormData", map[string]*Type{
+			"append": NewFunctionType([]*Type{String, Any}, Void),
+			"delete": NewFunctionType([]*Type{String}, Void),
+			"get":    NewFunctionType([]*Type{String}, Any),
+			"getAll": NewFunctionType([]*Type{String}, NewArrayType(Any)),
+			"has":    NewFunctionType([]*Type{String}, Boolean),
+			"set":    NewFunctionType([]*Type{String, Any}, Void),
+		})
+		env.Objects["FormData"] = formDataType
+		env.Types["FormData"] = formDataType
+
+		// Location type
+		locationType := NewObjectType("Location", map[string]*Type{
+			"href":     String,
+			"protocol": String,
+			"host":     String,
+			"hostname": String,
+			"port":     String,
+			"pathname": String,
+			"search":   String,
+			"hash":     String,
+			"origin":   String,
+			"assign":   NewFunctionType([]*Type{String}, Void),
+			"replace":  NewFunctionType([]*Type{String}, Void),
+			"reload":   NewFunctionType([]*Type{}, Void),
+		})
+		env.Objects["location"] = locationType
+		env.Types["Location"] = locationType
+
+		// Document type
+		documentType := NewObjectType("Document", map[string]*Type{
+			"getElementById":   NewFunctionType([]*Type{String}, htmlElementType),
+			"querySelector":    NewFunctionType([]*Type{String}, elementType),
+			"querySelectorAll": NewFunctionType([]*Type{String}, NewArrayType(elementType)),
+			"createElement":    NewFunctionType([]*Type{String}, htmlElementType),
+			"body":             htmlElementType,
+			"head":             htmlElementType,
+			"location":         locationType,
+		})
+		env.Types["Document"] = documentType
+		env.Objects["document"] = documentType
+
+		// Window type
+		windowType := NewObjectType("Window", map[string]*Type{
+			"document": documentType,
+			"location": locationType,
+			"console":  consoleType,
+		})
+		env.Types["Window"] = windowType
+		env.Objects["window"] = windowType
+
+		// jQuery $ fallback
+		env.Objects["$"] = Any
+		env.Objects["jQuery"] = Any
 	}
-
-	// Check for common third-party libraries in node_modules/@types
-	// and add their globals if they exist
-	env.addThirdPartyGlobals()
-
-	// Constantes globales
-	env.Objects["undefined"] = Undefined
-	env.Objects["null"] = Null
-	env.Objects["NaN"] = Number
-	env.Objects["Infinity"] = Number
-
-	// Register utility types
 	utilityTypes := []string{
 		"Partial", "Required", "Readonly", "Pick", "Omit", "Record",
 		"Exclude", "Extract", "NonNullable", "ReturnType", "Parameters", "Awaited",
@@ -265,12 +362,18 @@ func (env *GlobalEnvironment) addThirdPartyGlobals() {
 // GetType retorna un tipo por nombre
 func (env *GlobalEnvironment) GetType(name string) (*Type, bool) {
 	typ, exists := env.Types[name]
+	if !exists && env.Parent != nil {
+		return env.Parent.GetType(name)
+	}
 	return typ, exists
 }
 
 // GetObject retorna un objeto global por nombre
 func (env *GlobalEnvironment) GetObject(name string) (*Type, bool) {
 	obj, exists := env.Objects[name]
+	if !exists && env.Parent != nil {
+		return env.Parent.GetObject(name)
+	}
 	return obj, exists
 }
 
@@ -278,5 +381,21 @@ func (env *GlobalEnvironment) GetObject(name string) (*Type, bool) {
 func (env *GlobalEnvironment) HasGlobal(name string) bool {
 	_, existsType := env.Types[name]
 	_, existsObj := env.Objects[name]
-	return existsType || existsObj
+	if existsType || existsObj {
+		return true
+	}
+	if env.Parent != nil {
+		return env.Parent.HasGlobal(name)
+	}
+	return false
+}
+
+// ObjectCount returns the number of global objects loaded
+// Used to check if types have been copied from another checker
+func (env *GlobalEnvironment) ObjectCount() int {
+	count := len(env.Objects)
+	if env.Parent != nil {
+		count += env.Parent.ObjectCount()
+	}
+	return count
 }

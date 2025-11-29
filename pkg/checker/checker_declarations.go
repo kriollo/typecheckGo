@@ -3,6 +3,7 @@ package checker
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"tstypechecker/pkg/ast"
 	"tstypechecker/pkg/modules"
@@ -59,30 +60,42 @@ func (tc *TypeChecker) checkVariableDeclaration(decl *ast.VariableDeclaration, f
 				// If there's a type annotation, check compatibility with initializer type
 				if declaredType != nil {
 					// Excess property checking for object literals
-					// When assigning an object literal to a typed variable, check for extra properties
+					// TypeScript only applies this in very specific contexts to avoid false positives
+					// We skip excess property checking if:
+					// 1. The type has an index signature (string or number)
+					// 2. The type name suggests it's generic or flexible (contains '<', '&', '|')
+					// 3. The type has no properties at all (likely unresolved or 'any'-like)
 					if objLit, ok := declarator.Init.(*ast.ObjectExpression); ok && declaredType.Kind == types.ObjectType {
-						// Check for properties in the literal that don't exist in the declared type
-						for _, propNode := range objLit.Properties {
-							if prop, ok := propNode.(*ast.Property); ok && prop.Key != nil {
-								// Get property name from the key
-								var propName string
-								if ident, ok := prop.Key.(*ast.Identifier); ok {
-									propName = ident.Name
-								} else if lit, ok := prop.Key.(*ast.Literal); ok {
-									propName = fmt.Sprintf("%v", lit.Value)
-								}
+						// Skip excess property checking if type has index signatures
+						hasIndexSignature := declaredType.StringIndexType != nil || declaredType.NumberIndexType != nil
 
-								if propName != "" {
-									// If the type has a string index signature, any property name is valid
-									// (we should check if the value matches the index type, but that's a separate check)
-									if declaredType.StringIndexType != nil {
-										continue
+						// Skip if type name suggests it's generic, union, or intersection
+						isFlexibleType := strings.Contains(declaredType.Name, "<") ||
+							strings.Contains(declaredType.Name, "|") ||
+							strings.Contains(declaredType.Name, "&")
+
+						// Skip if type has no properties (likely unresolved or flexible)
+						hasNoProperties := len(declaredType.Properties) == 0
+
+						// Only apply excess property checking if type is clearly closed/strict
+						if !hasIndexSignature && !isFlexibleType && !hasNoProperties {
+							// Check for properties in the literal that don't exist in the declared type
+							for _, propNode := range objLit.Properties {
+								if prop, ok := propNode.(*ast.Property); ok && prop.Key != nil {
+									// Get property name from the key
+									var propName string
+									if ident, ok := prop.Key.(*ast.Identifier); ok {
+										propName = ident.Name
+									} else if lit, ok := prop.Key.(*ast.Literal); ok {
+										propName = fmt.Sprintf("%v", lit.Value)
 									}
 
-									if _, exists := declaredType.Properties[propName]; !exists {
-										tc.addError(filename, prop.Key.Pos().Line, prop.Key.Pos().Column,
-											fmt.Sprintf("Object literal may only specify known properties, and '%s' does not exist in type '%s'.", propName, declaredType.String()),
-											"TS2353", "error")
+									if propName != "" {
+										if _, exists := declaredType.Properties[propName]; !exists {
+											tc.addError(filename, prop.Key.Pos().Line, prop.Key.Pos().Column,
+												fmt.Sprintf("Object literal may only specify known properties, and '%s' does not exist in type '%s'.", propName, declaredType.String()),
+												"TS2353", "error")
+										}
 									}
 								}
 							}
@@ -118,9 +131,25 @@ func (tc *TypeChecker) checkVariableDeclaration(decl *ast.VariableDeclaration, f
 					tc.varTypeCache[declarator.ID.Name] = declaredType
 				} else {
 					// No type annotation, store the inferred type
-					tc.typeCache[declarator] = inferredType
-					tc.typeCache[declarator.ID] = inferredType
-					tc.varTypeCache[declarator.ID.Name] = inferredType
+					finalType := inferredType
+
+					// Apply widening for literal types if it's not a const declaration
+					// let x = false; -> x is boolean, not false
+					// let y = "hello"; -> y is string, not "hello"
+					if decl.Kind != "const" && inferredType.Kind == types.LiteralType {
+						switch inferredType.Value.(type) {
+						case bool:
+							finalType = types.Boolean
+						case string:
+							finalType = types.String
+						case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
+							finalType = types.Number
+						}
+					}
+
+					tc.typeCache[declarator] = finalType
+					tc.typeCache[declarator.ID] = finalType
+					tc.varTypeCache[declarator.ID.Name] = finalType
 				}
 			} else if declarator.TypeAnnotation != nil {
 				// No initializer but has type annotation

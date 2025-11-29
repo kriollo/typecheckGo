@@ -248,8 +248,14 @@ func (tc *TypeChecker) CheckFile(filename string, file *ast.File) []TypeError {
 
 	// Load TypeScript lib files on first check (lazy loading)
 	// This ensures standard JavaScript globals like Intl, Promise, etc. are available
-	if tc.loadedLibFiles == nil || len(tc.loadedLibFiles) == 0 {
-		tc.LoadTypeScriptLibsWithSnapshot([]string{"ES2020", "DOM"})
+	// IMPORTANT: Only load if we haven't copied types from another checker (worker scenario)
+	// Workers get types via CopyGlobalTypesFrom() and should NOT reload libs
+	if len(tc.loadedLibFiles) == 0 {
+		// Check if we have global types already (copied from template checker)
+		// If globalEnv has objects, it means types were copied, so skip loading
+		if tc.globalEnv.ObjectCount() == 0 {
+			tc.LoadTypeScriptLibsWithSnapshot([]string{"ES2020", "DOM"})
+		}
 	}
 
 	// Process imports and add imported symbols to the symbol table
@@ -1219,22 +1225,16 @@ func (tc *TypeChecker) GetModuleResolver() *modules.ModuleResolver {
 // This is used to share pre-loaded node_modules types with worker threads
 // without re-parsing files.
 func (tc *TypeChecker) CopyGlobalTypesFrom(source *TypeChecker) {
-	// Copy global environment types (primitives, utility types, etc.)
-	for name, typ := range source.globalEnv.Types {
-		tc.globalEnv.Types[name] = typ
-	}
-
-	// Copy global environment objects (console, Math, Array, etc.)
-	for name, obj := range source.globalEnv.Objects {
-		tc.globalEnv.Objects[name] = obj
-	}
+	// Optimization: Use shared parent for global environment types and objects
+	// This avoids copying thousands of DOM types and reduces memory usage
+	tc.globalEnv.Parent = source.globalEnv
 
 	// Copy global symbols from node_modules and lib files
 	// We only copy global scope symbols, not file-specific ones
 	if source.symbolTable.Global != nil && tc.symbolTable.Global != nil {
-		for name, symbol := range source.symbolTable.Global.Symbols {
-			tc.symbolTable.Global.Symbols[name] = symbol
-		}
+		// Optimization: Use source global scope as parent of current global scope
+		// This avoids copying symbols and provides isolation (writes go to child, reads check parent)
+		tc.symbolTable.Global.Parent = source.symbolTable.Global
 	}
 
 	// Copy loaded lib files tracking
