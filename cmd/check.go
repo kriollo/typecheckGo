@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"runtime/pprof"
 	"strconv"
 	"sync"
 	"time"
@@ -25,6 +26,7 @@ var (
 	showAST      bool
 	codeInput    string
 	filename     string
+	cpuProfile   string
 )
 
 var checkCmd = &cobra.Command{
@@ -40,9 +42,25 @@ func init() {
 	checkCmd.Flags().BoolVarP(&showAST, "ast", "a", false, "Show AST output")
 	checkCmd.Flags().StringVarP(&codeInput, "code", "c", "", "TypeScript code as text input (alternative to file path)")
 	checkCmd.Flags().StringVarP(&filename, "filename", "n", "stdin.ts", "Filename to use when checking code from text input")
+	checkCmd.Flags().StringVar(&cpuProfile, "cpuprofile", "", "Write CPU profile to file")
 }
 
 func runCheck(cmd *cobra.Command, args []string) error {
+	// Start CPU profiling if requested
+	if cpuProfile != "" {
+		f, err := os.Create(cpuProfile)
+		if err != nil {
+			return fmt.Errorf("could not create CPU profile: %w", err)
+		}
+		defer f.Close()
+
+		// Import pprof at the top of the file
+		if err := startCPUProfile(f); err != nil {
+			return fmt.Errorf("could not start CPU profile: %w", err)
+		}
+		defer stopCPUProfile()
+	}
+
 	// Check if code input is provided
 	if codeInput != "" {
 		return checkCodeInput(codeInput, filename)
@@ -962,4 +980,14 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// startCPUProfile starts CPU profiling
+func startCPUProfile(f *os.File) error {
+	return pprof.StartCPUProfile(f)
+}
+
+// stopCPUProfile stops CPU profiling
+func stopCPUProfile() {
+	pprof.StopCPUProfile()
 }
