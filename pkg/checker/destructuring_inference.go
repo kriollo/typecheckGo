@@ -20,7 +20,7 @@ type DestructuringInferencer struct {
 func NewDestructuringInferencer(globalEnv *types.GlobalEnvironment) *DestructuringInferencer {
 	return &DestructuringInferencer{
 		globalEnv: globalEnv,
-		debug:     os.Getenv("TSCHECK_DEBUG") == "1",
+		debug:     debugParserEnabled,
 	}
 }
 

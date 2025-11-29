@@ -13,6 +13,9 @@ import (
 	"tstypechecker/pkg/types"
 )
 
+// Cache DEBUG_LIB_LOADING environment variable to avoid expensive os.Getenv calls
+// This was consuming 84% of CPU time according to profiling
+
 // ParallelLibLoader handles parallel loading of TypeScript library files
 type ParallelLibLoader struct {
 	tc       *TypeChecker
@@ -197,7 +200,7 @@ func (pll *ParallelLibLoader) extractVariablesParallel(files []string) {
 						pll.tc.globalEnv.Objects[global.Name] = types.Any
 						symbol := pll.tc.symbolTable.DefineSymbol(global.Name, symbols.VariableSymbol, nil, false)
 						symbol.FromDTS = true
-						if os.Getenv("DEBUG_LIB_LOADING") == "1" {
+						if debugLibLoadingEnabled {
 							fmt.Fprintf(os.Stderr, "Extracted namespace: %s\n", global.Name)
 						}
 					} else if global.IsFunction {
@@ -378,7 +381,7 @@ func (pll *ParallelLibLoader) loadBundledTypesParallel(nodeModulesDir string) {
 		go func() {
 			defer wg.Done()
 			for pkg := range jobs {
-				if os.Getenv("TSCHECK_DEBUG") == "1" {
+				if debugParserEnabled {
 					fmt.Fprintf(os.Stderr, "Loading package: %s (%s)\n", pkg.name, pkg.dir)
 				}
 				pll.tc.loadPackageWithCache(pkg.dir, pkg.name)

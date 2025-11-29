@@ -43,13 +43,13 @@ func (tc *TypeChecker) loadTypeScriptLibs(libs []string) {
 	}
 
 	if typescriptLibPath == "" {
-		if os.Getenv("DEBUG_LIB_LOADING") == "1" {
+		if debugLibLoadingEnabled {
 			fmt.Fprintf(os.Stderr, "⚠ TypeScript lib directory not found in any search path\n")
 		}
 		return
 	}
 
-	if os.Getenv("DEBUG_LIB_LOADING") == "1" {
+	if debugLibLoadingEnabled {
 		fmt.Fprintf(os.Stderr, "✓ Found TypeScript libs at: %s\n", typescriptLibPath)
 	}
 
@@ -83,7 +83,7 @@ func (tc *TypeChecker) loadTypeScriptLibs(libs []string) {
 		if fileName, ok := libFileMap[libLower]; ok {
 			libFilePath := filepath.Join(typescriptLibPath, fileName)
 			if _, err := os.Stat(libFilePath); err == nil {
-				if os.Getenv("DEBUG_LIB_LOADING") == "1" {
+				if debugLibLoadingEnabled {
 					fmt.Fprintf(os.Stderr, "Loading lib file: %s from %s\n", lib, libFilePath)
 				}
 				tc.loadLibFile(libFilePath)
@@ -274,7 +274,7 @@ func (tc *TypeChecker) loadScopedPackages(scopeDir, scopeName string) {
 			typesPath := filepath.Join(pkgDir, typesFile)
 			if _, err := os.Stat(typesPath); err == nil {
 				pkgFullName := scopeName + "/" + entry.Name()
-				if os.Getenv("TSCHECK_DEBUG") == "1" {
+				if debugParserEnabled {
 					fmt.Fprintf(os.Stderr, "Loading scoped package: %s (%s)\n", pkgFullName, typesPath)
 				}
 				tc.loadPackageWithCache(pkgDir, pkgFullName)
@@ -518,7 +518,7 @@ func (tc *TypeChecker) extractGlobalDeclarationFromLine(line string, lineIdx int
 				symbol := tc.symbolTable.DefineSymbol(name, symbols.VariableSymbol, nil, false)
 				symbol.FromDTS = true
 
-				if os.Getenv("DEBUG_LIB_LOADING") == "1" {
+				if debugLibLoadingEnabled {
 					fmt.Fprintf(os.Stderr, "Extracted namespace: %s\n", name)
 				}
 			}

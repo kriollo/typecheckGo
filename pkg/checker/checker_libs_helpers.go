@@ -134,7 +134,7 @@ func (tc *TypeChecker) extractVariablesFromFile(filePath string) {
 			tc.globalEnv.Objects[global.Name] = types.Any
 			symbol := tc.symbolTable.DefineSymbol(global.Name, symbols.VariableSymbol, nil, false)
 			symbol.FromDTS = true
-			if os.Getenv("DEBUG_LIB_LOADING") == "1" {
+			if debugLibLoadingEnabled {
 				fmt.Fprintf(os.Stderr, "Extracted namespace: %s\n", global.Name)
 			}
 		} else if global.IsFunction {
@@ -179,7 +179,7 @@ func (tc *TypeChecker) extractVariablesUsingPatterns(text string) {
 			tc.globalEnv.Objects[global.Name] = types.Any
 			symbol := tc.symbolTable.DefineSymbol(global.Name, symbols.VariableSymbol, nil, false)
 			symbol.FromDTS = true
-			if os.Getenv("DEBUG_LIB_LOADING") == "1" {
+			if debugLibLoadingEnabled {
 				fmt.Fprintf(os.Stderr, "Extracted namespace: %s\n", global.Name)
 			}
 		} else if global.IsFunction {

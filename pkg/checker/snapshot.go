@@ -16,7 +16,6 @@ import (
 
 // Cache DEBUG_LIB_LOADING environment variable to avoid expensive os.Getenv calls
 // This was consuming 84% of CPU time according to profiling
-var debugLibLoadingEnabled = os.Getenv("DEBUG_LIB_LOADING") == "1"
 
 // LibSnapshot represents a serialized snapshot of TypeScript library definitions
 type LibSnapshot struct {

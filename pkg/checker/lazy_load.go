@@ -12,7 +12,7 @@ func (tc *TypeChecker) ensureGlobalLoaded(name string) {
 		// Check if we already loaded this lib file
 		fullPath := filepath.Join(tc.typescriptLibPath, libFile)
 		if !tc.loadedLibFiles[fullPath] {
-			if os.Getenv("DEBUG_LIB_LOADING") == "1" {
+			if debugLibLoadingEnabled {
 				fmt.Fprintf(os.Stderr, "Lazy loading lib for symbol '%s': %s\n", name, libFile)
 			}
 			tc.loadLibFile(fullPath)

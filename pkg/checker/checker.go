@@ -12,6 +12,11 @@ import (
 	"tstypechecker/pkg/types"
 )
 
+// Cache DEBUG_LIB_LOADING environment variable to avoid expensive os.Getenv calls
+// This was consuming 84% of CPU time according to profiling
+var debugParserEnabled = os.Getenv("TSCHECK_DEBUG") == "1"
+var debugLibLoadingEnabled = os.Getenv("DEBUG_LIB_LOADING") == "1"
+
 // TypeChecker coordinates type checking operations
 type TypeChecker struct {
 	symbolTable        *symbols.SymbolTable
@@ -173,6 +178,9 @@ func NewWithModuleResolver(rootDir string) *TypeChecker {
 		tc.profiler.StartPhase("Node Modules Loading")
 	}
 
+	// Load builtin types (Exclude, Extract, etc.)
+	tc.loadBuiltinTypes()
+
 	tc.loadNodeModulesTypes(rootDir)
 
 	if tc.profiler.IsEnabled() {
@@ -253,7 +261,7 @@ func (tc *TypeChecker) CheckFile(filename string, file *ast.File) []TypeError {
 	// Load TypeScript lib files on first check (lazy loading)
 	// This ensures standard JavaScript globals like Intl, Promise, etc. are available
 	if len(tc.loadedLibFiles) == 0 {
-		if os.Getenv("DEBUG_LIB_LOADING") == "1" {
+		if debugLibLoadingEnabled {
 			fmt.Fprintf(os.Stderr, "→ CheckFile: loadedLibFiles=%d, loading TypeScript libs...\n", len(tc.loadedLibFiles))
 		}
 		tc.LoadTypeScriptLibsWithSnapshot([]string{"ES2020", "DOM"})
@@ -518,7 +526,7 @@ func (tc *TypeChecker) checkSatisfiesExpression(satisfies *ast.SatisfiesExpressi
 
 func (tc *TypeChecker) checkIdentifier(id *ast.Identifier, filename string) {
 	// Debug logging
-	if os.Getenv("TSCHECK_DEBUG_SCOPE") == "1" && id.Name == "emit" {
+	if debugParserEnabled && id.Name == "emit" {
 		debugFile, err := os.OpenFile("debug_scope.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if err == nil {
 			fmt.Fprintf(debugFile, "DEBUG: Checking identifier 'emit' at line %d, Current scope level: %d\n",
@@ -543,7 +551,7 @@ func (tc *TypeChecker) checkIdentifier(id *ast.Identifier, filename string) {
 	}
 
 	// Debug: log scope information for debugging
-	if os.Getenv("TSCHECK_DEBUG_SCOPE") == "1" {
+	if debugParserEnabled {
 		var symbolNames []string
 		for name := range tc.symbolTable.Current.Symbols {
 			symbolNames = append(symbolNames, name)
@@ -1566,7 +1574,7 @@ func (tc *TypeChecker) processImportWithModule(importDecl *ast.ImportDeclaration
 		if (symbol.Type == symbols.TypeAliasSymbol || symbol.Type == symbols.InterfaceSymbol) && symbol.Node != nil {
 			if symbol.ResolvedType != nil {
 				tc.typeAliasCache[name] = symbol.ResolvedType
-				if name == "actionsType" && os.Getenv("TSCHECK_DEBUG") == "1" {
+				if name == "actionsType" && debugParserEnabled {
 					fmt.Fprintf(os.Stderr, "DEBUG: Imported actionsType with pre-resolved type (StringIndexType=%v)\n",
 						symbol.ResolvedType.StringIndexType != nil)
 				}
@@ -1576,7 +1584,7 @@ func (tc *TypeChecker) processImportWithModule(importDecl *ast.ImportDeclaration
 					resolvedType := tc.convertTypeNode(typeAliasDecl.TypeAnnotation)
 					// Cache the resolved type so it can be found when referenced
 					tc.typeAliasCache[name] = resolvedType
-					if name == "actionsType" && os.Getenv("TSCHECK_DEBUG") == "1" {
+					if name == "actionsType" && debugParserEnabled {
 						fmt.Fprintf(os.Stderr, "DEBUG: Resolved imported actionsType from AST (StringIndexType=%v)\n",
 							resolvedType.StringIndexType != nil)
 					}
@@ -2217,7 +2225,7 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 		}
 		return &types.Type{Kind: types.TupleType, Types: elementTypes}
 	case *ast.TypeReference:
-		if t.Name == "StringMap" && os.Getenv("TSCHECK_DEBUG") == "1" {
+		if t.Name == "StringMap" && debugParserEnabled {
 			fmt.Fprintf(os.Stderr, "DEBUG: Converting TypeReference StringMap, has TypeArgs=%v\n", len(t.TypeArguments) > 0)
 		}
 		// Handle readonly types
@@ -2311,7 +2319,7 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 						// Resolve lazily - this handles cases like 'typeof' where the type
 						// depends on variables that might not have been checked during the first pass
 						resolvedType := tc.convertTypeNode(aliasDecl.TypeAnnotation)
-						if os.Getenv("TSCHECK_DEBUG") == "1" {
+						if debugParserEnabled {
 							fmt.Fprintf(os.Stderr, "DEBUG: Resolved type alias '%s': Kind=%v, Name=%s, Properties=%d\n",
 								t.Name, resolvedType.Kind, resolvedType.Name, len(resolvedType.Properties))
 						}
@@ -2374,9 +2382,21 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 
 		// Handle generic type alias instantiation (when TypeArguments are present)
 		if len(t.TypeArguments) > 0 {
+			if t.Name == "Exclude" {
+				fmt.Fprintf(os.Stderr, "DEBUG: resolving Exclude. TypeArgs=%d\n", len(t.TypeArguments))
+			}
 			if symbol, exists := tc.symbolTable.ResolveSymbol(t.Name); exists {
-				if symbol.Type == symbols.TypeAliasSymbol {
+				if t.Name == "Exclude" {
+					fmt.Fprintf(os.Stderr, "DEBUG: Exclude symbol found. Type=%v, Node=%v\n", symbol.Type, symbol.Node != nil)
+				}
+
+				if symbol.Type == symbols.TypeParameterSymbol {
+					return types.NewTypeParameter(t.Name, nil, nil)
+				} else if symbol.Type == symbols.TypeAliasSymbol {
 					if symbol.Node == nil {
+						if t.Name == "Exclude" {
+							fmt.Fprintf(os.Stderr, "DEBUG: Exclude symbol has no node\n")
+						}
 						return types.Any
 					}
 					aliasDecl := symbol.Node.(*ast.TypeAliasDeclaration)
@@ -2394,21 +2414,31 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 						}
 					}
 
+					// Enter a new scope for the generic parameters to shadow outer symbols
+					tc.symbolTable.EnterScope(aliasDecl)
+
+					// Define type parameters in the new scope
+					for _, param := range aliasDecl.TypeParameters {
+						if typeParam, ok := param.(*ast.TypeParameter); ok {
+							tc.symbolTable.DefineSymbol(typeParam.Name.Name, symbols.TypeParameterSymbol, typeParam, false)
+						}
+					}
+
 					// Substitute in the alias's type annotation
 					annotationType := tc.convertTypeNode(aliasDecl.TypeAnnotation)
-					resolvedType := tc.substituteType(annotationType, substitutions)
 
-					// Preserve the alias name by wrapping in an ObjectType
-					// This ensures "Tuple<[boolean]>" shows as "Tuple" not "tuple"
-					if resolvedType.Kind == types.TupleType {
-						// For tuple types, we need to preserve the name
-						resolvedType.Name = t.Name
-						return resolvedType
+					// Exit scope
+					tc.symbolTable.ExitScope()
+
+					resolvedType := tc.substituteType(annotationType, substitutions)
+					if debugParserEnabled {
+						fmt.Fprintf(os.Stderr, "DEBUG: Resolved type alias '%s': Kind=%v, Name=%s, Properties=%d\n",
+							t.Name, resolvedType.Kind, resolvedType.Name, len(resolvedType.Properties))
 					}
 
 					// Evaluate if it's a conditional type
 					if resolvedType.Kind == types.ConditionalType {
-						return tc.evaluateConditionalType(resolvedType)
+						return tc.resolveConditionalType(resolvedType.CheckType, resolvedType.ExtendsType, resolvedType.TrueType, resolvedType.FalseType)
 					}
 					return resolvedType
 				} else if symbol.Type == symbols.InterfaceSymbol {
@@ -2476,7 +2506,7 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 						}
 					}
 
-					if t.Name == "StringMap" && os.Getenv("TSCHECK_DEBUG") == "1" {
+					if t.Name == "StringMap" && debugParserEnabled {
 						fmt.Fprintf(os.Stderr, "DEBUG: Processing StringMap - StringIndexType: %v, Members: %d\n", stringIndexType != nil, len(interfaceDecl.Members))
 					}
 
@@ -2519,7 +2549,7 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 		// For other type references without type arguments, check if it's an interface
 		// and convert its members (including call signatures)
 		if symbol, exists := tc.symbolTable.ResolveSymbol(t.Name); exists {
-			if t.Name == "StringMap" && os.Getenv("TSCHECK_DEBUG") == "1" {
+			if t.Name == "StringMap" && debugParserEnabled {
 				fmt.Fprintf(os.Stderr, "DEBUG: Found StringMap symbol, type=%v, hasNode=%v\n", symbol.Type, symbol.Node != nil)
 			}
 			if symbol.Type == symbols.InterfaceSymbol {
@@ -2679,7 +2709,7 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 		if ident, ok := t.ExprName.(*ast.Identifier); ok {
 			// First check if this is a variable/const declaration
 			if varType, ok := tc.varTypeCache[ident.Name]; ok && varType != nil {
-				if os.Getenv("TSCHECK_DEBUG") == "1" {
+				if debugParserEnabled {
 					fmt.Fprintf(os.Stderr, "DEBUG: TypeQuery for '%s' resolved from varTypeCache: Kind=%v, Name=%s\n",
 						ident.Name, varType.Kind, varType.Name)
 				}
@@ -2689,7 +2719,7 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 			// Then check symbol table
 			if symbol, exists := tc.symbolTable.ResolveSymbol(ident.Name); exists {
 				if symbol.ResolvedType != nil {
-					if os.Getenv("TSCHECK_DEBUG") == "1" {
+					if debugParserEnabled {
 						fmt.Fprintf(os.Stderr, "DEBUG: TypeQuery for '%s' resolved from symbol.ResolvedType: Kind=%v, Name=%s\n",
 							ident.Name, symbol.ResolvedType.Kind, symbol.ResolvedType.Name)
 					}
@@ -2699,7 +2729,7 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 		}
 		// Fallback: try to infer from the expression
 		inferredType := tc.inferencer.InferType(t.ExprName)
-		if os.Getenv("TSCHECK_DEBUG") == "1" {
+		if debugParserEnabled {
 			fmt.Fprintf(os.Stderr, "DEBUG: TypeQuery fallback inference: Kind=%v, Name=%s\n",
 				inferredType.Kind, inferredType.Name)
 		}
@@ -2817,17 +2847,63 @@ func (tc *TypeChecker) substituteType(t *types.Type, substitutions map[string]*t
 		}
 		return t
 	case types.ConditionalType:
+		// Handle distributive conditional types: T extends U ? X : Y
+		// If T is a naked type parameter and we are substituting it with a Union,
+		// we must distribute the condition over the union members.
+		if t.CheckType.Kind == types.TypeParameterType {
+			if sub, ok := substitutions[t.CheckType.Name]; ok && sub.Kind == types.UnionType {
+				var results []*types.Type
+				for _, member := range sub.Types {
+					// Create a new substitution map where T -> member
+					newSubstitutions := make(map[string]*types.Type)
+					for k, v := range substitutions {
+						newSubstitutions[k] = v
+					}
+					newSubstitutions[t.CheckType.Name] = member
+
+					// Recursively substitute the whole conditional type
+					results = append(results, tc.substituteType(t, newSubstitutions))
+				}
+				return types.NewUnionType(results)
+			}
+		}
+
 		checkType := tc.substituteType(t.CheckType, substitutions)
 		extendsType := tc.substituteType(t.ExtendsType, substitutions)
 		trueType := tc.substituteType(t.TrueType, substitutions)
 		falseType := tc.substituteType(t.FalseType, substitutions)
+
 		if t.InferredType != nil {
 			// We don't substitute the inferred type parameter itself
 			return types.NewConditionalTypeWithInfer(checkType, t.InferredType, trueType, falseType)
 		}
-		return types.NewConditionalType(checkType, extendsType, trueType, falseType)
+
+		return tc.resolveConditionalType(checkType, extendsType, trueType, falseType)
 
 	default:
 		return t
 	}
+}
+
+// resolveConditionalType evaluates a conditional type T extends U ? X : Y
+func (tc *TypeChecker) resolveConditionalType(checkType, extendsType, trueType, falseType *types.Type) *types.Type {
+	// 1. Distributive conditional types: (A | B) extends U ? X : Y  =>  (A extends U ? X : Y) | (B extends U ? X : Y)
+	if checkType.Kind == types.UnionType {
+		var results []*types.Type
+		for _, t := range checkType.Types {
+			results = append(results, tc.resolveConditionalType(t, extendsType, trueType, falseType))
+		}
+		return types.NewUnionType(results)
+	}
+
+	// 2. If checkType is still a type parameter (generic), we can't evaluate yet
+	if checkType.Kind == types.TypeParameterType {
+		return types.NewConditionalType(checkType, extendsType, trueType, falseType)
+	}
+
+	// 3. Evaluate: check assignability
+	if checkType.IsAssignableTo(extendsType) {
+		return trueType
+	}
+	return falseType
 }

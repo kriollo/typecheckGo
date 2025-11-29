@@ -131,7 +131,7 @@ func (oll *OptimizedLibLoader) LoadLibFileOptimized(filePath string) error {
 					// In a full implementation we would support merged declarations.
 					if name == "Promise" {
 						if existing, ok := oll.tc.symbolTable.ResolveSymbol(name); ok && existing.Type == symbols.InterfaceSymbol {
-							if os.Getenv("TSCHECK_DEBUG") == "1" {
+							if debugParserEnabled {
 								fmt.Printf("DEBUG: OptimizedLibLoader skipping var Promise to preserve interface Promise\n")
 							}
 							continue
@@ -210,7 +210,7 @@ func (oll *OptimizedLibLoader) LoadLibFileOptimized(filePath string) error {
 				if blockDepth <= 0 && interfaceName != "" {
 					// Skip if this interface already exists with a node (e.g., from loadBuiltinTypes)
 					if existing, ok := oll.tc.symbolTable.ResolveSymbol(interfaceName); ok && existing.Node != nil {
-						if interfaceName == "Promise" && os.Getenv("TSCHECK_DEBUG") == "1" {
+						if interfaceName == "Promise" && debugParserEnabled {
 							fmt.Printf("DEBUG: OptimizedLibLoader skipping Promise because it already has a node\n")
 						}
 						inInterfaceBlock = false
@@ -218,7 +218,7 @@ func (oll *OptimizedLibLoader) LoadLibFileOptimized(filePath string) error {
 						continue
 					}
 
-					if interfaceName == "Promise" && os.Getenv("TSCHECK_DEBUG") == "1" {
+					if interfaceName == "Promise" && debugParserEnabled {
 						fmt.Printf("DEBUG: OptimizedLibLoader defining Promise (overwriting or new)\n")
 					}
 					symbol := oll.tc.symbolTable.DefineSymbol(interfaceName, symbols.InterfaceSymbol, nil, false)
@@ -463,7 +463,7 @@ func (oll *OptimizedLibLoader) LoadTypeScriptLibsOptimized(libs []string, typesc
 		if fileName, ok := libFileMap[libLower]; ok {
 			libFilePath := filepath.Join(typescriptLibPath, fileName)
 			if _, err := os.Stat(libFilePath); err == nil {
-				if os.Getenv("DEBUG_LIB_LOADING") == "1" {
+				if debugLibLoadingEnabled {
 					fmt.Fprintf(os.Stderr, "Loading lib file (optimized): %s from %s\n", lib, libFilePath)
 				}
 				if err := oll.LoadLibFileOptimized(libFilePath); err != nil {

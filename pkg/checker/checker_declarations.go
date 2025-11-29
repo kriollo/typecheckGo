@@ -34,7 +34,7 @@ func (tc *TypeChecker) checkVariableDeclaration(decl *ast.VariableDeclaration, f
 			var declaredType *types.Type
 			if declarator.TypeAnnotation != nil {
 				declaredType = tc.convertTypeNode(declarator.TypeAnnotation)
-				if os.Getenv("TSCHECK_DEBUG") == "1" && declarator.ID != nil {
+				if debugParserEnabled && declarator.ID != nil {
 					fmt.Fprintf(os.Stderr, "DEBUG: Variable '%s' declared type: Kind=%v, Name=%s, Properties=%d\n",
 						declarator.ID.Name, declaredType.Kind, declaredType.Name, len(declaredType.Properties))
 				}

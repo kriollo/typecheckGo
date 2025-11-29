@@ -57,7 +57,7 @@ func (tc *TypeChecker) LoadTypeScriptLibsWithSnapshot(libs []string) {
 				tc.profiler.EndSubPhase("TypeScript Libs Loading", "Load from Snapshot")
 				tc.profiler.RecordCacheHit("TypeScript Libs Loading")
 			}
-			if os.Getenv("DEBUG_LIB_LOADING") == "1" {
+			if debugLibLoadingEnabled {
 				fmt.Fprintf(os.Stderr, "✓ Loaded TypeScript libs from snapshot cache\n")
 			}
 			return
