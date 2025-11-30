@@ -2225,6 +2225,16 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 		}
 		return &types.Type{Kind: types.TupleType, Types: elementTypes}
 	case *ast.TypeReference:
+		// Handle Array<T> generic type - must be here to catch Array with type arguments
+		if t.Name == "Array" {
+			if len(t.TypeArguments) == 1 {
+				elementType := tc.convertTypeNode(t.TypeArguments[0])
+				return types.NewArrayType(elementType)
+			}
+			// Array without type argument defaults to any[]
+			return types.NewArrayType(types.Any)
+		}
+
 		if t.Name == "StringMap" && debugParserEnabled {
 			fmt.Fprintf(os.Stderr, "DEBUG: Converting TypeReference StringMap, has TypeArgs=%v\n", len(t.TypeArguments) > 0)
 		}
@@ -2366,14 +2376,6 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 				return types.Null
 			case "undefined":
 				return types.Undefined
-			case "Array":
-				// Handle Array<T> generic type
-				if len(t.TypeArguments) == 1 {
-					elementType := tc.convertTypeNode(t.TypeArguments[0])
-					return types.NewArrayType(elementType)
-				}
-				// Array without type argument defaults to any[]
-				return types.NewArrayType(types.Any)
 			}
 		}
 
