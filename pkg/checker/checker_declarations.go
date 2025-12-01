@@ -374,6 +374,8 @@ func (tc *TypeChecker) checkInterfaceDeclaration(decl *ast.InterfaceDeclaration,
 }
 
 func (tc *TypeChecker) checkClassDeclaration(decl *ast.ClassDeclaration, filename string) {
+	fmt.Fprintf(os.Stderr, "DEBUG checkClassDeclaration: Class='%s', Implements=%d\n", decl.ID.Name, len(decl.Implements))
+
 	// Check class name
 	if !isValidIdentifier(decl.ID.Name) {
 		tc.addError(filename, decl.ID.Pos().Line, decl.ID.Pos().Column,
@@ -387,60 +389,17 @@ func (tc *TypeChecker) checkClassDeclaration(decl *ast.ClassDeclaration, filenam
 
 	// Find the class scope
 	classScope := tc.findScopeForNode(decl)
-	if classScope == nil {
-		// If we can't find the scope, skip member checking
-		return
-	}
+	fmt.Fprintf(os.Stderr, "DEBUG: classScope is nil: %v\n", classScope == nil)
 
 	// Save current scope
 	originalScope := tc.symbolTable.Current
 
-	// Enter class scope
-	tc.symbolTable.Current = classScope
-
-	// Check interface implementation if present
-	if decl.Implements != nil && len(decl.Implements) > 0 {
-		for _, impl := range decl.Implements {
-			if typeRef, ok := impl.(*ast.TypeReference); ok {
-				interfaceType := tc.convertTypeNode(typeRef)
-				if interfaceType != nil && interfaceType.Kind == types.ObjectType {
-					// Check that class has all required interface properties
-					for propName, propType := range interfaceType.Properties {
-						// Find matching property or method in class
-						found := false
-						for _, member := range decl.Body {
-							switch m := member.(type) {
-							case *ast.MethodDefinition:
-								if m.Key != nil && m.Key.Name == propName {
-									found = true
-									// Check method return type matches interface
-									if m.Value != nil && m.Value.ReturnType != nil {
-										methodReturnType := tc.convertTypeNode(m.Value.ReturnType)
-										if methodReturnType != nil && !tc.isAssignableTo(methodReturnType, propType) {
-											msg := fmt.Sprintf("Property '%s' in type '%s' is not assignable to the same property in base type '%s'.", propName, decl.ID.Name, typeRef.Name)
-											tc.addError(filename, m.Key.Pos().Line, m.Key.Pos().Column, msg, "TS2416", "error")
-										}
-									}
-									break
-								}
-							case *ast.PropertyDefinition:
-								if m.Key != nil && m.Key.Name == propName {
-									found = true
-									break
-								}
-							}
-						}
-						if !found {
-							msg := fmt.Sprintf("Class '%s' incorrectly implements interface '%s'. Property '%s' is missing.", decl.ID.Name, typeRef.Name, propName)
-							tc.addError(filename, decl.ID.Pos().Line, decl.ID.Pos().Column, msg, "TS2420", "error")
-						}
-					}
-				}
-			}
-		}
+	// Enter class scope if available
+	if classScope != nil {
+		tc.symbolTable.Current = classScope
 	}
 
-	// Check members
+	// Check members first to populate typeCache
 	for _, member := range decl.Body {
 		switch m := member.(type) {
 		case *ast.MethodDefinition:
@@ -471,8 +430,12 @@ func (tc *TypeChecker) checkClassDeclaration(decl *ast.ClassDeclaration, filenam
 						}
 					}
 
-					// Restore class scope
-					tc.symbolTable.Current = classScope
+					// Restore class scope (or original if no class scope)
+					if classScope != nil {
+						tc.symbolTable.Current = classScope
+					} else {
+						tc.symbolTable.Current = originalScope
+					}
 
 					tc.currentFunction = previousFunction
 				}
@@ -491,6 +454,74 @@ func (tc *TypeChecker) checkClassDeclaration(decl *ast.ClassDeclaration, filenam
 						if propName != "" {
 							msg := fmt.Sprintf("Property '%s' has no initializer and is not definitely assigned in the constructor.", propName)
 							tc.addError(filename, m.Key.Pos().Line, m.Key.Pos().Column, msg, "TS2564", "error")
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// After checking all members, validate interface implementation
+	if decl.Implements != nil && len(decl.Implements) > 0 {
+		fmt.Fprintf(os.Stderr, "DEBUG: Class '%s' implements %d interfaces\n", decl.ID.Name, len(decl.Implements))
+		for _, impl := range decl.Implements {
+			if typeRef, ok := impl.(*ast.TypeReference); ok {
+				fmt.Fprintf(os.Stderr, "DEBUG: Checking implements '%s'\n", typeRef.Name)
+				interfaceType := tc.convertTypeNode(typeRef)
+				fmt.Fprintf(os.Stderr, "DEBUG: Interface type: Kind=%v, Properties=%d\n", interfaceType.Kind, len(interfaceType.Properties))
+				if interfaceType != nil && interfaceType.Kind == types.ObjectType {
+					// Check that class has all required interface properties
+					for propName, propType := range interfaceType.Properties {
+						fmt.Fprintf(os.Stderr, "DEBUG: Checking property '%s' of type Kind=%v, IsFunction=%v\n", propName, propType.Kind, propType.IsFunction)
+						if propType.ReturnType != nil {
+							fmt.Fprintf(os.Stderr, "DEBUG: Property has ReturnType: Kind=%v, Name=%s\n", propType.ReturnType.Kind, propType.ReturnType.Name)
+						}
+						// Find matching property or method in class
+						found := false
+						var methodNode *ast.MethodDefinition
+						for _, member := range decl.Body {
+							switch m := member.(type) {
+							case *ast.MethodDefinition:
+								if m.Key != nil && m.Key.Name == propName {
+									found = true
+									methodNode = m
+									break
+								}
+							case *ast.PropertyDefinition:
+								if m.Key != nil && m.Key.Name == propName {
+									found = true
+									break
+								}
+							}
+							if found {
+								break
+							}
+						}
+
+						if !found {
+							msg := fmt.Sprintf("Class '%s' incorrectly implements interface '%s'. Property '%s' is missing.", decl.ID.Name, typeRef.Name, propName)
+							tc.addError(filename, decl.ID.Pos().Line, decl.ID.Pos().Column, msg, "TS2420", "error")
+						} else if methodNode != nil && methodNode.Value != nil {
+							// Validate method return type against interface
+							var methodReturnType *types.Type
+
+							// If method has explicit return type, use it
+							if methodNode.Value.ReturnType != nil {
+								methodReturnType = tc.convertTypeNode(methodNode.Value.ReturnType)
+							} else {
+								// No explicit return type - get inferred type from typeCache
+								if inferredType, exists := tc.typeCache[methodNode.Value]; exists {
+									methodReturnType = inferredType
+								}
+							}
+
+							// Check if method return type matches interface property type
+							if methodReturnType != nil && propType.Kind == types.FunctionType && propType.ReturnType != nil {
+								if !tc.isAssignableTo(methodReturnType, propType.ReturnType) {
+									msg := fmt.Sprintf("Property '%s' in type '%s' is not assignable to the same property in base type '%s'.", propName, decl.ID.Name, typeRef.Name)
+									tc.addError(filename, methodNode.Key.Pos().Line, methodNode.Key.Pos().Column, msg, "TS2416", "error")
+								}
+							}
 						}
 					}
 				}
