@@ -624,7 +624,15 @@ func (tc *TypeChecker) checkCallExpression(call *ast.CallExpression, filename st
 	// Check all arguments
 	for _, arg := range call.Arguments {
 		tc.checkExpression(arg, filename)
-	} // Check if it's a valid function call
+	}
+
+	// Handle method calls (e.g., object.method(args))
+	if member, ok := call.Callee.(*ast.MemberExpression); ok {
+		tc.checkMethodCall(call, member, filename)
+		return
+	}
+
+	// Check if it's a valid function call
 	if id, ok := call.Callee.(*ast.Identifier); ok {
 		// This check is already done in the symbol table, but we can add more
 		// sophisticated type checking here
@@ -1020,6 +1028,86 @@ func (tc *TypeChecker) checkFunctionExpression(fn *ast.FunctionExpression, filen
 	} else {
 		// No scope found - just check the body with current scope
 		tc.checkBlockStatement(fn.Body, filename)
+	}
+}
+
+// checkMethodCall validates method calls (e.g., obj.method(args))
+func (tc *TypeChecker) checkMethodCall(call *ast.CallExpression, member *ast.MemberExpression, filename string) {
+	// Get the method name
+	var methodName string
+	if prop, ok := member.Property.(*ast.Identifier); ok {
+		methodName = prop.Name
+	} else {
+		// Computed property, can't validate
+		return
+	}
+
+	// Get the object type
+	objectType := tc.getExpressionType(member.Object)
+
+	// Skip validation for built-in types and their methods
+	if objectType.Kind == types.StringType || objectType.Kind == types.NumberType ||
+		objectType.Kind == types.BooleanType || objectType.Kind == types.ArrayType {
+		return
+	}
+
+	// Check if it's a class instance method
+	if objId, ok := member.Object.(*ast.Identifier); ok {
+		if symbol, exists := tc.symbolTable.ResolveSymbol(objId.Name); exists {
+			// Find the class that this instance is of
+			if symbol.Type == symbols.VariableSymbol && symbol.Node != nil {
+				if varDecl, ok := symbol.Node.(*ast.VariableDeclarator); ok {
+					// Check if it's instantiated with 'new'
+					if newExpr, ok := varDecl.Init.(*ast.NewExpression); ok {
+						if classId, ok := newExpr.Callee.(*ast.Identifier); ok {
+							// Find the class declaration
+							if classSymbol, classExists := tc.symbolTable.ResolveSymbol(classId.Name); classExists {
+								if classDecl, ok := classSymbol.Node.(*ast.ClassDeclaration); ok {
+									// Find the method in the class
+									for _, classMember := range classDecl.Body {
+										if method, ok := classMember.(*ast.MethodDefinition); ok {
+											if method.Key != nil && method.Key.Name == methodName {
+												if method.Value != nil {
+													// Validate method parameters
+													tc.checkArgumentTypes(call.Arguments, method.Value.Params, filename, methodName)
+												}
+												return
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Check if the method exists on the object type
+	if objectType.Kind == types.ObjectType {
+		methodType, exists := objectType.Properties[methodName]
+		if exists && methodType.Kind == types.FunctionType {
+			// Validate parameter count and types directly
+			args := call.Arguments
+			params := methodType.Parameters
+
+			// Basic validation: check assignability of arguments
+			for i, arg := range args {
+				if i >= len(params) {
+					break
+				}
+
+				argType := tc.inferencer.InferType(arg)
+				paramType := params[i]
+
+				if !tc.isAssignableTo(argType, paramType) {
+					msg := fmt.Sprintf("Argument of type '%s' is not assignable to parameter of type '%s'.",
+						argType.String(), paramType.String())
+					tc.addError(filename, arg.Pos().Line, arg.Pos().Column, msg, "TS2345", "error")
+				}
+			}
+		}
 	}
 }
 

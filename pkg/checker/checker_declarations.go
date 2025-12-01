@@ -487,23 +487,48 @@ func (tc *TypeChecker) checkClassDeclaration(decl *ast.ClassDeclaration, filenam
 							msg := fmt.Sprintf("Class '%s' incorrectly implements interface '%s'. Property '%s' is missing.", decl.ID.Name, typeRef.Name, propName)
 							tc.addError(filename, decl.ID.Pos().Line, decl.ID.Pos().Column, msg, "TS2420", "error")
 						} else if methodNode != nil && methodNode.Value != nil {
-							// Validate method return type against interface
-							var methodReturnType *types.Type
+							// Validate method signature against interface
+							if propType.Kind == types.FunctionType {
+								var methodReturnType *types.Type
 
-							// If method has explicit return type, use it
-							if methodNode.Value.ReturnType != nil {
-								methodReturnType = tc.convertTypeNode(methodNode.Value.ReturnType)
-							} else {
-								// No explicit return type - get inferred type from typeCache
-								if inferredType, exists := tc.typeCache[methodNode.Value]; exists {
-									methodReturnType = inferredType
+								// Get the method's return type
+								if methodNode.Value.ReturnType != nil {
+									methodReturnType = tc.convertTypeNode(methodNode.Value.ReturnType)
+								} else {
+									// No explicit return type - infer from typeCache or assume void
+									if inferredType, exists := tc.typeCache[methodNode.Value]; exists {
+										methodReturnType = inferredType
+									} else {
+										// Assume void if no cached type
+										methodReturnType = types.Void
+									}
 								}
-							}
 
-							// Check if method return type matches interface property type
-							if methodReturnType != nil && propType.Kind == types.FunctionType && propType.ReturnType != nil {
-								if !tc.isAssignableTo(methodReturnType, propType.ReturnType) {
-									msg := fmt.Sprintf("Property '%s' in type '%s' is not assignable to the same property in base type '%s'.", propName, decl.ID.Name, typeRef.Name)
+								// Validate return type compatibility
+								if methodReturnType != nil && propType.ReturnType != nil {
+									// Special case: if interface expects void, implementation can return anything
+									if propType.ReturnType.Kind == types.VoidType {
+										// void return type in interface allows any return in implementation
+										// This is intentional in TypeScript - the return value is just ignored
+									} else if methodReturnType.Kind != types.VoidType {
+										// Both have non-void returns - check assignability
+										if !tc.isAssignableTo(methodReturnType, propType.ReturnType) {
+											msg := fmt.Sprintf("Property '%s' in type '%s' is not assignable to the same property in base type '%s'.\n  Type '%s' is not assignable to type '%s'.",
+												propName, decl.ID.Name, typeRef.Name, methodReturnType.String(), propType.ReturnType.String())
+											tc.addError(filename, methodNode.Key.Pos().Line, methodNode.Key.Pos().Column, msg, "TS2416", "error")
+										}
+									} else if methodReturnType.Kind == types.VoidType && propType.ReturnType.Kind != types.VoidType {
+										// Method returns void but interface expects a value
+										msg := fmt.Sprintf("Property '%s' in type '%s' is not assignable to the same property in base type '%s'.\n  Type 'void' is not assignable to type '%s'.",
+											propName, decl.ID.Name, typeRef.Name, propType.ReturnType.String())
+										tc.addError(filename, methodNode.Key.Pos().Line, methodNode.Key.Pos().Column, msg, "TS2416", "error")
+									}
+								}
+
+								// Validate parameter count and types
+								if len(methodNode.Value.Params) != len(propType.Parameters) {
+									msg := fmt.Sprintf("Property '%s' in type '%s' is not assignable to the same property in base type '%s'.\n  Type has %d parameter(s) but interface has %d parameter(s).",
+										propName, decl.ID.Name, typeRef.Name, len(methodNode.Value.Params), len(propType.Parameters))
 									tc.addError(filename, methodNode.Key.Pos().Line, methodNode.Key.Pos().Column, msg, "TS2416", "error")
 								}
 							}
