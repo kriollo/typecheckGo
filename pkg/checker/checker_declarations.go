@@ -234,6 +234,20 @@ func (tc *TypeChecker) checkFunctionDeclaration(decl *ast.FunctionDeclaration, f
 			tc.checkBlockStatement(decl.Body, filename)
 		}
 
+		// Validate return type matches declaration
+		if decl.ReturnType != nil {
+			declaredReturnType := tc.convertTypeNode(decl.ReturnType)
+			actualReturnType, hasReturn := tc.typeCache[decl]
+
+			if hasReturn && declaredReturnType != nil {
+				// Check if actual return type is assignable to declared return type
+				if !tc.isAssignableTo(actualReturnType, declaredReturnType) {
+					msg := fmt.Sprintf("Type '%s' is not assignable to type '%s'.", actualReturnType.String(), declaredReturnType.String())
+					tc.addError(filename, decl.ReturnType.Pos().Line, decl.ReturnType.Pos().Column, msg, "TS2322", "error")
+				}
+			}
+		}
+
 		// Restore previous function
 		tc.currentFunction = previousFunction
 	}
@@ -384,6 +398,48 @@ func (tc *TypeChecker) checkClassDeclaration(decl *ast.ClassDeclaration, filenam
 	// Enter class scope
 	tc.symbolTable.Current = classScope
 
+	// Check interface implementation if present
+	if decl.Implements != nil && len(decl.Implements) > 0 {
+		for _, impl := range decl.Implements {
+			if typeRef, ok := impl.(*ast.TypeReference); ok {
+				interfaceType := tc.convertTypeNode(typeRef)
+				if interfaceType != nil && interfaceType.Kind == types.ObjectType {
+					// Check that class has all required interface properties
+					for propName, propType := range interfaceType.Properties {
+						// Find matching property or method in class
+						found := false
+						for _, member := range decl.Body {
+							switch m := member.(type) {
+							case *ast.MethodDefinition:
+								if m.Key != nil && m.Key.Name == propName {
+									found = true
+									// Check method return type matches interface
+									if m.Value != nil && m.Value.ReturnType != nil {
+										methodReturnType := tc.convertTypeNode(m.Value.ReturnType)
+										if methodReturnType != nil && !tc.isAssignableTo(methodReturnType, propType) {
+											msg := fmt.Sprintf("Property '%s' in type '%s' is not assignable to the same property in base type '%s'.", propName, decl.ID.Name, typeRef.Name)
+											tc.addError(filename, m.Key.Pos().Line, m.Key.Pos().Column, msg, "TS2416", "error")
+										}
+									}
+									break
+								}
+							case *ast.PropertyDefinition:
+								if m.Key != nil && m.Key.Name == propName {
+									found = true
+									break
+								}
+							}
+						}
+						if !found {
+							msg := fmt.Sprintf("Class '%s' incorrectly implements interface '%s'. Property '%s' is missing.", decl.ID.Name, typeRef.Name, propName)
+							tc.addError(filename, decl.ID.Pos().Line, decl.ID.Pos().Column, msg, "TS2420", "error")
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// Check members
 	for _, member := range decl.Body {
 		switch m := member.(type) {
@@ -402,6 +458,19 @@ func (tc *TypeChecker) checkClassDeclaration(decl *ast.ClassDeclaration, filenam
 
 					tc.checkBlockStatement(m.Value.Body, filename)
 
+					// Validate method return type
+					if m.Value.ReturnType != nil {
+						declaredReturnType := tc.convertTypeNode(m.Value.ReturnType)
+						actualReturnType, hasReturn := tc.typeCache[m.Value]
+
+						if hasReturn && declaredReturnType != nil {
+							if !tc.isAssignableTo(actualReturnType, declaredReturnType) {
+								msg := fmt.Sprintf("Type '%s' is not assignable to type '%s'.", actualReturnType.String(), declaredReturnType.String())
+								tc.addError(filename, m.Value.ReturnType.Pos().Line, m.Value.ReturnType.Pos().Column, msg, "TS2322", "error")
+							}
+						}
+					}
+
 					// Restore class scope
 					tc.symbolTable.Current = classScope
 
@@ -413,6 +482,18 @@ func (tc *TypeChecker) checkClassDeclaration(decl *ast.ClassDeclaration, filenam
 			// Check property initializer
 			if m.Value != nil {
 				tc.checkExpression(m.Value, filename)
+			} else if m.TypeAnnotation != nil && !m.Optional {
+				// Property has no initializer and is not optional - check strictPropertyInitialization
+				if tc.GetConfig().StrictPropertyInitialization {
+					// Check if it's initialized in constructor (not implemented yet, so we report error)
+					if m.Key != nil {
+						propName := m.Key.Name
+						if propName != "" {
+							msg := fmt.Sprintf("Property '%s' has no initializer and is not definitely assigned in the constructor.", propName)
+							tc.addError(filename, m.Key.Pos().Line, m.Key.Pos().Column, msg, "TS2564", "error")
+						}
+					}
+				}
 			}
 		}
 	}
