@@ -2117,6 +2117,9 @@ func (tc *TypeChecker) SetLibs(libs []string) {
 	startTime := time.Now()
 	tc.LoadTypeScriptLibsWithSnapshot(libs)
 	tc.loadStats.TypeScriptLibsTime = time.Since(startTime)
+
+	// Reload builtin types to ensure they have AST nodes (snapshot might have stripped them)
+	tc.loadBuiltinTypes()
 }
 
 // Functions moved to checker_libs.go:
