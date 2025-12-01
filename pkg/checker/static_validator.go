@@ -22,6 +22,10 @@ func (smv *StaticMemberValidator) ValidateStaticAccess(
 	member *ast.MemberExpression,
 	filename string,
 ) {
+	if smv == nil || smv.tc == nil {
+		return
+	}
+
 	// Check if object is a class reference (not an instance)
 	objId, ok := member.Object.(*ast.Identifier)
 	if !ok {
@@ -92,12 +96,16 @@ func (smv *StaticMemberValidator) ValidateStaticAccess(
 	}
 }
 
-// ValidateStaticMethodCall validates static method calls
+// ValidateStaticMethodCall validates calling a static method
 func (smv *StaticMemberValidator) ValidateStaticMethodCall(
 	call *ast.CallExpression,
 	member *ast.MemberExpression,
 	filename string,
 ) {
+	if smv == nil || smv.tc == nil {
+		return
+	}
+
 	// Check if object is a class reference
 	objId, ok := member.Object.(*ast.Identifier)
 	if !ok {
