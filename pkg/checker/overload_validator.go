@@ -110,7 +110,16 @@ func (ov *OverloadValidator) validateImplementation(
 	filename string,
 ) {
 	implReturnType := ov.tc.convertTypeNode(impl.ReturnType)
-	if implReturnType == nil {
+
+	// If no explicit return type, infer from body
+	if implReturnType == nil && impl.Body != nil {
+		returnInfo := ov.tc.controlFlow.AnalyzeReturns(impl.Body)
+		if len(returnInfo.ReturnTypes) > 0 {
+			implReturnType = ov.tc.controlFlow.UnifyReturnTypes(returnInfo.ReturnTypes)
+		} else {
+			implReturnType = types.Void
+		}
+	} else if implReturnType == nil {
 		implReturnType = types.Any
 	}
 
@@ -118,7 +127,8 @@ func (ov *OverloadValidator) validateImplementation(
 	for _, sig := range signatures {
 		// Validate that implementation return type is compatible
 		if sig.ReturnType != nil && implReturnType.Kind != types.AnyType {
-			if !ov.isReturnTypeCompatible(implReturnType, sig.ReturnType) {
+			// Implementation must be assignable to ALL overload signatures
+			if !ov.tc.isAssignableTo(implReturnType, sig.ReturnType) {
 				ov.tc.addError(
 					filename,
 					impl.ID.Pos().Line,

@@ -21,7 +21,7 @@ func (rpv *RestParameterValidator) ValidateRestParameter(
 	param *ast.Parameter,
 	filename string,
 ) {
-	if !param.Rest {
+	if rpv == nil || rpv.tc == nil || param == nil || !param.Rest {
 		return
 	}
 
@@ -56,7 +56,7 @@ func (rpv *RestParameterValidator) ValidateRestArguments(
 	startIndex int,
 	filename string,
 ) {
-	if restParam.ParamType == nil {
+	if rpv == nil || rpv.tc == nil || restParam == nil || restParam.ParamType == nil {
 		return
 	}
 
@@ -97,7 +97,7 @@ func (rpv *RestParameterValidator) ValidateSpreadArgument(
 	expectedType *types.Type,
 	filename string,
 ) {
-	if spreadExpr.Argument == nil {
+	if rpv == nil || rpv.tc == nil || spreadExpr == nil || spreadExpr.Argument == nil {
 		return
 	}
 
@@ -169,6 +169,10 @@ func (rpv *RestParameterValidator) ValidateFunctionWithRest(
 	filename string,
 	funcName string,
 ) {
+	if rpv == nil || rpv.tc == nil {
+		return
+	}
+
 	restIndex := rpv.GetRestParameterIndex(params)
 	if restIndex == -1 {
 		return // No rest parameter
@@ -228,7 +232,7 @@ func (rpv *RestParameterValidator) InferRestParameterType(
 	args []ast.Expression,
 	startIndex int,
 ) *types.Type {
-	if startIndex >= len(args) {
+	if rpv == nil || rpv.tc == nil || startIndex >= len(args) {
 		return types.NewArrayType(types.Any)
 	}
 

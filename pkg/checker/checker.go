@@ -2414,6 +2414,9 @@ func (tc *TypeChecker) checkNewExpression(expr *ast.NewExpression, filename stri
 				for _, member := range classDecl.Body {
 					if method, ok := member.(*ast.MethodDefinition); ok {
 						if method.Kind == "constructor" && method.Value != nil {
+							// Note: Generic type inference for constructors would be validated here
+							// but requires converting TypeNode to TypeParameter first
+
 							// Validate argument types against constructor parameters
 							if len(method.Value.Params) > 0 && len(expr.Arguments) > 0 {
 								tc.checkArgumentTypes(expr.Arguments, method.Value.Params, filename, id.Name)

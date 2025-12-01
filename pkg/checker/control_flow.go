@@ -1,6 +1,7 @@
 package checker
 
 import (
+	"fmt"
 	"tstypechecker/pkg/ast"
 	"tstypechecker/pkg/types"
 )
@@ -32,8 +33,10 @@ func (cfa *ControlFlowAnalyzer) AnalyzeReturns(body *ast.BlockStatement) *Return
 		return info
 	}
 
+	fmt.Printf("DEBUG CFA: Analyzing block with %d statements\n", len(body.Body))
 	info.AllPathsReturn = cfa.analyzeStatements(body.Body, info)
 	info.HasReturn = len(info.ReturnTypes) > 0
+	fmt.Printf("DEBUG CFA: Found %d return types\n", len(info.ReturnTypes))
 
 	return info
 }
