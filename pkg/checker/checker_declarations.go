@@ -474,9 +474,7 @@ func (tc *TypeChecker) checkClassDeclaration(decl *ast.ClassDeclaration, filenam
 				interfaceType := tc.convertTypeNode(typeRef)
 				if interfaceType != nil && interfaceType.Kind == types.ObjectType {
 					// Check that class has all required interface properties
-					fmt.Printf("DEBUG: Checking interface '%s' with %d properties\n", typeRef.Name, len(interfaceType.Properties))
 					for propName, propType := range interfaceType.Properties {
-						fmt.Printf("DEBUG: Looking for property '%s' (type: %s)\n", propName, propType.String())
 						// Find matching property or method in class
 						found := false
 						var methodNode *ast.MethodDefinition
@@ -486,7 +484,6 @@ func (tc *TypeChecker) checkClassDeclaration(decl *ast.ClassDeclaration, filenam
 								if m.Key != nil && m.Key.Name == propName {
 									found = true
 									methodNode = m
-									fmt.Printf("DEBUG: Found method '%s'\n", propName)
 									break
 								}
 							case *ast.PropertyDefinition:
@@ -505,34 +502,16 @@ func (tc *TypeChecker) checkClassDeclaration(decl *ast.ClassDeclaration, filenam
 							tc.addError(filename, decl.ID.Pos().Line, decl.ID.Pos().Column, msg, "TS2420", "error")
 						} else if methodNode != nil && methodNode.Value != nil {
 							// Validate method signature against interface
-							fmt.Printf("DEBUG: propType.Kind = %v, FunctionType = %v\n", propType.Kind, types.FunctionType)
 							if propType.Kind == types.FunctionType {
 								var methodReturnType *types.Type
 
-								// Get the method's return type
+								// Get the method's return type - only validate if explicitly declared
 								if methodNode.Value.ReturnType != nil {
 									methodReturnType = tc.convertTypeNode(methodNode.Value.ReturnType)
-									fmt.Printf("DEBUG: Method has explicit return type: %s\n", methodReturnType.String())
 								} else {
-									fmt.Printf("DEBUG: Method has no explicit return type, Body=%v\n", methodNode.Value.Body != nil)
-									// No explicit return type - infer from body using control flow
-									if methodNode.Value.Body != nil {
-										returnInfo := tc.controlFlow.AnalyzeReturns(methodNode.Value.Body)
-										fmt.Printf("DEBUG: AnalyzeReturns returned %d return types\n", len(returnInfo.ReturnTypes))
-										if len(returnInfo.ReturnTypes) > 0 {
-											methodReturnType = tc.controlFlow.UnifyReturnTypes(returnInfo.ReturnTypes)
-											fmt.Printf("DEBUG: Method '%s' inferred return type: %s\n", propName, methodReturnType.String())
-										} else {
-											methodReturnType = types.Void
-											fmt.Printf("DEBUG: No return types found, using void\n")
-										}
-									} else if inferredType, exists := tc.typeCache[methodNode.Value]; exists {
-										methodReturnType = inferredType
-										fmt.Printf("DEBUG: Using cached type\n")
-									} else {
-										methodReturnType = types.Void
-										fmt.Printf("DEBUG: Using default void\n")
-									}
+									// Skip validation if no explicit return type
+									// TODO: Implement proper return type inference from method body
+									continue
 								}
 
 								// Validate return type compatibility
