@@ -374,8 +374,6 @@ func (tc *TypeChecker) checkInterfaceDeclaration(decl *ast.InterfaceDeclaration,
 }
 
 func (tc *TypeChecker) checkClassDeclaration(decl *ast.ClassDeclaration, filename string) {
-	fmt.Fprintf(os.Stderr, "DEBUG checkClassDeclaration: Class='%s', Implements=%d\n", decl.ID.Name, len(decl.Implements))
-
 	// Check class name
 	if !isValidIdentifier(decl.ID.Name) {
 		tc.addError(filename, decl.ID.Pos().Line, decl.ID.Pos().Column,
@@ -389,7 +387,6 @@ func (tc *TypeChecker) checkClassDeclaration(decl *ast.ClassDeclaration, filenam
 
 	// Find the class scope
 	classScope := tc.findScopeForNode(decl)
-	fmt.Fprintf(os.Stderr, "DEBUG: classScope is nil: %v\n", classScope == nil)
 
 	// Save current scope
 	originalScope := tc.symbolTable.Current
@@ -463,19 +460,12 @@ func (tc *TypeChecker) checkClassDeclaration(decl *ast.ClassDeclaration, filenam
 
 	// After checking all members, validate interface implementation
 	if decl.Implements != nil && len(decl.Implements) > 0 {
-		fmt.Fprintf(os.Stderr, "DEBUG: Class '%s' implements %d interfaces\n", decl.ID.Name, len(decl.Implements))
 		for _, impl := range decl.Implements {
 			if typeRef, ok := impl.(*ast.TypeReference); ok {
-				fmt.Fprintf(os.Stderr, "DEBUG: Checking implements '%s'\n", typeRef.Name)
 				interfaceType := tc.convertTypeNode(typeRef)
-				fmt.Fprintf(os.Stderr, "DEBUG: Interface type: Kind=%v, Properties=%d\n", interfaceType.Kind, len(interfaceType.Properties))
 				if interfaceType != nil && interfaceType.Kind == types.ObjectType {
 					// Check that class has all required interface properties
 					for propName, propType := range interfaceType.Properties {
-						fmt.Fprintf(os.Stderr, "DEBUG: Checking property '%s' of type Kind=%v, IsFunction=%v\n", propName, propType.Kind, propType.IsFunction)
-						if propType.ReturnType != nil {
-							fmt.Fprintf(os.Stderr, "DEBUG: Property has ReturnType: Kind=%v, Name=%s\n", propType.ReturnType.Kind, propType.ReturnType.Name)
-						}
 						// Find matching property or method in class
 						found := false
 						var methodNode *ast.MethodDefinition
