@@ -401,15 +401,20 @@ func (tc *TypeChecker) getDeclaredReturnType(funcNode ast.Node) *types.Type {
 		return nil
 	}
 
+	var returnType *types.Type
+	var isAsync bool
+
 	switch fn := funcNode.(type) {
 	case *ast.FunctionDeclaration:
 		if fn.ReturnType != nil {
-			return tc.convertTypeNode(fn.ReturnType)
+			returnType = tc.convertTypeNode(fn.ReturnType)
+			isAsync = fn.Async
 		}
 
 	case *ast.FunctionExpression:
 		if fn.ReturnType != nil {
-			return tc.convertTypeNode(fn.ReturnType)
+			returnType = tc.convertTypeNode(fn.ReturnType)
+			isAsync = fn.Async
 		}
 
 	case *ast.ArrowFunctionExpression:
@@ -418,5 +423,26 @@ func (tc *TypeChecker) getDeclaredReturnType(funcNode ast.Node) *types.Type {
 		return nil
 	}
 
-	return nil
+	// For async functions, unwrap Promise<T> to get T
+	// Because return statements in async functions return T, not Promise<T>
+	if returnType != nil && isAsync {
+		return tc.unwrapPromiseType(returnType)
+	}
+
+	return returnType
+}
+
+// unwrapPromiseType extracts T from Promise<T>
+func (tc *TypeChecker) unwrapPromiseType(t *types.Type) *types.Type {
+	if t == nil {
+		return nil
+	}
+
+	// Check if this is Promise<T>
+	if t.Kind == types.ObjectType && t.Name == "Promise" && len(t.TypeArguments) > 0 {
+		return t.TypeArguments[0]
+	}
+
+	// Not a Promise type, return as-is
+	return t
 }
