@@ -1986,6 +1986,32 @@ func (tc *TypeChecker) isAssignableToUncached(sourceType, targetType *types.Type
 				return tc.isAssignableTo(sourceType.ElementType, targetType.ElementType)
 			}
 		}
+
+		// Check function types
+		if sourceType.Kind == types.FunctionType {
+			// Check return type compatibility (Covariance)
+			if sourceType.ReturnType != nil && targetType.ReturnType != nil {
+				// Void return type in target allows any return type in source
+				if targetType.ReturnType.Kind != types.VoidType {
+					if !tc.isAssignableTo(sourceType.ReturnType, targetType.ReturnType) {
+						return false
+					}
+				}
+			}
+
+			// Check parameter compatibility (Contravariance/Bivariance)
+			if len(sourceType.Parameters) > len(targetType.Parameters) {
+				return false
+			}
+
+			for i := 0; i < len(sourceType.Parameters); i++ {
+				if !tc.isAssignableTo(sourceType.Parameters[i], targetType.Parameters[i]) {
+					return false
+				}
+			}
+			return true
+		}
+
 		return true
 	}
 
@@ -2026,49 +2052,7 @@ func (tc *TypeChecker) isAssignableToUncached(sourceType, targetType *types.Type
 		}
 	}
 
-	// Check function types
-	if sourceType.Kind == types.FunctionType && targetType.Kind == types.FunctionType {
-		fmt.Fprintf(os.Stderr, "DEBUG: Checking FunctionType compatibility\n")
-		// Check return type compatibility (Covariance)
-		if sourceType.ReturnType != nil && targetType.ReturnType != nil {
-			fmt.Fprintf(os.Stderr, "DEBUG: Source Return: %s, Target Return: %s\n", sourceType.ReturnType.String(), targetType.ReturnType.String())
-			// Void return type in target allows any return type in source
-			if targetType.ReturnType.Kind != types.VoidType {
-				if !tc.isAssignableTo(sourceType.ReturnType, targetType.ReturnType) {
-					fmt.Fprintf(os.Stderr, "DEBUG: Return types incompatible\n")
-					return false
-				}
-			}
-		} else {
-			fmt.Fprintf(os.Stderr, "DEBUG: One return type is nil. Source: %v, Target: %v\n", sourceType.ReturnType, targetType.ReturnType)
-		}
-
-		// Check parameter compatibility (Contravariance/Bivariance)
-		// For now, we'll implement a simple check:
-		// 1. Source must not have more required parameters than target
-		// 2. Parameter types must be compatible (using bivariance for simplicity as TS often does)
-
-		// Note: In a strict implementation, parameters should be contravariant (Target assignable to Source)
-		// But TS defaults to bivariance (Source assignable to Target OR Target assignable to Source)
-		// We'll check if Source parameters are assignable to Target parameters for now
-
-		if len(sourceType.Parameters) > len(targetType.Parameters) {
-			// Source has more parameters - only allowed if extra parameters are optional
-			// For now, we'll just return false if counts don't match exactly or source has more
-			// TODO: Check for optional parameters
-			return false
-		}
-
-		for i := 0; i < len(sourceType.Parameters); i++ {
-			// Check parameter type compatibility
-			// Using bivariance: check if source param is assignable to target param
-			if !tc.isAssignableTo(sourceType.Parameters[i], targetType.Parameters[i]) {
-				return false
-			}
-		}
-
-		return true
-	} // Check union types - source can be assigned to union if it matches any member
+	// Check union types - source can be assigned to union if it matches any member
 	if targetType.Kind == types.UnionType {
 		for _, member := range targetType.Types {
 			if tc.isAssignableTo(sourceType, member) {
@@ -2408,9 +2392,6 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 			return types.NewArrayType(types.Any)
 		}
 
-		if debugParserEnabled {
-			fmt.Fprintf(os.Stderr, "DEBUG: Converting TypeReference '%s'\n", t.Name)
-		}
 		// Handle readonly types
 		if t.Name == "readonly" && len(t.TypeArguments) == 1 {
 			innerType := tc.convertTypeNode(t.TypeArguments[0])
@@ -2870,7 +2851,6 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 		return types.NewObjectType(t.Name, nil)
 
 	case *ast.FunctionType:
-		fmt.Fprintf(os.Stderr, "DEBUG: Converting FunctionType\n")
 		paramTypes := make([]*types.Type, len(t.Params))
 		for i, param := range t.Params {
 			if param.ParamType != nil {

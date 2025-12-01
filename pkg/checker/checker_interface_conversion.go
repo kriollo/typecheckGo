@@ -1,8 +1,6 @@
 package checker
 
 import (
-	"fmt"
-	"os"
 	"tstypechecker/pkg/ast"
 	"tstypechecker/pkg/symbols"
 	"tstypechecker/pkg/types"
@@ -46,7 +44,6 @@ func (tc *TypeChecker) convertInterfaceToType(decl *ast.InterfaceDeclaration) *t
 	for _, member := range decl.Members {
 		switch m := member.(type) {
 		case ast.InterfaceProperty:
-			fmt.Fprintf(os.Stderr, "DEBUG: Converting InterfaceProperty '%s', Value Type: %T\n", m.Key.Name, m.Value)
 			propType := tc.convertTypeNode(m.Value)
 
 			// Handle optional properties: make them a union with undefined
@@ -80,7 +77,7 @@ func (tc *TypeChecker) convertInterfaceToType(decl *ast.InterfaceDeclaration) *t
 				numberIndexType = valueType
 			}
 		default:
-			fmt.Fprintf(os.Stderr, "DEBUG: Unknown member type in interface: %T\n", member)
+			// Unknown member type
 		}
 	}
 
