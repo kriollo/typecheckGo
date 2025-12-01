@@ -451,7 +451,7 @@ func (tc *TypeChecker) checkClassDeclaration(decl *ast.ClassDeclaration, filenam
 				if methodScope != nil {
 					// Set current function for return type checking
 					previousFunction := tc.currentFunction
-					tc.currentFunction = nil // Methods are not FunctionDeclaration
+					tc.currentFunction = m.Value // Set to FunctionExpression for return validation
 
 					// Enter method scope
 					tc.symbolTable.Current = methodScope

@@ -401,21 +401,17 @@ func (tc *TypeChecker) getDeclaredReturnType(funcNode ast.Node) *types.Type {
 		return nil
 	}
 
-	var returnType *types.Type
+	var returnTypeNode ast.TypeNode
 	var isAsync bool
 
 	switch fn := funcNode.(type) {
 	case *ast.FunctionDeclaration:
-		if fn.ReturnType != nil {
-			returnType = tc.convertTypeNode(fn.ReturnType)
-			isAsync = fn.Async
-		}
+		returnTypeNode = fn.ReturnType
+		isAsync = fn.Async
 
 	case *ast.FunctionExpression:
-		if fn.ReturnType != nil {
-			returnType = tc.convertTypeNode(fn.ReturnType)
-			isAsync = fn.Async
-		}
+		returnTypeNode = fn.ReturnType
+		isAsync = fn.Async
 
 	case *ast.ArrowFunctionExpression:
 		// ArrowFunctionExpression in the current AST doesn't have a ReturnType field
@@ -423,24 +419,41 @@ func (tc *TypeChecker) getDeclaredReturnType(funcNode ast.Node) *types.Type {
 		return nil
 	}
 
-	// For async functions, unwrap Promise<T> to get T
-	// Because return statements in async functions return T, not Promise<T>
-	if returnType != nil && isAsync {
-		return tc.unwrapPromiseType(returnType)
+	if returnTypeNode == nil {
+		return nil
 	}
 
-	return returnType
+	// For async functions that return Promise<T>, unwrap to get T
+	// Because return statements in async functions return T, not Promise<T>
+	if isAsync {
+		if typeRef, ok := returnTypeNode.(*ast.TypeReference); ok {
+			if typeRef.Name == "Promise" && len(typeRef.TypeArguments) > 0 {
+				// Extract T from Promise<T>
+				return tc.convertTypeNode(typeRef.TypeArguments[0])
+			}
+		}
+	}
+
+	// Not async or not Promise, convert normally
+	return tc.convertTypeNode(returnTypeNode)
 }
 
 // unwrapPromiseType extracts T from Promise<T>
+// For async functions, the return type is Promise<T> but return statements return T
 func (tc *TypeChecker) unwrapPromiseType(t *types.Type) *types.Type {
 	if t == nil {
 		return nil
 	}
 
-	// Check if this is Promise<T>
-	if t.Kind == types.ObjectType && t.Name == "Promise" && len(t.TypeArguments) > 0 {
-		return t.TypeArguments[0]
+	// Check if this is Promise<T> by looking at TypeParameters
+	if t.Kind == types.ObjectType && t.Name == "Promise" {
+		if len(t.TypeParameters) > 0 {
+			return t.TypeParameters[0]
+		}
+		// TypeParameters might not be set if Promise was created from a TypeReference
+		// In that case, we need to look at the properties to extract the generic type
+		// As a fallback, if there are no type parameters, we can't unwrap, return any
+		return types.Any
 	}
 
 	// Not a Promise type, return as-is
