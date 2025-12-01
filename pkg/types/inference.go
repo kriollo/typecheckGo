@@ -109,18 +109,28 @@ func (ti *TypeInferencer) inferMemberExpressionType(expr *ast.MemberExpression) 
 		return Any
 	}
 
+	// Extract property name
+	var propName string
+	if !expr.Computed {
+		// Acceso directo: obj.prop
+		if id, ok := expr.Property.(*ast.Identifier); ok {
+			propName = id.Name
+		}
+	} else {
+		// Acceso computado: obj["prop"]
+		if lit, ok := expr.Property.(*ast.Literal); ok {
+			if str, ok := lit.Value.(string); ok {
+				propName = str
+			}
+		}
+	}
+
 	// Handle union types (e.g., for optional properties)
 	if objType.Kind == UnionType {
 		// For optional chaining on union types, we need to handle each type in the union
 		var resultTypes []*Type
 		for _, t := range objType.Types {
 			if t.Kind == ObjectType {
-				var propName string
-				if !expr.Computed {
-					if id, ok := expr.Property.(*ast.Identifier); ok {
-						propName = id.Name
-					}
-				}
 				if propName != "" {
 					if propType, exists := t.Properties[propName]; exists {
 						resultTypes = append(resultTypes, propType)
@@ -141,22 +151,6 @@ func (ti *TypeInferencer) inferMemberExpressionType(expr *ast.MemberExpression) 
 
 	// Si es un objeto, buscar la propiedad
 	if objType.Kind == ObjectType {
-		var propName string
-
-		if !expr.Computed {
-			// Acceso directo: obj.prop
-			if id, ok := expr.Property.(*ast.Identifier); ok {
-				propName = id.Name
-			}
-		} else {
-			// Acceso computado: obj["prop"]
-			if lit, ok := expr.Property.(*ast.Literal); ok {
-				if str, ok := lit.Value.(string); ok {
-					propName = str
-				}
-			}
-		}
-
 		if propName != "" {
 			// Buscar en las propiedades del objeto
 			if propType, exists := objType.Properties[propName]; exists {
@@ -168,6 +162,42 @@ func (ti *TypeInferencer) inferMemberExpressionType(expr *ast.MemberExpression) 
 			}
 
 			// TODO: Buscar en la cadena de prototipos o tipos heredados
+		}
+	}
+
+	// Handle primitive types properties
+	if objType.Kind == StringType {
+		if propName == "length" {
+			return Number
+		}
+		if propName == "toUpperCase" || propName == "toLowerCase" || propName == "trim" {
+			return NewFunctionType(nil, String)
+		}
+		if propName == "split" {
+			// split(separator: string): string[]
+			return NewFunctionType([]*Type{String}, NewArrayType(String))
+		}
+	}
+
+	if objType.Kind == ArrayType {
+		if propName == "length" {
+			return Number
+		}
+		if propName == "push" {
+			// push(...items: T[]): number
+			return NewFunctionType([]*Type{objType.ElementType}, Number)
+		}
+		if propName == "pop" {
+			// pop(): T | undefined
+			return NewFunctionType(nil, NewUnionType([]*Type{objType.ElementType, Undefined}))
+		}
+		if propName == "join" {
+			return NewFunctionType([]*Type{String}, String)
+		}
+		if propName == "map" {
+			// map<U>(callback: (value: T, index: number, array: T[]) => U): U[]
+			// Simplified: return Any[] for now as we don't have full generic inference here
+			return NewFunctionType([]*Type{Any}, NewArrayType(Any))
 		}
 	}
 
@@ -380,21 +410,82 @@ func (ti *TypeInferencer) inferArrayType(arr *ast.ArrayExpression) *Type {
 	}
 	// Si los tipos son homogéneos, devuelve ArrayType; si son heterogéneos, TupleType
 	if isHomogeneous {
+		// fmt.Printf("DEBUG: inferArrayType returning ArrayType: %s[]\n", firstType.String())
 		return NewArrayType(firstType)
 	}
 	return &Type{Kind: TupleType, Types: elementTypes}
 }
 
+// convertTypeNode converts an AST TypeNode to a types.Type (simplified version for inference)
+func (ti *TypeInferencer) convertTypeNode(node ast.TypeNode) *Type {
+	if node == nil {
+		return Any
+	}
+
+	switch t := node.(type) {
+	case *ast.TypeReference:
+		switch t.Name {
+		case "string":
+			return String
+		case "number":
+			return Number
+		case "boolean":
+			return Boolean
+		case "void":
+			return Void
+		case "any":
+			return Any
+		case "unknown":
+			return Unknown
+		case "(array)":
+			if len(t.TypeArguments) > 0 {
+				elemType := ti.convertTypeNode(t.TypeArguments[0])
+				return NewArrayType(elemType)
+			}
+			return NewArrayType(Any)
+		}
+	}
+	// For other types, return Any for now
+	return Any
+}
+
 // inferArrowFunctionType infiere el tipo de una arrow function
 func (ti *TypeInferencer) inferArrowFunctionType(arrow *ast.ArrowFunctionExpression) *Type {
-	// Infer parameter types
+	// Store original types to restore later
+	originalTypes := make(map[string]*Type)
+
+	// Infer parameter types and update scope
 	params := make([]*Type, len(arrow.Params))
-	for i := range params {
-		params[i] = Any
+	for i, param := range arrow.Params {
+		// Use type annotation if available
+		if param.ParamType != nil {
+			params[i] = ti.convertTypeNode(param.ParamType)
+		} else {
+			params[i] = Any
+		}
+
+		// Add to varTypeCache for body inference
+		if param.ID != nil {
+			if t, ok := ti.varTypeCache[param.ID.Name]; ok {
+				originalTypes[param.ID.Name] = t
+			}
+			ti.varTypeCache[param.ID.Name] = params[i]
+		}
 	}
 
 	// Infer return type by analyzing the function body
 	returnType := ti.inferArrowFunctionReturnType(arrow)
+
+	// Restore original types
+	for _, param := range arrow.Params {
+		if param.ID != nil {
+			if t, ok := originalTypes[param.ID.Name]; ok {
+				ti.varTypeCache[param.ID.Name] = t
+			} else {
+				delete(ti.varTypeCache, param.ID.Name)
+			}
+		}
+	}
 
 	// If it's an async function, the return type is a Promise
 	// For now, we return Any to allow .then() and await, as we don't have full Promise<T> support yet

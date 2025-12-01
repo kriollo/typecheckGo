@@ -1941,7 +1941,7 @@ func (tc *TypeChecker) isAssignableTo(sourceType, targetType *types.Type) bool {
 // isAssignableToUncached performs the actual assignability check without caching
 func (tc *TypeChecker) isAssignableToUncached(sourceType, targetType *types.Type) bool {
 	// Check enum assignability first (Fix 4 & 5)
-	if result, handled := isEnumAssignable(sourceType, targetType); handled {
+	if result, handled := isEnumAssignable(tc, sourceType, targetType); handled {
 		return result
 	}
 

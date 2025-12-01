@@ -115,6 +115,10 @@ func (tc *TypeChecker) checkVariableDeclaration(decl *ast.VariableDeclaration, f
 						}
 					}
 
+					if declarator.ID.Name == "matrix" {
+						fmt.Printf("DEBUG: matrix typeToCheck: %s, declaredType: %s\n", typeToCheck.String(), declaredType.String())
+					}
+
 					if !tc.isAssignableTo(typeToCheck, declaredType) {
 						tc.addError(filename, declarator.Init.Pos().Line, declarator.Init.Pos().Column,
 							fmt.Sprintf("Type '%s' is not assignable to type '%s'.", typeToCheck.String(), declaredType.String()),
