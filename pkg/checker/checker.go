@@ -30,7 +30,7 @@ type TypeChecker struct {
 	exprCache          *TypeExpressionCache   // Advanced cache for type expressions and assignability
 	inferencer         *types.TypeInferencer
 	destructuringInfer *DestructuringInferencer // Inferencer for destructured parameters
-	currentFunction    *ast.FunctionDeclaration // Track current function for return type checking
+	currentFunction    ast.Node                 // Track current function for return type checking (FunctionDeclaration, FunctionExpression, ArrowFunctionExpression)
 	config             *CompilerConfig          // Compiler configuration
 	typeGuards         map[string]bool          // Track variables under type guards (instanceof Function)
 	loadedLibFiles     map[string]bool          // Track loaded lib files to avoid duplicates

@@ -97,34 +97,51 @@ func (tc *TypeChecker) checkReturnStatement(ret *ast.ReturnStatement, filename s
 		// Infer the type of the return value
 		returnType := tc.inferencer.InferType(ret.Argument)
 
-		// Store the return type for the current function
+		// Get declared return type from current function
 		if tc.currentFunction != nil {
-			// Check if we already have a cached return type for this function
-			existingReturnType, exists := tc.typeCache[tc.currentFunction]
+			declaredReturnType := tc.getDeclaredReturnType(tc.currentFunction)
 
-			if exists {
-				// Verify that all returns have compatible types
-				if !tc.isAssignableTo(returnType, existingReturnType) {
-					msg := fmt.Sprintf("Type '%s' is not assignable to type '%s'.", returnType.String(), existingReturnType.String())
-					msg += "\n  Sugerencia: Todas las rutas de retorno deben devolver el mismo tipo"
+			if declaredReturnType != nil {
+				// Validate against declared return type
+				if !tc.isAssignableTo(returnType, declaredReturnType) {
+					msg := fmt.Sprintf("Type '%s' is not assignable to type '%s'.", returnType.String(), declaredReturnType.String())
 					tc.addError(filename, ret.Argument.Pos().Line, ret.Argument.Pos().Column, msg, "TS2322", "error")
 				}
 			} else {
-				// First return statement, cache the type
-				tc.typeCache[tc.currentFunction] = returnType
+				// No declared return type - validate consistency between returns
+				existingReturnType, exists := tc.typeCache[tc.currentFunction]
+				if exists {
+					if !tc.isAssignableTo(returnType, existingReturnType) {
+						msg := fmt.Sprintf("Type '%s' is not assignable to type '%s'.", returnType.String(), existingReturnType.String())
+						msg += "\n  Sugerencia: Todas las rutas de retorno deben devolver el mismo tipo"
+						tc.addError(filename, ret.Argument.Pos().Line, ret.Argument.Pos().Column, msg, "TS2322", "error")
+					}
+				} else {
+					tc.typeCache[tc.currentFunction] = returnType
+				}
 			}
 		}
 	} else {
 		// Return without value (void)
 		if tc.currentFunction != nil {
-			existingReturnType, exists := tc.typeCache[tc.currentFunction]
-			if exists && existingReturnType.Kind != types.VoidType && existingReturnType.Kind != types.AnyType {
-				msg := "A function whose declared type is neither 'void' nor 'any' must return a value."
-				msg += "\n  Sugerencia: Agrega un valor de retorno o cambia el tipo de retorno a 'void'"
-				tc.addError(filename, ret.Pos().Line, ret.Pos().Column, msg, "TS2355", "error")
-			} else if !exists {
-				// First return is void
-				tc.typeCache[tc.currentFunction] = types.Void
+			declaredReturnType := tc.getDeclaredReturnType(tc.currentFunction)
+
+			if declaredReturnType != nil {
+				// Validate void return against declared type
+				if declaredReturnType.Kind != types.VoidType && declaredReturnType.Kind != types.AnyType && declaredReturnType.Kind != types.UndefinedType {
+					msg := "A function whose declared type is neither 'void' nor 'any' must return a value."
+					tc.addError(filename, ret.Pos().Line, ret.Pos().Column, msg, "TS2355", "error")
+				}
+			} else {
+				// No declared type - track void
+				existingReturnType, exists := tc.typeCache[tc.currentFunction]
+				if exists && existingReturnType.Kind != types.VoidType && existingReturnType.Kind != types.AnyType {
+					msg := "A function whose declared type is neither 'void' nor 'any' must return a value."
+					msg += "\n  Sugerencia: Agrega un valor de retorno o cambia el tipo de retorno a 'void'"
+					tc.addError(filename, ret.Pos().Line, ret.Pos().Column, msg, "TS2355", "error")
+				} else if !exists {
+					tc.typeCache[tc.currentFunction] = types.Void
+				}
 			}
 		}
 	}
@@ -374,4 +391,32 @@ func (tc *TypeChecker) checkContinueStatement(stmt *ast.ContinueStatement, filen
 	// - If there's a label, it exists and is valid
 	_ = stmt
 	_ = filename
+}
+
+// getDeclaredReturnType extracts the declared return type from a function node
+// Supports FunctionDeclaration and FunctionExpression
+// Note: ArrowFunctionExpression doesn't currently capture ReturnType in the AST
+func (tc *TypeChecker) getDeclaredReturnType(funcNode ast.Node) *types.Type {
+	if funcNode == nil {
+		return nil
+	}
+
+	switch fn := funcNode.(type) {
+	case *ast.FunctionDeclaration:
+		if fn.ReturnType != nil {
+			return tc.convertTypeNode(fn.ReturnType)
+		}
+
+	case *ast.FunctionExpression:
+		if fn.ReturnType != nil {
+			return tc.convertTypeNode(fn.ReturnType)
+		}
+
+	case *ast.ArrowFunctionExpression:
+		// ArrowFunctionExpression in the current AST doesn't have a ReturnType field
+		// This would need to be added to the AST and parser to support: (x: number): string => ...
+		return nil
+	}
+
+	return nil
 }
