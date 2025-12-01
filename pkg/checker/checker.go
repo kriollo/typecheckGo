@@ -2007,6 +2007,9 @@ func (tc *TypeChecker) needsLiteralType(targetType *types.Type) bool {
 	if targetType.Kind == types.LiteralType {
 		return true
 	}
+	if targetType.Kind == types.TemplateLiteralType {
+		return true
+	}
 	if targetType.Kind == types.UnionType {
 		// Check if any member is a literal type
 		for _, member := range targetType.Types {
@@ -2227,7 +2230,58 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 			elementTypes[i] = tc.convertTypeNode(elem)
 		}
 		return &types.Type{Kind: types.TupleType, Types: elementTypes}
+	case *ast.MappedType:
+		constraint := tc.convertTypeNode(t.Constraint)
+		mapped := tc.convertTypeNode(t.MappedType)
+		// Create a TypeParameter for the key variable
+		typeParam := types.NewTypeParameter(t.TypeParameter.Name, constraint, nil)
+
+		return types.NewMappedType(typeParam, constraint, mapped, t.Readonly, t.MinusReadonly, t.Optional, t.MinusOptional)
+	case *ast.TemplateLiteralType:
+		templateTypes := make([]*types.Type, len(t.Types))
+		for i, typeNode := range t.Types {
+			templateTypes[i] = tc.convertTypeNode(typeNode)
+			fmt.Fprintf(os.Stderr, "DEBUG TemplateLiteralType part %d: kind=%v, intrinsicKind=%s\n", i, templateTypes[i].Kind, templateTypes[i].IntrinsicKind)
+		}
+		result := types.NewTemplateLiteralType(t.Parts, templateTypes)
+		fmt.Fprintf(os.Stderr, "DEBUG TemplateLiteralType result: %s\n", result.String())
+		return result
 	case *ast.TypeReference:
+		// Handle intrinsic string manipulation types
+		if (t.Name == "Capitalize" || t.Name == "Uncapitalize" || t.Name == "Uppercase" || t.Name == "Lowercase") && len(t.TypeArguments) == 1 {
+			arg := tc.convertTypeNode(t.TypeArguments[0])
+
+			// If argument is generic string, return intrinsic type to preserve transformation info
+			if arg.Kind == types.StringType {
+				return types.NewIntrinsicStringType(t.Name)
+			}
+
+			// If argument is string literal, apply transformation
+			if arg.Kind == types.LiteralType {
+				if str, ok := arg.Value.(string); ok {
+					var result string
+					switch t.Name {
+					case "Capitalize":
+						if len(str) > 0 {
+							result = strings.ToUpper(str[:1]) + str[1:]
+						}
+					case "Uncapitalize":
+						if len(str) > 0 {
+							result = strings.ToLower(str[:1]) + str[1:]
+						}
+					case "Uppercase":
+						result = strings.ToUpper(str)
+					case "Lowercase":
+						result = strings.ToLower(str)
+					}
+					return types.NewLiteralType(result)
+				}
+			}
+
+			// Fallback to string for other cases (e.g. unions, generics we can't resolve yet)
+			return types.String
+		}
+
 		// Handle Array<T> generic type - must be here to catch Array with type arguments
 		if t.Name == "Array" {
 			if len(t.TypeArguments) == 1 {
@@ -2310,8 +2364,10 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 					}
 				}
 			}
-			// Fallback if resolution fails
-			return types.String
+			// Fallback if resolution fails - create a KeyOfType with a placeholder
+			// This allows resolving keyof T where T is a generic type parameter
+			targetPlaceholder := types.NewObjectType(typeName, nil)
+			return types.NewKeyOfType(targetPlaceholder)
 		}
 
 		// First, check if we have this type cached (for imported types)
@@ -2884,10 +2940,111 @@ func (tc *TypeChecker) substituteType(t *types.Type, substitutions map[string]*t
 		}
 
 		return tc.resolveConditionalType(checkType, extendsType, trueType, falseType)
+	case types.MappedType:
+		constraint := tc.substituteType(t.Constraint, substitutions)
+
+		// If constraint is a union of literals (keys), expand it
+		keys := tc.extractKeysFromType(constraint)
+
+		if len(keys) > 0 {
+			props := make(map[string]*types.Type)
+			for _, key := range keys {
+				// Substitute P -> key
+				newSubs := make(map[string]*types.Type)
+				for k, v := range substitutions {
+					newSubs[k] = v
+				}
+				newSubs[t.TypeParameter.Name] = types.NewLiteralType(key)
+
+				propType := tc.substituteType(t.MappedType, newSubs)
+
+				// Apply modifiers
+				if t.MappedReadonly {
+					newPropType := *propType
+					newPropType.IsReadonly = true
+					propType = &newPropType
+				} else if t.MappedMinusReadonly {
+					newPropType := *propType
+					newPropType.IsReadonly = false
+					propType = &newPropType
+				}
+
+				// Handle optional
+				if t.MappedOptional {
+					propType = types.NewUnionType([]*types.Type{propType, types.Undefined})
+				} else if t.MappedMinusOptional {
+					// Remove Undefined from union
+					if propType.Kind == types.UnionType {
+						var nonUndefined []*types.Type
+						for _, sub := range propType.Types {
+							if sub.Kind != types.UndefinedType {
+								nonUndefined = append(nonUndefined, sub)
+							}
+						}
+						if len(nonUndefined) == 1 {
+							propType = nonUndefined[0]
+						} else {
+							propType = types.NewUnionType(nonUndefined)
+						}
+					}
+				}
+
+				props[key] = propType
+			}
+			return types.NewObjectType("Mapped", props)
+		}
+
+		// If not resolvable, return new MappedType with substituted components
+		mapped := tc.substituteType(t.MappedType, substitutions)
+		return types.NewMappedType(t.TypeParameter, constraint, mapped, t.MappedReadonly, t.MappedMinusReadonly, t.MappedOptional, t.MappedMinusOptional)
+
+	case types.KeyOfType:
+		// Substitute the target
+		target := tc.substituteType(t.KeyOfTarget, substitutions)
+
+		// If target is resolved to an ObjectType (or Interface), we can resolve keyof
+		if target.Kind == types.ObjectType {
+			// Return Union of keys
+			var keys []*types.Type
+			for k := range target.Properties {
+				keys = append(keys, types.NewLiteralType(k))
+			}
+			if len(keys) == 0 {
+				return types.Never
+			}
+			return types.NewUnionType(keys)
+		}
+
+		// If target is still TypeParameter/ObjectType(placeholder), return new KeyOfType
+		return types.NewKeyOfType(target)
 
 	default:
 		return t
 	}
+}
+
+// extractKeysFromType extracts string keys from a type (LiteralType or Union of LiteralTypes)
+func (tc *TypeChecker) extractKeysFromType(t *types.Type) []string {
+	if t == nil {
+		return nil
+	}
+	if t.Kind == types.LiteralType {
+		if str, ok := t.Value.(string); ok {
+			return []string{str}
+		}
+	}
+	if t.Kind == types.UnionType {
+		var keys []string
+		for _, sub := range t.Types {
+			if sub.Kind == types.LiteralType {
+				if str, ok := sub.Value.(string); ok {
+					keys = append(keys, str)
+				}
+			}
+		}
+		return keys
+	}
+	return nil
 }
 
 // resolveConditionalType evaluates a conditional type T extends U ? X : Y

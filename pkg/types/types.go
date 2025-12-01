@@ -2,6 +2,7 @@ package types
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -33,6 +34,8 @@ const (
 	TemplateLiteralType
 	IndexedAccessType
 	RestType
+	KeyOfType
+	IntrinsicStringType
 )
 
 func (tk TypeKind) String() string {
@@ -83,6 +86,10 @@ func (tk TypeKind) String() string {
 		return "template literal type"
 	case IndexedAccessType:
 		return "indexed access type"
+	case KeyOfType:
+		return "keyof"
+	case IntrinsicStringType:
+		return "intrinsic string"
 	default:
 		return "unknown"
 	}
@@ -129,6 +136,18 @@ type Type struct {
 	// Index signatures
 	StringIndexType *Type // [key: string]: T
 	NumberIndexType *Type // [key: number]: T
+
+	// Mapped Type Modifiers
+	MappedReadonly      bool // readonly [P in K]
+	MappedMinusReadonly bool // -readonly [P in K]
+	MappedOptional      bool // [P in K]?
+	MappedMinusOptional bool // [P in K]-?
+
+	// KeyOf Type
+	KeyOfTarget *Type // keyof T
+
+	// Intrinsic String Type (Capitalize, Uppercase, etc.)
+	IntrinsicKind string // "Capitalize", "Uppercase", "Lowercase", "Uncapitalize"
 }
 
 // NewPrimitiveType crea un tipo primitivo
@@ -230,16 +249,20 @@ func NewLiteralType(value interface{}) *Type {
 }
 
 // NewMappedType crea un mapped type { [K in T]: U }
-func NewMappedType(typeParam *Type, constraint *Type, mappedType *Type) *Type {
+func NewMappedType(typeParam *Type, constraint *Type, mappedType *Type, readonly, minusReadonly, optional, minusOptional bool) *Type {
 	return &Type{
-		Kind:          MappedType,
-		TypeParameter: typeParam,
-		Constraint:    constraint,
-		MappedType:    mappedType,
+		Kind:                MappedType,
+		TypeParameter:       typeParam,
+		Constraint:          constraint,
+		MappedType:          mappedType,
+		MappedReadonly:      readonly,
+		MappedMinusReadonly: minusReadonly,
+		MappedOptional:      optional,
+		MappedMinusOptional: minusOptional,
 	}
 }
 
-// NewConditionalType crea un conditional type T extends U ? X : Y or T extends infer U ? X : Y
+// NewConditionalType crea un conditional type T extends U ? X : Y
 func NewConditionalType(checkType *Type, extendsType *Type, trueType *Type, falseType *Type) *Type {
 	return &Type{
 		Kind:        ConditionalType,
@@ -259,6 +282,22 @@ func NewConditionalTypeWithInfer(checkType *Type, inferredType *Type, trueType *
 		InferredType: inferredType,
 		TrueType:     trueType,
 		FalseType:    falseType,
+	}
+}
+
+// NewKeyOfType crea un tipo keyof T
+func NewKeyOfType(target *Type) *Type {
+	return &Type{
+		Kind:        KeyOfType,
+		KeyOfTarget: target,
+	}
+}
+
+// NewIntrinsicStringType crea un tipo string intrínseco (Capitalize, Uppercase, etc.)
+func NewIntrinsicStringType(kind string) *Type {
+	return &Type{
+		Kind:          IntrinsicStringType,
+		IntrinsicKind: kind,
 	}
 }
 
@@ -540,6 +579,12 @@ func (t *Type) IsAssignableTo(target *Type) bool {
 		// Literal assignable to corresponding primitive
 		switch t.Value.(type) {
 		case string:
+			if target.Kind == TemplateLiteralType {
+				fmt.Printf("DEBUG IsAssignableTo: checking literal '%s' against template\n", t.Value.(string))
+				result := target.matchesTemplate(t.Value.(string))
+				fmt.Printf("DEBUG IsAssignableTo: result=%v\n", result)
+				return result
+			}
 			return target.Kind == StringType
 		case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
 			return target.Kind == NumberType
@@ -550,6 +595,57 @@ func (t *Type) IsAssignableTo(target *Type) bool {
 
 	return false
 
+}
+
+// matchesTemplate checks if a string matches a template literal type
+func (t *Type) matchesTemplate(s string) bool {
+	// Build regex pattern
+	pattern := "^"
+	for i, part := range t.TemplateParts {
+		pattern += regexp.QuoteMeta(part)
+		if i < len(t.TemplateTypes) {
+			subType := t.TemplateTypes[i]
+			switch subType.Kind {
+			case StringType:
+				pattern += ".*"
+			case IntrinsicStringType:
+				// Handle intrinsic string types with specific patterns
+				switch subType.IntrinsicKind {
+				case "Capitalize":
+					// Match string starting with uppercase letter
+					pattern += "[A-Z].*"
+				case "Uncapitalize":
+					// Match string starting with lowercase letter
+					pattern += "[a-z].*"
+				case "Uppercase":
+					// Match all uppercase string
+					pattern += "[A-Z]+"
+				case "Lowercase":
+					// Match all lowercase string
+					pattern += "[a-z]+"
+				default:
+					pattern += ".*"
+				}
+			case NumberType:
+				pattern += "[0-9.]+" // Simplified
+			case BooleanType:
+				pattern += "(true|false)"
+			case LiteralType:
+				if str, ok := subType.Value.(string); ok {
+					pattern += regexp.QuoteMeta(str)
+				}
+			// TODO: Handle unions and other types
+			default:
+				pattern += ".*"
+			}
+		}
+	}
+	pattern += "$"
+	// Debug: print pattern
+	fmt.Printf("DEBUG matchesTemplate: pattern='%s', string='%s'\n", pattern, s)
+	matched, _ := regexp.MatchString(pattern, s)
+	fmt.Printf("DEBUG matchesTemplate: matched=%v\n", matched)
+	return matched
 }
 
 // Tipos primitivos predefinidos
