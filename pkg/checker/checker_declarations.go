@@ -229,6 +229,20 @@ func (tc *TypeChecker) checkFunctionDeclaration(decl *ast.FunctionDeclaration, f
 			tc.checkBlockStatement(decl.Body, filename)
 		}
 
+		// Análisis de flujo de control para returns
+		returnInfo := tc.controlFlow.AnalyzeReturns(decl.Body)
+		if decl.ReturnType != nil && len(returnInfo.ReturnTypes) > 0 {
+			declaredReturnType := tc.convertTypeNode(decl.ReturnType)
+			unifiedReturnType := tc.controlFlow.UnifyReturnTypes(returnInfo.ReturnTypes)
+
+			if declaredReturnType != nil && unifiedReturnType != nil {
+				if !tc.isAssignableTo(unifiedReturnType, declaredReturnType) {
+					msg := fmt.Sprintf("Type '%s' is not assignable to type '%s'.", unifiedReturnType.String(), declaredReturnType.String())
+					tc.addError(filename, decl.ReturnType.Pos().Line, decl.ReturnType.Pos().Column, msg, "TS2322", "error")
+				}
+			}
+		}
+
 		// Validate return type matches declaration
 		if decl.ReturnType != nil {
 			declaredReturnType := tc.convertTypeNode(decl.ReturnType)

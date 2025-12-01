@@ -40,6 +40,13 @@ type TypeChecker struct {
 	typescriptLibPath  string                   // Path to TypeScript lib directory
 	profiler           *PerformanceProfiler     // Performance profiler for initialization
 	conversionStack    map[ast.TypeNode]bool    // Track types being converted to prevent infinite recursion
+	// Advanced validators
+	genericInferencer *GenericInferencer
+	arrayValidator    *ArrayValidator
+	controlFlow       *ControlFlowAnalyzer
+	overloadValidator *OverloadValidator
+	staticValidator   *StaticMemberValidator
+	restValidator     *RestParameterValidator
 }
 
 // CompilerConfig holds the compiler options for type checking
@@ -102,6 +109,14 @@ func New() *TypeChecker {
 		profiler:           NewPerformanceProfiler(),
 		conversionStack:    make(map[ast.TypeNode]bool),
 	}
+
+	// Initialize validators
+	tc.genericInferencer = NewGenericInferencer(tc)
+	tc.arrayValidator = NewArrayValidator(tc)
+	tc.controlFlow = NewControlFlowAnalyzer(tc)
+	tc.overloadValidator = NewOverloadValidator(tc)
+	tc.staticValidator = NewStaticMemberValidator(tc)
+	tc.restValidator = NewRestParameterValidator(tc)
 
 	return tc
 }
@@ -310,6 +325,15 @@ func (tc *TypeChecker) checkFile(file *ast.File, filename string) {
 	for _, stmt := range file.Body {
 		tc.checkStatement(stmt, filename)
 	}
+
+	// Third pass: Validate function overloads
+	functionDecls := []*ast.FunctionDeclaration{}
+	for _, stmt := range file.Body {
+		if funcDecl, ok := stmt.(*ast.FunctionDeclaration); ok {
+			functionDecls = append(functionDecls, funcDecl)
+		}
+	}
+	tc.overloadValidator.ValidateFunctionOverloads(functionDecls, filename)
 }
 
 // Statement checking functions moved to checker_statements.go:
@@ -351,6 +375,10 @@ func (tc *TypeChecker) checkExpression(expr ast.Expression, filename string) {
 		// Check all elements
 		for _, elem := range e.Elements {
 			tc.checkExpression(elem, filename)
+		}
+		// Validación profunda de arrays: inferimos el tipo esperado
+		if inferredType, ok := tc.typeCache[e]; ok {
+			tc.arrayValidator.ValidateArrayLiteral(e, inferredType, filename)
 		}
 	case *ast.ObjectExpression:
 		// Check all property values
@@ -628,6 +656,8 @@ func (tc *TypeChecker) checkCallExpression(call *ast.CallExpression, filename st
 
 	// Handle method calls (e.g., object.method(args))
 	if member, ok := call.Callee.(*ast.MemberExpression); ok {
+		// Check for static method calls
+		tc.staticValidator.ValidateStaticMethodCall(call, member, filename)
 		tc.checkMethodCall(call, member, filename)
 		return
 	}
@@ -748,9 +778,12 @@ func (tc *TypeChecker) checkCallExpression(call *ast.CallExpression, filename st
 
 					// Check argument types
 					if len(params) > 0 {
-						tc.checkArgumentTypes(call.Arguments, params, filename, id.Name)
-
-						// Additional check for generic constraints (keyof)
+						// Check if function has rest parameters
+						if tc.restValidator.GetRestParameterIndex(params) != -1 {
+							tc.restValidator.ValidateFunctionWithRest(params, call.Arguments, filename, id.Name)
+						} else {
+							tc.checkArgumentTypes(call.Arguments, params, filename, id.Name)
+						} // Additional check for generic constraints (keyof)
 						// This handles faulty101.ts: getProperty<T, K extends keyof T>(obj: T, key: K)
 						if funcDecl, ok := symbol.Node.(*ast.FunctionDeclaration); ok && len(funcDecl.TypeParameters) > 0 {
 							// Map type parameter names to their constraints
@@ -2363,6 +2396,9 @@ func (tc *TypeChecker) checkNewExpression(expr *ast.NewExpression, filename stri
 	for _, arg := range expr.Arguments {
 		tc.checkExpression(arg, filename)
 	}
+
+	// Validación completa de constructores usando StaticValidator
+	tc.staticValidator.ValidateConstructorInstantiation(expr, filename)
 
 	// Check constructor argument types
 	if id, ok := expr.Callee.(*ast.Identifier); ok {
