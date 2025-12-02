@@ -136,6 +136,31 @@ func (tc *TypeChecker) registerFunctionType(decl *ast.FunctionDeclaration, filen
 		returnType = types.Void
 	}
 
+	// If it's an async function, ensure the return type is Promise<T>
+	if decl.Async {
+		// If the return type is not already a Promise, wrap it
+		if returnType.Name != "Promise" {
+			// Create Promise<T> type
+			if promiseType, exists := tc.globalEnv.Objects["Promise"]; exists {
+				// Clone the Promise type and set the type parameter
+				wrappedType := &types.Type{
+					Kind:           types.ObjectType,
+					Name:           "Promise",
+					Properties:     promiseType.Properties,
+					TypeParameters: []*types.Type{returnType},
+				}
+				returnType = wrappedType
+			} else {
+				// Fallback: create a simple Promise<T> type
+				returnType = &types.Type{
+					Kind:           types.ObjectType,
+					Name:           "Promise",
+					TypeParameters: []*types.Type{returnType},
+				}
+			}
+		}
+	}
+
 	var fnType *types.Type
 	if len(decl.TypeParameters) > 0 {
 		typeParams := make([]*types.Type, len(decl.TypeParameters))

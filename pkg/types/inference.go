@@ -78,6 +78,8 @@ func (ti *TypeInferencer) InferType(expr ast.Expression) *Type {
 		return ti.inferObjectType(e)
 	case *ast.ArrowFunctionExpression:
 		return ti.inferArrowFunctionType(e)
+	case *ast.FunctionExpression:
+		return ti.inferFunctionExpressionType(e)
 	case *ast.YieldExpression:
 		// yield expression returns the type of its argument
 		// In a full implementation, this would return the element type of the Generator
@@ -491,10 +493,100 @@ func (ti *TypeInferencer) inferArrowFunctionType(arrow *ast.ArrowFunctionExpress
 		}
 	}
 
-	// If it's an async function, the return type is a Promise
-	// For now, we return Any to allow .then() and await, as we don't have full Promise<T> support yet
+	// If it's an async function, wrap the return type in Promise<T>
 	if arrow.Async {
-		returnType = Any
+		// Create Promise<T> type
+		// First, check if Promise is available in global environment
+		if promiseType, exists := ti.globalEnv.Objects["Promise"]; exists {
+			// Clone the Promise type and set the type parameter
+			wrappedType := &Type{
+				Kind:           ObjectType,
+				Name:           "Promise",
+				Properties:     promiseType.Properties,
+				TypeParameters: []*Type{returnType},
+			}
+			returnType = wrappedType
+		} else {
+			// Fallback: create a simple Promise<T> type
+			returnType = &Type{
+				Kind:           ObjectType,
+				Name:           "Promise",
+				TypeParameters: []*Type{returnType},
+			}
+		}
+	}
+
+	return NewFunctionType(params, returnType)
+}
+
+// inferFunctionExpressionType infiere el tipo de una function expression
+func (ti *TypeInferencer) inferFunctionExpressionType(fn *ast.FunctionExpression) *Type {
+	// Store original types to restore later
+	originalTypes := make(map[string]*Type)
+
+	// Infer parameter types and update scope
+	params := make([]*Type, len(fn.Params))
+	for i, param := range fn.Params {
+		// Use type annotation if available
+		if param.ParamType != nil {
+			params[i] = ti.convertTypeNode(param.ParamType)
+		} else {
+			params[i] = Any
+		}
+
+		// Add to varTypeCache for body inference
+		if param.ID != nil {
+			if t, ok := ti.varTypeCache[param.ID.Name]; ok {
+				originalTypes[param.ID.Name] = t
+			}
+			ti.varTypeCache[param.ID.Name] = params[i]
+		}
+	}
+
+	// Use return type annotation if available, otherwise infer from body
+	var returnType *Type
+	if fn.ReturnType != nil {
+		returnType = ti.convertTypeNode(fn.ReturnType)
+	} else if fn.Body != nil {
+		returnType = ti.InferReturnTypeFromBlock(fn.Body)
+	} else {
+		returnType = Void
+	}
+
+	// Restore original types
+	for _, param := range fn.Params {
+		if param.ID != nil {
+			if t, ok := originalTypes[param.ID.Name]; ok {
+				ti.varTypeCache[param.ID.Name] = t
+			} else {
+				delete(ti.varTypeCache, param.ID.Name)
+			}
+		}
+	}
+
+	// If it's an async function, wrap the return type in Promise<T>
+	if fn.Async {
+		// If the return type is not already a Promise, wrap it
+		if returnType.Name != "Promise" {
+			// Create Promise<T> type
+			if promiseType, exists := ti.globalEnv.Objects["Promise"]; exists {
+				// Clone the Promise type and set the type parameter
+				wrappedType := &Type{
+					Kind:           ObjectType,
+					Name:           "Promise",
+					Properties:     promiseType.Properties,
+					TypeParameters: []*Type{returnType},
+				}
+				returnType = wrappedType
+			} else {
+				// Fallback: create a simple Promise<T> type
+				returnType = &Type{
+					Kind:           ObjectType,
+					Name:           "Promise",
+					TypeParameters: []*Type{returnType},
+				}
+			}
+		}
 	}
 
 	return NewFunctionType(params, returnType)
