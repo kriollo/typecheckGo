@@ -64,6 +64,11 @@ func (tc *TypeChecker) checkVariableDeclaration(decl *ast.VariableDeclaration, f
 						// Skip excess property checking if type has index signatures
 						hasIndexSignature := declaredType.StringIndexType != nil || declaredType.NumberIndexType != nil
 
+						// Validate that properties comply with index signature
+						if hasIndexSignature {
+							tc.validateIndexSignature(objLit, declaredType, filename)
+						}
+
 						// Skip if type name suggests it's generic, union, or intersection
 						isFlexibleType := strings.Contains(declaredType.Name, "<") ||
 							strings.Contains(declaredType.Name, "|") ||
