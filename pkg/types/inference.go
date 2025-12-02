@@ -70,6 +70,8 @@ func (ti *TypeInferencer) InferType(expr ast.Expression) *Type {
 		return Unknown
 	case *ast.BinaryExpression:
 		return ti.inferBinaryExpressionType(e)
+	case *ast.UnaryExpression:
+		return ti.inferUnaryExpressionType(e)
 	case *ast.CallExpression:
 		return ti.inferCallExpressionType(e)
 	case *ast.ArrayExpression:
@@ -384,6 +386,33 @@ func (ti *TypeInferencer) inferBinaryExpressionType(expr *ast.BinaryExpression) 
 		// Por simplicidad, retornamos boolean
 		return Boolean
 
+	default:
+		return Unknown
+	}
+}
+
+// inferUnaryExpressionType infiere el tipo de una expresión unaria
+func (ti *TypeInferencer) inferUnaryExpressionType(unary *ast.UnaryExpression) *Type {
+	argType := ti.InferType(unary.Argument)
+
+	switch unary.Operator {
+	case "await":
+		// Unwrap Promise<T> -> T
+		if argType.Name == "Promise" && len(argType.TypeParameters) > 0 {
+			return argType.TypeParameters[0]
+		}
+		// If it's not a promise, await returns the value as is
+		return argType
+	case "typeof":
+		return String
+	case "!":
+		return Boolean
+	case "-", "+", "++", "--":
+		return Number
+	case "delete":
+		return Boolean
+	case "void":
+		return Undefined
 	default:
 		return Unknown
 	}

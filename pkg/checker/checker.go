@@ -1978,6 +1978,7 @@ func (tc *TypeChecker) isAssignableToUncached(sourceType, targetType *types.Type
 	if targetType.Kind == types.AnyType || sourceType.Kind == types.AnyType {
 		return true
 	}
+
 	if targetType.Kind == types.UnknownType {
 		return true
 	}
@@ -2056,23 +2057,6 @@ func (tc *TypeChecker) isAssignableToUncached(sourceType, targetType *types.Type
 			if sourceType.Kind == types.ObjectType || sourceType.Kind == types.ArrayType || sourceType.Kind == types.FunctionType {
 				return true
 			}
-		}
-
-		// Also accept if target is a utility type (Omit, Pick, Partial, etc.) or generic type (T, K, etc.)
-		// These might not have resolved properties due to incomplete generic resolution
-		utilityTypes := []string{"Omit", "Pick", "Partial", "Required", "Record", "Readonly", "Mapped", "Parameters", "ReturnType"}
-		for _, ut := range utilityTypes {
-			if targetType.Name == ut || strings.HasPrefix(targetType.Name, ut+"<") {
-				if sourceType.Kind == types.ObjectType {
-					return true
-				}
-			}
-		}
-
-		// Accept if target is Promise (we don't fully resolve async return types yet)
-		if targetType.Name == "Promise" || strings.HasPrefix(targetType.Name, "Promise<") {
-			// Allow any type to be assigned to Promise for now
-			return true
 		}
 
 		// Accept if target looks like a generic type parameter (T, K, U, V, R, P, etc.)
@@ -2325,11 +2309,14 @@ func (tc *TypeChecker) isObjectAssignable(sourceType, targetType *types.Type) bo
 				continue
 			}
 			// Required property missing in source
+			fmt.Printf("DEBUG: isObjectAssignable missing prop %s\n", propName)
 			return false
 		}
 
 		// Check if the property types are compatible
+		fmt.Printf("DEBUG: isObjectAssignable checking prop %s: source=%s target=%s\n", propName, sourcePropType.String(), targetPropType.String())
 		if !tc.isAssignableTo(sourcePropType, targetPropType) {
+			fmt.Printf("DEBUG: isObjectAssignable prop mismatch %s\n", propName)
 			return false
 		}
 	}
@@ -2617,7 +2604,9 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 
 				// Extract keys from literal type or union of literal types
 				keys := tc.extractKeysFromType(keysType)
+
 				for _, key := range keys {
+
 					if propType, exists := baseType.Properties[key]; exists {
 						pickedProps[key] = propType
 					}
@@ -2684,6 +2673,43 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 			}
 
 			return objType
+		}
+
+		// Handle Readonly<T> utility type - makes all properties readonly
+		if t.Name == "Readonly" && len(t.TypeArguments) == 1 {
+			baseType := tc.convertTypeNode(t.TypeArguments[0])
+			if baseType != nil && baseType.Kind == types.ObjectType {
+				readonlyProps := make(map[string]*types.Type)
+				for propName, propType := range baseType.Properties {
+					// Create a copy of the property type and mark it as readonly
+					newPropType := *propType
+					newPropType.IsReadonly = true
+					readonlyProps[propName] = &newPropType
+				}
+				result := types.NewObjectType("Readonly", readonlyProps)
+				result.IsReadonly = true
+				return result
+			}
+		}
+
+		// Handle Parameters<T> utility type - extracts function parameter types as tuple
+		if t.Name == "Parameters" && len(t.TypeArguments) == 1 {
+			funcType := tc.convertTypeNode(t.TypeArguments[0])
+
+			if funcType != nil && funcType.Kind == types.FunctionType {
+				// Return a tuple type of the parameter types
+				if funcType.Parameters != nil && len(funcType.Parameters) > 0 {
+					return &types.Type{
+						Kind:  types.TupleType,
+						Types: funcType.Parameters,
+					}
+				}
+				// If no parameters, return empty tuple
+				return &types.Type{
+					Kind:  types.TupleType,
+					Types: []*types.Type{},
+				}
+			}
 		}
 
 		// Handle keyof operator (parsed as TypeReference with name starting with "keyof ")
@@ -3076,6 +3102,7 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 				if m.Optional {
 					propType = types.NewUnionType([]*types.Type{propType, types.Undefined})
 				}
+
 				properties[m.Key.Name] = propType
 			case *ast.IndexSignature:
 				valueType := tc.convertTypeNode(m.ValueType)
@@ -3383,6 +3410,10 @@ func (tc *TypeChecker) extractKeysFromType(t *types.Type) []string {
 	}
 	if t.Kind == types.LiteralType {
 		if str, ok := t.Value.(string); ok {
+			// Strip surrounding quotes if present (parser may include them)
+			if len(str) >= 2 && ((str[0] == '"' && str[len(str)-1] == '"') || (str[0] == '\'' && str[len(str)-1] == '\'')) {
+				str = str[1 : len(str)-1]
+			}
 			return []string{str}
 		}
 	}
@@ -3391,6 +3422,10 @@ func (tc *TypeChecker) extractKeysFromType(t *types.Type) []string {
 		for _, sub := range t.Types {
 			if sub.Kind == types.LiteralType {
 				if str, ok := sub.Value.(string); ok {
+					// Strip surrounding quotes if present
+					if len(str) >= 2 && ((str[0] == '"' && str[len(str)-1] == '"') || (str[0] == '\'' && str[len(str)-1] == '\'')) {
+						str = str[1 : len(str)-1]
+					}
 					keys = append(keys, str)
 				}
 			}
