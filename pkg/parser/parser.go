@@ -4723,27 +4723,88 @@ func (p *parser) parseTypeAnnotationPrimary() (ast.TypeNode, error) {
 		}
 
 		if isFunctionType {
-			// Parse as function type - for now just skip to =>
+			// Parse as function type: (param1: Type1, param2: Type2) => ReturnType
 			p.advance() // consume (
-			depth := 1
-			for depth > 0 && !p.isAtEnd() {
-				if p.match("(") {
-					depth++
-				} else if p.match(")") {
-					depth--
-				}
-				p.advance()
-			}
 			p.skipWhitespaceAndComments()
-			// Skip => and return type
-			if p.match("=") && p.peek(1) == ">" {
-				p.advanceString(2)
+
+			// Parse parameters
+			var params []*ast.Parameter
+			for !p.match(")") && !p.isAtEnd() {
+				paramStart := p.currentPos()
+
+				// Check for rest parameter
+				isRest := false
+				if p.match(".") && p.peek(1) == "." && p.peek(2) == "." {
+					p.advanceString(3)
+					p.skipWhitespaceAndComments()
+					isRest = true
+				}
+
+				// Parse parameter name
+				paramName, err := p.parseIdentifier()
+				if err != nil {
+					return nil, err
+				}
+
 				p.skipWhitespaceAndComments()
-				p.skipTypeAnnotation()
+
+				// Check for optional marker
+				optional := false
+				if p.match("?") {
+					optional = true
+					p.advance()
+					p.skipWhitespaceAndComments()
+				}
+
+				// Parse type annotation
+				var paramType ast.TypeNode
+				if p.match(":") {
+					p.advance()
+					p.skipWhitespaceAndComments()
+					paramType, err = p.parseTypeAnnotationFull()
+					if err != nil {
+						return nil, err
+					}
+				}
+
+				params = append(params, &ast.Parameter{
+					ID:        paramName,
+					ParamType: paramType,
+					Optional:  optional,
+					Rest:      isRest,
+					Position:  paramStart,
+					EndPos:    p.currentPos(),
+				})
+
+				p.skipWhitespaceAndComments()
+				if p.match(",") {
+					p.advance()
+					p.skipWhitespaceAndComments()
+				}
 			}
-			// Return placeholder type
-			return &ast.TypeReference{
-				Name:     "Function",
+
+			if !p.match(")") {
+				return nil, fmt.Errorf("expected ')' after function parameters")
+			}
+			p.advance()
+			p.skipWhitespaceAndComments()
+
+			// Expect =>
+			if !p.match("=") || p.peek(1) != ">" {
+				return nil, fmt.Errorf("expected '=>' in function type")
+			}
+			p.advanceString(2)
+			p.skipWhitespaceAndComments()
+
+			// Parse return type
+			returnType, err := p.parseTypeAnnotationFull()
+			if err != nil {
+				return nil, err
+			}
+
+			return &ast.FunctionType{
+				Params:   params,
+				Return:   returnType,
 				Position: startPos,
 				EndPos:   p.currentPos(),
 			}, nil

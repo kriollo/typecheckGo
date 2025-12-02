@@ -371,7 +371,13 @@ func (tc *TypeChecker) checkTypeAliasDeclaration(decl *ast.TypeAliasDeclaration,
 		// Also skip TypeQuery (typeof) as it might depend on variables not yet checked.
 		if len(decl.TypeParameters) == 0 {
 			if _, isTypeQuery := decl.TypeAnnotation.(*ast.TypeQuery); !isTypeQuery {
+				if typeRef, ok := decl.TypeAnnotation.(*ast.TypeReference); ok {
+					fmt.Printf("DEBUG: Caching type alias '%s', TypeAnnotation=*ast.TypeReference (Name='%s')\n", decl.ID.Name, typeRef.Name)
+				} else {
+					fmt.Printf("DEBUG: Caching type alias '%s', TypeAnnotation=%T\n", decl.ID.Name, decl.TypeAnnotation)
+				}
 				resolvedType := tc.convertTypeNode(decl.TypeAnnotation)
+				fmt.Printf("DEBUG: Type alias '%s' cached as Kind=%s\n", decl.ID.Name, resolvedType.Kind)
 				tc.typeAliasCache[decl.ID.Name] = resolvedType
 			}
 		}
@@ -607,10 +613,10 @@ func (tc *TypeChecker) checkEnumDeclaration(decl *ast.EnumDeclaration, filename 
 	if decl.Name != nil {
 		// Create properties map for the enum object
 		properties := make(map[string]*types.Type)
-		
+
 		// Create the enum type
 		enumType := types.NewObjectType(decl.Name.Name, properties)
-		
+
 		// Populate properties with the enum type itself (simplification)
 		// In TypeScript, enum members are of type Enum.Member, which is a subtype of Enum
 		for _, member := range decl.Members {
@@ -622,7 +628,7 @@ func (tc *TypeChecker) checkEnumDeclaration(decl *ast.EnumDeclaration, filename 
 
 		// Register as a type (for 'var s: Status')
 		tc.typeAliasCache[decl.Name.Name] = enumType
-		
+
 		// Register as a value (for 'Status.Active')
 		// Enums are real objects at runtime
 		tc.varTypeCache[decl.Name.Name] = enumType

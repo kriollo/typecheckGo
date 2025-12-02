@@ -2710,6 +2710,7 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 					Types: []*types.Type{},
 				}
 			}
+
 		}
 
 		// Handle keyof operator (parsed as TypeReference with name starting with "keyof ")
@@ -2754,7 +2755,9 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 					if aliasDecl, ok := symbol.Node.(*ast.TypeAliasDeclaration); ok {
 						// Resolve lazily - this handles cases like 'typeof' where the type
 						// depends on variables that might not have been checked during the first pass
+						fmt.Printf("DEBUG: Resolving type alias '%s', TypeAnnotation=%T\n", t.Name, aliasDecl.TypeAnnotation)
 						resolvedType := tc.convertTypeNode(aliasDecl.TypeAnnotation)
+						fmt.Printf("DEBUG: Type alias '%s' resolved to Kind=%s\n", t.Name, resolvedType.Kind)
 						if debugParserEnabled {
 							fmt.Fprintf(os.Stderr, "DEBUG: Resolved type alias '%s': Kind=%v, Name=%s, Properties=%d\n",
 								t.Name, resolvedType.Kind, resolvedType.Name, len(resolvedType.Properties))
