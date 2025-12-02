@@ -2426,6 +2426,34 @@ func (tc *TypeChecker) checkNewExpression(expr *ast.NewExpression, filename stri
 					tc.addError(filename, expr.Pos().Line, expr.Pos().Column, fmt.Sprintf("Cannot create an instance of an abstract class '%s'.", id.Name), "TS2511", "error")
 				}
 
+				// Check if class has only static members (Utility Class pattern)
+				hasInstanceMembers := false
+				hasStaticMembers := false
+				hasMembers := false
+
+				for _, member := range classDecl.Body {
+					hasMembers = true
+					switch m := member.(type) {
+					case *ast.MethodDefinition:
+						if m.Static {
+							hasStaticMembers = true
+						} else if m.Kind != "constructor" {
+							// Constructor doesn't count as instance member for this check
+							hasInstanceMembers = true
+						}
+					case *ast.PropertyDefinition:
+						if m.Static {
+							hasStaticMembers = true
+						} else {
+							hasInstanceMembers = true
+						}
+					}
+				}
+
+				if hasMembers && hasStaticMembers && !hasInstanceMembers {
+					tc.addError(filename, expr.Pos().Line, expr.Pos().Column, fmt.Sprintf("Class '%s' only has static members and should not be instantiated.", id.Name), "TS2099", "error")
+				}
+
 				// Find the constructor method
 				for _, member := range classDecl.Body {
 					if method, ok := member.(*ast.MethodDefinition); ok {
