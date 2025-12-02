@@ -174,7 +174,7 @@ func (p *parser) parseTypeAnnotationUnary() (ast.TypeNode, error) {
 	}
 
 	// Check for array type suffix [] or indexed access type: T[K]
-	if p.match("[") {
+	for p.match("[") {
 		p.advance()
 		p.skipWhitespaceAndComments()
 
@@ -192,14 +192,15 @@ func (p *parser) parseTypeAnnotationUnary() (ast.TypeNode, error) {
 			}
 
 			if isReadonly {
-				return &ast.TypeReference{
+				firstType = &ast.TypeReference{
 					Name:          "readonly",
 					TypeArguments: []ast.TypeNode{arrayType},
 					Position:      startPos,
 					EndPos:        p.currentPos(),
-				}, nil
+				}
+			} else {
+				firstType = arrayType
 			}
-			return arrayType, nil
 		} else {
 			// Indexed access type T[K]
 			indexType, err := p.parseTypeAnnotationFull()
@@ -223,14 +224,15 @@ func (p *parser) parseTypeAnnotationUnary() (ast.TypeNode, error) {
 			}
 
 			if isReadonly {
-				return &ast.TypeReference{
+				firstType = &ast.TypeReference{
 					Name:          "readonly",
 					TypeArguments: []ast.TypeNode{res},
 					Position:      startPos,
 					EndPos:        p.currentPos(),
-				}, nil
+				}
+			} else {
+				firstType = res
 			}
-			return res, nil
 		}
 	}
 

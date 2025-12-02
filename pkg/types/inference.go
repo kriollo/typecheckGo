@@ -410,7 +410,7 @@ func (ti *TypeInferencer) inferArrayType(arr *ast.ArrayExpression) *Type {
 	}
 	// Si los tipos son homogéneos, devuelve ArrayType; si son heterogéneos, TupleType
 	if isHomogeneous {
-		// fmt.Printf("DEBUG: inferArrayType returning ArrayType: %s[]\n", firstType.String())
+		// fmt.Fprintf(os.Stderr, "DEBUG: inferArrayType returning ArrayType: %s[]\n", firstType.String())
 		return NewArrayType(firstType)
 	}
 	return &Type{Kind: TupleType, Types: elementTypes}
