@@ -5203,10 +5203,23 @@ func (p *parser) parseClassMember() (ast.ClassMember, error) {
 
 	p.skipWhitespaceAndComments()
 
+	// Check for get/set accessors
+	kind := "method"
+	if (memberName.Name == "get" || memberName.Name == "set") && p.matchIdentifier() {
+		kind = memberName.Name
+		memberName, err = p.parseIdentifier()
+		if err != nil {
+			return nil, err
+		}
+		p.skipWhitespaceAndComments()
+	} else if memberName.Name == "constructor" {
+		kind = "constructor"
+	}
+
 	// Check if it's a method (has parentheses) or property
 	if p.match("(") {
 		// It's a method
-		return p.parseMethodDefinition(memberName, accessModifier, isStatic, isAsync, isAbstract, startPos)
+		return p.parseMethodDefinition(memberName, accessModifier, isStatic, isAsync, isAbstract, kind, startPos)
 	} else {
 		// It's a property
 		// Abstract properties are also possible: abstract prop: Type;
@@ -5215,7 +5228,7 @@ func (p *parser) parseClassMember() (ast.ClassMember, error) {
 }
 
 // parseMethodDefinition parses a method definition
-func (p *parser) parseMethodDefinition(name *ast.Identifier, accessModifier string, isStatic bool, isAsync bool, isAbstract bool, startPos ast.Position) (*ast.MethodDefinition, error) {
+func (p *parser) parseMethodDefinition(name *ast.Identifier, accessModifier string, isStatic bool, isAsync bool, isAbstract bool, kind string, startPos ast.Position) (*ast.MethodDefinition, error) {
 	// Parse parameters
 	p.advance() // consume '('
 	p.skipWhitespaceAndComments()
@@ -5277,8 +5290,7 @@ func (p *parser) parseMethodDefinition(name *ast.Identifier, accessModifier stri
 	}
 
 	// Determine method kind
-	kind := "method"
-	if name.Name == "constructor" {
+	if kind == "method" && name.Name == "constructor" {
 		kind = "constructor"
 	}
 

@@ -514,9 +514,15 @@ func (tc *TypeChecker) checkClassDeclaration(decl *ast.ClassDeclaration, filenam
 								if methodNode.Value.ReturnType != nil {
 									methodReturnType = tc.convertTypeNode(methodNode.Value.ReturnType)
 								} else {
-									// Skip validation if no explicit return type
-									// TODO: Implement proper return type inference from method body
-									continue
+									// Infer return type from body if not explicitly declared
+									if methodNode.Value.Body != nil {
+										methodReturnType = tc.inferencer.InferReturnTypeFromBlock(methodNode.Value.Body)
+									}
+
+									// If still nil (couldn't infer), skip validation
+									if methodReturnType == nil {
+										continue
+									}
 								}
 
 								// Validate return type compatibility
@@ -550,6 +556,51 @@ func (tc *TypeChecker) checkClassDeclaration(decl *ast.ClassDeclaration, filenam
 							}
 						}
 					}
+				}
+			}
+		}
+	}
+
+	// Validate getter/setter pairs have compatible types
+	getters := make(map[string]*ast.MethodDefinition)
+	setters := make(map[string]*ast.MethodDefinition)
+
+	for _, member := range decl.Body {
+		if method, ok := member.(*ast.MethodDefinition); ok {
+			if method.Key != nil {
+				propName := method.Key.Name
+				if method.Kind == "get" {
+					getters[propName] = method
+				} else if method.Kind == "set" {
+					setters[propName] = method
+				}
+			}
+		}
+	}
+
+	// Check each getter/setter pair
+	for propName, getter := range getters {
+		if setter, hasSetter := setters[propName]; hasSetter {
+			// Get getter return type
+			var getterReturnType *types.Type
+			if getter.Value != nil && getter.Value.ReturnType != nil {
+				getterReturnType = tc.convertTypeNode(getter.Value.ReturnType)
+			}
+
+			// Get setter parameter type
+			var setterParamType *types.Type
+			if setter.Value != nil && len(setter.Value.Params) > 0 {
+				if setter.Value.Params[0].ParamType != nil {
+					setterParamType = tc.convertTypeNode(setter.Value.Params[0].ParamType)
+				}
+			}
+
+			// Validate compatibility: setter param type should be assignable to getter return type
+			if getterReturnType != nil && setterParamType != nil {
+				if !tc.isAssignableTo(setterParamType, getterReturnType) && !tc.isAssignableTo(getterReturnType, setterParamType) {
+					msg := fmt.Sprintf("Getter and setter for '%s' have incompatible types. Getter returns '%s' but setter accepts '%s'.",
+						propName, getterReturnType.String(), setterParamType.String())
+					tc.addError(filename, setter.Key.Pos().Line, setter.Key.Pos().Column, msg, "TS2380", "error")
 				}
 			}
 		}
