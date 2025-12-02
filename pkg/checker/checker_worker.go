@@ -40,5 +40,15 @@ func NewForWorker(resolver *modules.ModuleResolver, symbolTable *symbols.SymbolT
 	// Note: Types are NOT loaded here to avoid redundant I/O in worker threads.
 	// Call CopyGlobalTypesFrom() to share types from the main checker.
 
+	// Initialize validators
+	tc.genericInferencer = NewGenericInferencer(tc)
+	tc.arrayValidator = NewArrayValidator(tc)
+	tc.controlFlow = NewControlFlowAnalyzer(tc)
+	tc.overloadValidator = NewOverloadValidator(tc)
+	tc.staticValidator = NewStaticMemberValidator(tc)
+	tc.restValidator = NewRestParameterValidator(tc)
+	tc.typeNarrowing = NewTypeNarrowing(tc)
+	tc.controlFlowNarrowing = NewControlFlowNarrowing(tc)
+
 	return tc
 }

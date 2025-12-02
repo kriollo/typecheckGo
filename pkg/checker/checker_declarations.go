@@ -605,8 +605,27 @@ func (tc *TypeChecker) checkEnumDeclaration(decl *ast.EnumDeclaration, filename 
 
 	// Create enum type and cache it
 	if decl.Name != nil {
-		enumType := types.NewObjectType(decl.Name.Name, nil)
+		// Create properties map for the enum object
+		properties := make(map[string]*types.Type)
+		
+		// Create the enum type
+		enumType := types.NewObjectType(decl.Name.Name, properties)
+		
+		// Populate properties with the enum type itself (simplification)
+		// In TypeScript, enum members are of type Enum.Member, which is a subtype of Enum
+		for _, member := range decl.Members {
+			if member.Name != nil {
+				// Each member is of type Enum
+				properties[member.Name.Name] = enumType
+			}
+		}
+
+		// Register as a type (for 'var s: Status')
 		tc.typeAliasCache[decl.Name.Name] = enumType
+		
+		// Register as a value (for 'Status.Active')
+		// Enums are real objects at runtime
+		tc.varTypeCache[decl.Name.Name] = enumType
 	}
 }
 

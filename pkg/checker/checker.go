@@ -41,12 +41,14 @@ type TypeChecker struct {
 	profiler           *PerformanceProfiler     // Performance profiler for initialization
 	conversionStack    map[ast.TypeNode]bool    // Track types being converted to prevent infinite recursion
 	// Advanced validators
-	genericInferencer *GenericInferencer
-	arrayValidator    *ArrayValidator
-	controlFlow       *ControlFlowAnalyzer
-	overloadValidator *OverloadValidator
-	staticValidator   *StaticMemberValidator
-	restValidator     *RestParameterValidator
+	genericInferencer    *GenericInferencer
+	arrayValidator       *ArrayValidator
+	controlFlow          *ControlFlowAnalyzer
+	overloadValidator    *OverloadValidator
+	staticValidator      *StaticMemberValidator
+	restValidator        *RestParameterValidator
+	typeNarrowing        *TypeNarrowing
+	controlFlowNarrowing *ControlFlowNarrowing
 }
 
 // CompilerConfig holds the compiler options for type checking
@@ -117,6 +119,8 @@ func New() *TypeChecker {
 	tc.overloadValidator = NewOverloadValidator(tc)
 	tc.staticValidator = NewStaticMemberValidator(tc)
 	tc.restValidator = NewRestParameterValidator(tc)
+	tc.typeNarrowing = NewTypeNarrowing(tc)
+	tc.controlFlowNarrowing = NewControlFlowNarrowing(tc)
 
 	return tc
 }
@@ -202,6 +206,16 @@ func NewWithModuleResolver(rootDir string) *TypeChecker {
 		tc.profiler.EndPhase("Node Modules Loading")
 	}
 
+	// Initialize validators
+	tc.genericInferencer = NewGenericInferencer(tc)
+	tc.arrayValidator = NewArrayValidator(tc)
+	tc.controlFlow = NewControlFlowAnalyzer(tc)
+	tc.overloadValidator = NewOverloadValidator(tc)
+	tc.staticValidator = NewStaticMemberValidator(tc)
+	tc.restValidator = NewRestParameterValidator(tc)
+	tc.typeNarrowing = NewTypeNarrowing(tc)
+	tc.controlFlowNarrowing = NewControlFlowNarrowing(tc)
+
 	return tc
 }
 
@@ -238,6 +252,16 @@ func NewWithSharedModuleResolver(resolver *modules.ModuleResolver) *TypeChecker 
 
 	// Note: Types are NOT loaded here to avoid redundant I/O in worker threads.
 	// Call CopyGlobalTypesFrom() to share types from the main checker.
+
+	// Initialize validators
+	tc.genericInferencer = NewGenericInferencer(tc)
+	tc.arrayValidator = NewArrayValidator(tc)
+	tc.controlFlow = NewControlFlowAnalyzer(tc)
+	tc.overloadValidator = NewOverloadValidator(tc)
+	tc.staticValidator = NewStaticMemberValidator(tc)
+	tc.restValidator = NewRestParameterValidator(tc)
+	tc.typeNarrowing = NewTypeNarrowing(tc)
+	tc.controlFlowNarrowing = NewControlFlowNarrowing(tc)
 
 	return tc
 }
@@ -1940,6 +1964,11 @@ func (tc *TypeChecker) isAssignableTo(sourceType, targetType *types.Type) bool {
 
 // isAssignableToUncached performs the actual assignability check without caching
 func (tc *TypeChecker) isAssignableToUncached(sourceType, targetType *types.Type) bool {
+	// Optimization: Pointer equality check
+	if sourceType == targetType {
+		return true
+	}
+
 	// Check enum assignability first (Fix 4 & 5)
 	if result, handled := isEnumAssignable(tc, sourceType, targetType); handled {
 		return result

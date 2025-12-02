@@ -151,7 +151,7 @@ func (tc *TypeChecker) checkIfStatement(stmt *ast.IfStatement, filename string) 
 	// Check the test condition
 	tc.checkExpression(stmt.Test, filename)
 
-	// Detect type guards
+	// Detect type guards (legacy support for simple guards)
 	var typeGuardVars []string
 
 	var detectGuard func(expr ast.Expression)
@@ -218,24 +218,14 @@ func (tc *TypeChecker) checkIfStatement(stmt *ast.IfStatement, filename string) 
 		originalScope := tc.symbolTable.Current
 		tc.symbolTable.Current = ifScope
 
-		// Check the consequent (then branch)
-		tc.checkStatement(stmt.Consequent, filename)
-
-		// Check the alternate (else branch) if present
-		if stmt.Alternate != nil {
-			tc.checkStatement(stmt.Alternate, filename)
-		}
+		// Use control flow narrowing to analyze the if statement
+		tc.controlFlowNarrowing.AnalyzeIfStatementWithControlFlow(stmt, stmt.Test, filename)
 
 		// Restore the original scope
 		tc.symbolTable.Current = originalScope
 	} else {
-		// Fallback: check without scope change
-		tc.checkStatement(stmt.Consequent, filename)
-
-		// Check the alternate (else branch) if present
-		if stmt.Alternate != nil {
-			tc.checkStatement(stmt.Alternate, filename)
-		}
+		// Fallback: check without scope change but with control flow narrowing
+		tc.controlFlowNarrowing.AnalyzeIfStatementWithControlFlow(stmt, stmt.Test, filename)
 	}
 
 	// Clean up type guard after if block

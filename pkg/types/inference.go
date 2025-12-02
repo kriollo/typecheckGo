@@ -164,7 +164,6 @@ func (ti *TypeInferencer) inferMemberExpressionType(expr *ast.MemberExpression) 
 			// TODO: Buscar en la cadena de prototipos o tipos heredados
 		}
 	}
-
 	// Handle primitive types properties
 	if objType.Kind == StringType {
 		if propName == "length" {

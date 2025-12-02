@@ -425,10 +425,18 @@ func (t *Type) String() string {
 		return "..." + t.ElementType.String()
 
 	case ObjectType:
-		if t.Name != "" {
+		if t.Name != "" && t.Name != "object" {
 			return t.Name
 		}
-		return "object"
+		// Anonymous object, print properties
+		if len(t.Properties) == 0 {
+			return "{}"
+		}
+		var props []string
+		for name, typ := range t.Properties {
+			props = append(props, fmt.Sprintf("%s: %s", name, typ.String()))
+		}
+		return fmt.Sprintf("{ %s }", strings.Join(props, "; "))
 
 	default:
 		if t.Name != "" {
