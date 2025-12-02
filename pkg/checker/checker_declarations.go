@@ -371,13 +371,7 @@ func (tc *TypeChecker) checkTypeAliasDeclaration(decl *ast.TypeAliasDeclaration,
 		// Also skip TypeQuery (typeof) as it might depend on variables not yet checked.
 		if len(decl.TypeParameters) == 0 {
 			if _, isTypeQuery := decl.TypeAnnotation.(*ast.TypeQuery); !isTypeQuery {
-				if typeRef, ok := decl.TypeAnnotation.(*ast.TypeReference); ok {
-					fmt.Printf("DEBUG: Caching type alias '%s', TypeAnnotation=*ast.TypeReference (Name='%s')\n", decl.ID.Name, typeRef.Name)
-				} else {
-					fmt.Printf("DEBUG: Caching type alias '%s', TypeAnnotation=%T\n", decl.ID.Name, decl.TypeAnnotation)
-				}
 				resolvedType := tc.convertTypeNode(decl.TypeAnnotation)
-				fmt.Printf("DEBUG: Type alias '%s' cached as Kind=%s\n", decl.ID.Name, resolvedType.Kind)
 				tc.typeAliasCache[decl.ID.Name] = resolvedType
 			}
 		}
