@@ -4269,14 +4269,16 @@ func (p *parser) parseArrowFunction() (*ast.ArrowFunctionExpression, error) {
 	p.skipWhitespaceAndComments()
 
 	// Check for return type annotation (: Type)
+	var returnType ast.TypeNode
 	if p.match(":") {
 		p.advance()
 		p.skipWhitespaceAndComments()
-		// Parse and skip the return type annotation for now
-		_, err := p.parseTypeAnnotationFull()
+		// Parse the return type annotation
+		rt, err := p.parseTypeAnnotationFull()
 		if err != nil {
 			return nil, err
 		}
+		returnType = rt
 		p.skipWhitespaceAndComments()
 	}
 
@@ -4308,11 +4310,12 @@ func (p *parser) parseArrowFunction() (*ast.ArrowFunctionExpression, error) {
 	}
 
 	return &ast.ArrowFunctionExpression{
-		Params:   params,
-		Body:     body,
-		Async:    isAsync,
-		Position: startPos,
-		EndPos:   p.currentPos(),
+		Params:     params,
+		Body:       body,
+		ReturnType: returnType,
+		Async:      isAsync,
+		Position:   startPos,
+		EndPos:     p.currentPos(),
 	}, nil
 }
 

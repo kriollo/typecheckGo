@@ -592,11 +592,12 @@ func (s *SpreadElement) exprNode()           {}
 
 // ArrowFunctionExpression represents an arrow function (x) => expr
 type ArrowFunctionExpression struct {
-	Params   []*Parameter
-	Body     Node // Can be Expression or BlockStatement
-	Async    bool
-	Position Position
-	EndPos   Position
+	Params     []*Parameter
+	Body       Node // Can be Expression or BlockStatement
+	ReturnType TypeNode
+	Async      bool
+	Position   Position
+	EndPos     Position
 }
 
 func (a *ArrowFunctionExpression) Type() string  { return "ArrowFunctionExpression" }

@@ -473,8 +473,13 @@ func (ti *TypeInferencer) inferArrowFunctionType(arrow *ast.ArrowFunctionExpress
 		}
 	}
 
-	// Infer return type by analyzing the function body
-	returnType := ti.inferArrowFunctionReturnType(arrow)
+	// Use return type annotation if available, otherwise infer from body
+	var returnType *Type
+	if arrow.ReturnType != nil {
+		returnType = ti.convertTypeNode(arrow.ReturnType)
+	} else {
+		returnType = ti.inferArrowFunctionReturnType(arrow)
+	}
 
 	// Restore original types
 	for _, param := range arrow.Params {
