@@ -1175,28 +1175,21 @@ func (tc *TypeChecker) checkMemberExpression(member *ast.MemberExpression, filen
 	// Get the type of the object
 	objectType := tc.getExpressionType(member.Object)
 
-	// Check if trying to access property on unknown type (TS18046/TS2571)
-	// NOTE: This check is intentionally conservative to avoid false positives
-	// We only report if the variable is explicitly typed as unknown AND
-	// we're not inside a type guard (typeof, instanceof, etc.)
-	// Full type narrowing support would require control flow analysis
+	// Check if trying to access property on unknown type (TS18046)
+	// Report error when accessing properties on unknown types without type narrowing
 	if objectType.Kind == types.UnknownType {
 		if !member.Computed {
 			if objId, ok := member.Object.(*ast.Identifier); ok {
-				// Check if variable is in a type guard (basic heuristic: check if it's in typeGuards map)
+				// Check if variable is in a type guard (check if it's in typeGuards map)
 				if tc.typeGuards[objId.Name] {
-					// Variable is guarded, allow access
+					// Variable is guarded by type narrowing, allow access
 					return
 				}
 
-				// Only report for catch parameters or explicitly unknown variables
-				// Skip if it's inside a conditional (basic heuristic)
-				if symbol, exists := tc.symbolTable.ResolveSymbol(objId.Name); exists {
-					// For now, be conservative and only report for catch parameters
-					// Detecting catch parameters would require tracking their origin
-					// For now, skip this validation to avoid false positives
-					_ = symbol // Keep the check here for future enhancements
-				}
+				// Report TS18046: accessing property on unknown type
+				tc.addError(filename, member.Pos().Line, member.Pos().Column,
+					fmt.Sprintf("'%s' is of type 'unknown'.", objId.Name),
+					"TS18046", "error")
 			}
 		}
 	}
