@@ -431,10 +431,12 @@ func (tc *TypeChecker) checkClassDeclaration(decl *ast.ClassDeclaration, filenam
 	for _, member := range decl.Body {
 		switch m := member.(type) {
 		case *ast.MethodDefinition:
+			fmt.Printf("DEBUG: Visiting method %s in class %s\n", m.Key.Name, decl.ID.Name)
 			// Check method body
 			if m.Value != nil && m.Value.Body != nil {
 				// Find method scope
 				methodScope := tc.findScopeForNode(m)
+				fmt.Printf("DEBUG: methodScope for %s is %v\n", m.Key.Name, methodScope)
 				if methodScope != nil {
 					// Set current function for return type checking
 					previousFunction := tc.currentFunction
@@ -442,6 +444,17 @@ func (tc *TypeChecker) checkClassDeclaration(decl *ast.ClassDeclaration, filenam
 
 					// Enter method scope
 					tc.symbolTable.Current = methodScope
+
+					// Store parameter types in varTypeCache so they can be resolved in the method body
+					for _, param := range m.Value.Params {
+						if param.ID != nil && param.ParamType != nil {
+							paramType := tc.convertTypeNode(param.ParamType)
+							if paramType != nil {
+								tc.varTypeCache[param.ID.Name] = paramType
+								tc.typeCache[param.ID] = paramType
+							}
+						}
+					}
 
 					tc.checkBlockStatement(m.Value.Body, filename)
 

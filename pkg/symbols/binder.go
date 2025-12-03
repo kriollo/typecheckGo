@@ -869,6 +869,8 @@ func (b *Binder) bindClassDeclaration(decl *ast.ClassDeclaration) {
 		Level:   b.table.Current.Level + 1,
 		Node:    decl,
 	}
+	// Add to parent's children so it can be found by findScopeForNode
+	b.table.Current.Children = append(b.table.Current.Children, classScope)
 	b.table.Current = classScope
 
 	// Bind class members
@@ -893,6 +895,8 @@ func (b *Binder) bindClassDeclaration(decl *ast.ClassDeclaration) {
 					Level:   b.table.Current.Level + 1,
 					Node:    m,
 				}
+				// Add to parent's children so it can be found by findScopeForNode
+				b.table.Current.Children = append(b.table.Current.Children, methodScope)
 				b.table.Current = methodScope
 
 				// Add parameters to method scope
