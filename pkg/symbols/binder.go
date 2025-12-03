@@ -331,6 +331,10 @@ func (b *Binder) bindExpression(expr ast.Expression) {
 		// Bind the expression being checked
 		b.bindExpression(e.Expression)
 		return
+	case *ast.AsExpression:
+		// Bind the expression being asserted
+		b.bindExpression(e.Expression)
+		return
 	default:
 		// Unknown expression type
 		fmt.Printf("Warning: Unknown expression type: %T\n", expr)

@@ -462,10 +462,9 @@ func (ti *TypeInferencer) inferBinaryExpressionType(expr *ast.BinaryExpression) 
 		// Operadores de comparación siempre retornan boolean
 		return Boolean
 
-	case "&&", "||":
-		// Operadores lógicos retornan el tipo de uno de los operandos
-		// Por simplicidad, retornamos boolean
-		return Boolean
+	case "&&", "||", "??":
+		// Operadores lógicos retornan la unión de los tipos de los operandos
+		return NewUnionType([]*Type{leftType, rightType})
 
 	default:
 		return Unknown
