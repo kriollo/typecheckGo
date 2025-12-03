@@ -742,5 +742,20 @@ func (ti *TypeInferencer) inferObjectType(obj *ast.ObjectExpression) *Type {
 	}
 
 	// Create an anonymous object type with the inferred properties
-	return NewObjectType("", properties)
+	objType := NewObjectType("", properties)
+
+	// Update 'this' context for function properties
+	for _, propType := range properties {
+		if propType.Kind == FunctionType && propType.ThisType == nil {
+			// Create a new function type with the same properties but with 'ThisType' set
+			// We need to copy to avoid mutating shared types if any
+			// But here propType comes from InferType(p.Value), so it's likely a fresh type or one we can modify
+			// For safety, let's just set it if it's nil.
+			// However, since we are in Go and types are pointers, modifying it here might affect other usages if it was reused.
+			// But typically object literal values are fresh expressions.
+			propType.ThisType = objType
+		}
+	}
+
+	return objType
 }

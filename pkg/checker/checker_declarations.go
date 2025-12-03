@@ -431,6 +431,15 @@ func (tc *TypeChecker) checkClassDeclaration(decl *ast.ClassDeclaration, filenam
 		tc.symbolTable.Current = classScope
 	}
 
+	// Find constructor
+	var constructor *ast.MethodDefinition
+	for _, member := range decl.Body {
+		if m, ok := member.(*ast.MethodDefinition); ok && m.Kind == "constructor" {
+			constructor = m
+			break
+		}
+	}
+
 	// Check members first to populate typeCache
 	for _, member := range decl.Body {
 		switch m := member.(type) {
@@ -491,12 +500,19 @@ func (tc *TypeChecker) checkClassDeclaration(decl *ast.ClassDeclaration, filenam
 			} else if m.TypeAnnotation != nil && !m.Optional {
 				// Property has no initializer and is not optional - check strictPropertyInitialization
 				if tc.GetConfig().StrictPropertyInitialization {
-					// Check if it's initialized in constructor (not implemented yet, so we report error)
+					// Check if it's initialized in constructor
 					if m.Key != nil {
 						propName := m.Key.Name
 						if propName != "" {
-							msg := fmt.Sprintf("Property '%s' has no initializer and is not definitely assigned in the constructor.", propName)
-							tc.addError(filename, m.Key.Pos().Line, m.Key.Pos().Column, msg, "TS2564", "error")
+							isAssigned := false
+							if constructor != nil {
+								isAssigned = tc.isPropertyAssignedInConstructor(propName, constructor)
+							}
+
+							if !isAssigned {
+								msg := fmt.Sprintf("Property '%s' has no initializer and is not definitely assigned in the constructor.", propName)
+								tc.addError(filename, m.Key.Pos().Line, m.Key.Pos().Column, msg, "TS2564", "error")
+							}
 						}
 					}
 				}
@@ -801,4 +817,51 @@ func (tc *TypeChecker) checkNamespaceDeclaration(decl *ast.NamespaceDeclaration,
 		namespaceType := types.NewObjectType("typeof "+decl.Name.Name, namespaceMembers)
 		tc.varTypeCache[decl.Name.Name] = namespaceType
 	}
+}
+
+// isPropertyAssignedInConstructor checks if a property is assigned in the constructor
+func (tc *TypeChecker) isPropertyAssignedInConstructor(propName string, constructor *ast.MethodDefinition) bool {
+	if constructor == nil || constructor.Value == nil || constructor.Value.Body == nil {
+		return false
+	}
+	return tc.isAssignedInBlock(propName, constructor.Value.Body)
+}
+
+// isAssignedInBlock checks if a property is assigned in a block statement
+func (tc *TypeChecker) isAssignedInBlock(propName string, block *ast.BlockStatement) bool {
+	for _, stmt := range block.Body {
+		if exprStmt, ok := stmt.(*ast.ExpressionStatement); ok {
+			if assign, ok := exprStmt.Expression.(*ast.AssignmentExpression); ok {
+				if member, ok := assign.Left.(*ast.MemberExpression); ok {
+					if _, isThis := member.Object.(*ast.ThisExpression); isThis {
+						if id, ok := member.Property.(*ast.Identifier); ok && id.Name == propName {
+							return true
+						}
+					}
+				}
+			}
+		}
+		// Also check if statements, loops, etc. (simplified for now)
+		if ifStmt, ok := stmt.(*ast.IfStatement); ok {
+			// If assigned in both branches, it's definitely assigned
+			// For now, we'll be conservative and only check top-level assignments
+			// or if it's assigned in at least one branch (which is not strictly correct but better than nothing)
+			// A proper implementation requires control flow analysis
+			if consequent, ok := ifStmt.Consequent.(*ast.BlockStatement); ok {
+				if tc.isAssignedInBlock(propName, consequent) {
+					// If there's an else block, we need to check that too
+					if ifStmt.Alternate != nil {
+						if altBlock, ok := ifStmt.Alternate.(*ast.BlockStatement); ok {
+							if tc.isAssignedInBlock(propName, altBlock) {
+								return true
+							}
+						}
+					} else {
+						// No else block, so not definitely assigned
+					}
+				}
+			}
+		}
+	}
+	return false
 }

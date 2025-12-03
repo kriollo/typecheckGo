@@ -718,6 +718,27 @@ func (tc *TypeChecker) checkCallExpression(call *ast.CallExpression, filename st
 		tc.checkExpression(arg, filename)
 	}
 
+	// Check 'this' context compatibility
+	// calleeType is already available from earlier in the function
+	if calleeType.Kind == types.FunctionType && calleeType.ThisType != nil {
+		var actualThisType *types.Type
+
+		if member, ok := call.Callee.(*ast.MemberExpression); ok {
+			actualThisType = tc.getExpressionType(member.Object)
+		} else {
+			// Standalone call -> 'this' is void/undefined
+			actualThisType = types.Void
+		}
+
+		// If actualThisType is unknown/any, we might skip check or be lenient
+		if actualThisType.Kind != types.UnknownType && actualThisType.Kind != types.AnyType {
+			if !tc.isAssignableTo(actualThisType, calleeType.ThisType) {
+				msg := fmt.Sprintf("The 'this' context of type '%s' is not assignable to method's 'this' of type '%s'.", actualThisType.String(), calleeType.ThisType.String())
+				tc.addError(filename, call.Pos().Line, call.Pos().Column, msg, "TS2684", "error")
+			}
+		}
+	}
+
 	// Handle method calls (e.g., object.method(args))
 	if member, ok := call.Callee.(*ast.MemberExpression); ok {
 		// Check for static method calls
@@ -3112,15 +3133,31 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 		return types.NewObjectType(t.Name, nil)
 
 	case *ast.FunctionType:
-		paramTypes := make([]*types.Type, len(t.Params))
-		for i, param := range t.Params {
+		var paramTypes []*types.Type
+		var thisType *types.Type
+
+		for _, param := range t.Params {
+			// Check for 'this' parameter
+			if param.ID != nil && param.ID.Name == "this" {
+				if param.ParamType != nil {
+					thisType = tc.convertTypeNode(param.ParamType)
+				} else {
+					thisType = types.Any
+				}
+				continue // Don't add 'this' to regular parameters
+			}
+
 			if param.ParamType != nil {
-				paramTypes[i] = tc.convertTypeNode(param.ParamType)
+				paramTypes = append(paramTypes, tc.convertTypeNode(param.ParamType))
 			} else {
-				paramTypes[i] = types.Any
+				paramTypes = append(paramTypes, types.Any)
 			}
 		}
 		returnType := tc.convertTypeNode(t.Return)
+
+		if thisType != nil {
+			return types.NewFunctionTypeWithThis(paramTypes, returnType, thisType)
+		}
 		return types.NewFunctionType(paramTypes, returnType)
 
 	case *ast.ConditionalType:

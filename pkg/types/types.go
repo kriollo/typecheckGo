@@ -109,6 +109,7 @@ type Type struct {
 	CallSignatures []*Type     // Para interfaces con call signatures
 	IsFunction     bool        // Indica si el tipo es una función callable
 	IsReadonly     bool        // Indica si el tipo es readonly (para arrays y propiedades)
+	ThisType       *Type       // Tipo de 'this' para funciones
 
 	// Para mapped types: { [K in keyof T]: U }
 	TypeParameter *Type // K
@@ -173,6 +174,18 @@ func NewFunctionType(params []*Type, returnType *Type) *Type {
 		Kind:       FunctionType,
 		Parameters: params,
 		ReturnType: returnType,
+		IsFunction: true,
+	}
+}
+
+// NewFunctionTypeWithThis crea un tipo función con un tipo 'this' específico
+func NewFunctionTypeWithThis(params []*Type, returnType *Type, thisType *Type) *Type {
+	return &Type{
+		Kind:       FunctionType,
+		Parameters: params,
+		ReturnType: returnType,
+		IsFunction: true,
+		ThisType:   thisType,
 	}
 }
 
@@ -182,6 +195,7 @@ func NewGenericFunctionType(typeParams []*Type, params []*Type, returnType *Type
 		TypeParameters: typeParams,
 		Parameters:     params,
 		ReturnType:     returnType,
+		IsFunction:     true,
 	}
 }
 
