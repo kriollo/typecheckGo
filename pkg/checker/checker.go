@@ -1752,6 +1752,8 @@ func (tc *TypeChecker) processImportWithModule(importDecl *ast.ImportDeclaration
 	for name, symbol := range importedSymbols {
 		// Define the imported symbol in the current scope
 		newSymbol := tc.symbolTable.DefineSymbol(name, symbol.Type, symbol.Node, false)
+		// Update the symbol type in case it was already defined with a different type
+		newSymbol.Type = symbol.Type
 		newSymbol.IsFunction = symbol.IsFunction
 		newSymbol.Params = symbol.Params
 
