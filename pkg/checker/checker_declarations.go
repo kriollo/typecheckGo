@@ -741,4 +741,64 @@ func (tc *TypeChecker) checkNamespaceDeclaration(decl *ast.NamespaceDeclaration,
 			tc.checkStatement(stmt, filename)
 		}
 	}
+
+	// Collect exported members to create a namespace type
+	if decl.Name != nil {
+		namespaceMembers := make(map[string]*types.Type)
+
+		for _, stmt := range decl.Body {
+			// Check if statement is an export declaration
+			if exportDecl, ok := stmt.(*ast.ExportDeclaration); ok && exportDecl.Declaration != nil {
+				// Handle exported function
+				if funcDecl, ok := exportDecl.Declaration.(*ast.FunctionDeclaration); ok {
+					if funcDecl.ID != nil {
+						// Create function type
+						var paramTypes []*types.Type
+						for _, param := range funcDecl.Params {
+							if param.ParamType != nil {
+								paramTypes = append(paramTypes, tc.convertTypeNode(param.ParamType))
+							} else {
+								paramTypes = append(paramTypes, types.Any)
+							}
+						}
+						var returnType *types.Type
+						if funcDecl.ReturnType != nil {
+							returnType = tc.convertTypeNode(funcDecl.ReturnType)
+						} else {
+							returnType = types.Void
+						}
+						namespaceMembers[funcDecl.ID.Name] = types.NewFunctionType(paramTypes, returnType)
+					}
+				}
+				// Handle exported variable/const
+				if varDecl, ok := exportDecl.Declaration.(*ast.VariableDeclaration); ok {
+					for _, declarator := range varDecl.Decls {
+						if declarator.ID != nil {
+							var varType *types.Type
+							if declarator.TypeAnnotation != nil {
+								varType = tc.convertTypeNode(declarator.TypeAnnotation)
+							} else if declarator.Init != nil {
+								varType = tc.inferencer.InferType(declarator.Init)
+							} else {
+								varType = types.Any
+							}
+							namespaceMembers[declarator.ID.Name] = varType
+						}
+					}
+				}
+				// Handle exported class
+				if classDecl, ok := exportDecl.Declaration.(*ast.ClassDeclaration); ok {
+					if classDecl.ID != nil {
+						// For now, just mark it as an object type
+						// In a full implementation, we'd create a proper class type
+						namespaceMembers[classDecl.ID.Name] = types.NewObjectType(classDecl.ID.Name, nil)
+					}
+				}
+			}
+		}
+
+		// Create namespace type as an ObjectType with the exported members
+		namespaceType := types.NewObjectType("typeof "+decl.Name.Name, namespaceMembers)
+		tc.varTypeCache[decl.Name.Name] = namespaceType
+	}
 }
