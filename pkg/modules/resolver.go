@@ -99,6 +99,10 @@ type ExportInfo struct {
 	// Módulo fuente para re-exports
 	SourceModule string
 
+	// Nombre original en el módulo fuente (para re-exports)
+	// Por ejemplo: export { constant as renamedConstant } → OriginalName = "constant"
+	OriginalName string
+
 	// Cached inferred type
 	ResolvedType *types.Type
 }

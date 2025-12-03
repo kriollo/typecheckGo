@@ -87,10 +87,19 @@ func (a *ModuleAnalyzer) analyzeExportDeclaration(module *ResolvedModule, export
 		}
 
 		for _, spec := range export.Specifiers {
-			// Find the original declaration for this export
-			originalNode := a.findDeclaration(module, spec.Local.Name)
-			if originalNode == nil {
-				originalNode = export // Fallback to export node if not found
+			// For re-exports (with source module), we don't look for the declaration locally
+			// The import resolver will handle resolving the actual node from the source module
+			var originalNode ast.Node
+			if sourceModule == "" {
+				// Local export: find the original declaration in this module
+				originalNode = a.findDeclaration(module, spec.Local.Name)
+				if originalNode == nil {
+					originalNode = export // Fallback to export node if not found
+				}
+			} else {
+				// Re-export: use the export node as placeholder
+				// The actual node will be resolved by the import resolver
+				originalNode = export
 			}
 
 			module.Exports[spec.Exported.Name] = &ExportInfo{
@@ -98,8 +107,9 @@ func (a *ModuleAnalyzer) analyzeExportDeclaration(module *ResolvedModule, export
 				Type:         "named",
 				Node:         originalNode,
 				Position:     spec.Pos(),
-				IsReExport:   spec.Local.Name != spec.Exported.Name,
+				IsReExport:   sourceModule != "",
 				SourceModule: sourceModule,
+				OriginalName: spec.Local.Name, // Save the original name for re-export resolution
 			}
 		}
 		return nil

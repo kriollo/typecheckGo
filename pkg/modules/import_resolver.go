@@ -75,13 +75,30 @@ func (ir *ImportResolver) ResolveImport(importDecl *ast.ImportDeclaration) (map[
 		}
 
 		if export, exists := resolvedModule.Exports[spec.Imported.Name]; exists {
+			// If this is a re-export, resolve the original export from the source module
+			var finalExport *ExportInfo
+			var finalNode ast.Node
+
+			if export.IsReExport && export.SourceModule != "" {
+				// Resolve the re-export chain
+				finalExport = ir.resolveReExportChain(export, resolvedModule.AbsolutePath)
+				if finalExport != nil {
+					finalNode = finalExport.Node
+				} else {
+					finalNode = export.Node
+				}
+			} else {
+				finalExport = export
+				finalNode = export.Node
+			}
+
 			// Determine the symbol type based on the exported node
-			symbolType := ir.determineSymbolType(export.Node)
+			symbolType := ir.determineSymbolType(finalNode)
 
 			symbol := &symbols.Symbol{
 				Name:         spec.Local.Name,
 				Type:         symbolType,
-				Node:         export.Node,
+				Node:         finalNode,
 				DeclSpan:     export.Position,
 				IsFunction:   symbolType == symbols.FunctionSymbol,
 				ResolvedType: export.ResolvedType,
@@ -91,7 +108,7 @@ func (ir *ImportResolver) ResolveImport(importDecl *ast.ImportDeclaration) (map[
 			}
 
 			// If it's a function, extract parameter information
-			if funcDecl, ok := export.Node.(*ast.FunctionDeclaration); ok {
+			if funcDecl, ok := finalNode.(*ast.FunctionDeclaration); ok {
 				var params []string
 				for _, param := range funcDecl.Params {
 					if param.ID != nil {
@@ -213,3 +230,39 @@ func (ir *ImportResolver) determineSymbolType(node ast.Node) symbols.SymbolType 
 		return symbols.VariableSymbol
 	}
 }
+
+// resolveReExportChain resolves a re-export chain to get the original export
+func (ir *ImportResolver) resolveReExportChain(export *ExportInfo, currentModulePath string) *ExportInfo {
+if export == nil || !export.IsReExport || export.SourceModule == "" {
+return export
+}
+
+// Resolve the source module
+sourceModule, err := ir.moduleResolver.ResolveModule(export.SourceModule, currentModulePath)
+if err != nil {
+return export
+}
+
+// Find the export in the source module
+// The export name in the source module should match the original name
+var sourceExport *ExportInfo
+for _, exp := range sourceModule.Exports {
+if exp.Name == searchName {
+sourceExport = exp
+break
+}
+}
+
+if sourceExport == nil {
+return export
+}
+
+// If the source export is also a re-export, follow the chain recursively
+if sourceExport.IsReExport {
+return ir.resolveReExportChain(sourceExport, sourceModule.AbsolutePath)
+}
+
+return sourceExport
+}
+
+

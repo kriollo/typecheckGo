@@ -167,3 +167,42 @@ func (tc *TypeChecker) bindImportedSymbols(importDecl *ast.ImportDeclaration, fi
 		}
 	}
 }
+// resolveReExportType resolves the type of a re-exported symbol by following the chain
+func (tc *TypeChecker) resolveReExportType(exportInfo *modules.ExportInfo, currentModulePath string) *types.Type {
+if exportInfo == nil || !exportInfo.IsReExport || exportInfo.SourceModule == "" {
+return types.Any
+}
+
+// Resolve the source module
+sourceModule, err := tc.moduleResolver.ResolveModule(exportInfo.SourceModule, currentModulePath)
+if err != nil {
+return types.Any
+}
+
+// Find the export in the source module
+// For re-exports, we need to find the original export name
+var sourceExport *modules.ExportInfo
+for _, exp := range sourceModule.Exports {
+if exp.Name == exportInfo.Name {
+sourceExport = exp
+break
+}
+}
+
+if sourceExport == nil {
+return types.Any
+}
+
+// If the source export is also a re-export, follow the chain recursively
+if sourceExport.IsReExport {
+return tc.resolveReExportType(sourceExport, sourceModule.AbsolutePath)
+}
+
+// Create a temporary symbol to resolve the type
+tempSymbol := &symbols.Symbol{
+Node:         sourceExport.Node,
+ResolvedType: sourceExport.ResolvedType,
+}
+
+return tc.resolveImportedType(tempSymbol)
+}
