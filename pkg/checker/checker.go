@@ -2715,8 +2715,23 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 				// Extract keys from literal type or union of literal types
 				keys := tc.extractKeysFromType(keysType)
 
+				// Validate that all keys exist in the base type
 				for _, key := range keys {
+					if _, exists := baseType.Properties[key]; !exists {
+						// Report error: key does not exist in base type
+						// Get a list of valid keys for the error message
+						validKeys := make([]string, 0, len(baseType.Properties))
+						for k := range baseType.Properties {
+							validKeys = append(validKeys, fmt.Sprintf("'%s'", k))
+						}
+						tc.addError(tc.currentFile, t.Pos().Line, t.Pos().Column,
+							fmt.Sprintf("Type '%s' does not satisfy the constraint 'keyof %s'. Property '%s' does not exist on type '%s'.",
+								key, baseType.Name, key, baseType.Name),
+							"TS2344", "error")
+					}
+				}
 
+				for _, key := range keys {
 					if propType, exists := baseType.Properties[key]; exists {
 						pickedProps[key] = propType
 					}
