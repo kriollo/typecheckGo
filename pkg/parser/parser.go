@@ -44,6 +44,11 @@ func parseTypeScript(source, filename string) (*ast.File, error) {
 	// Pre-process compiler directives
 	p.extractCompilerDirectives()
 
+	// Debug: print processed source if DEBUG_PARSER is enabled
+	if debugParserEnabled {
+		fmt.Printf("=== Source after directive extraction ===\n%s\n=== End source ===\n", p.source)
+	}
+
 	return p.parseFile()
 }
 
@@ -4349,12 +4354,25 @@ func (p *parser) parseTypePrimaryNode() (ast.TypeNode, error) {
 		iterations := 0
 		for depth > 0 && !p.isAtEnd() && iterations < maxParserIterations {
 			iterations++
+			ch := p.source[p.pos]
+			if debugParserEnabled {
+				fmt.Printf("parseTypePrimaryNode: pos=%d ch='%c' depth=%d\n", p.pos, ch, depth)
+			}
 			if p.match("{") {
 				depth++
+				p.advance()
 			} else if p.match("}") {
 				depth--
+				p.advance()
+				if depth == 0 {
+					break
+				}
+			} else {
+				p.advance()
 			}
-			p.advance()
+		}
+		if debugParserEnabled {
+			fmt.Printf("parseTypePrimaryNode: DONE pos=%d\n", p.pos)
 		}
 		result = &ast.TypeReference{
 			Name:     "{ ... }", // Placeholder for object type
@@ -5600,6 +5618,12 @@ func (p *parser) parseObjectTypeLiteral() (ast.TypeNode, error) {
 
 	var members []ast.TypeMember
 	for !p.match("}") && !p.isAtEnd() {
+		p.skipWhitespaceAndComments() // Skip whitespace at the start of each iteration
+
+		if p.match("}") {
+			break // Exit if we've reached the closing brace
+		}
+
 		memberStart := p.currentPos()
 
 		// Check for readonly modifiers: -readonly, +readonly, readonly

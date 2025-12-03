@@ -1,6 +1,9 @@
 package checker
 
 import (
+	"fmt"
+	"os"
+	"strings"
 	"tstypechecker/pkg/ast"
 	"tstypechecker/pkg/types"
 )
@@ -91,6 +94,9 @@ func (tn *TypeNarrowing) analyzeEquality(binExpr *ast.BinaryExpression, trueNarr
 		return
 	}
 
+	// Strip quotes if present (parser includes them)
+	literalValue = strings.Trim(literalValue, `"'`)
+
 	// Get the current type of the object
 	var objType *types.Type
 	if t, exists := tn.tc.varTypeCache[objId.Name]; exists {
@@ -111,20 +117,28 @@ func (tn *TypeNarrowing) analyzeEquality(binExpr *ast.BinaryExpression, trueNarr
 
 	// Check if it's a union type
 	if objType.Kind != types.UnionType {
+		fmt.Fprintf(os.Stderr, "DEBUG: Not a union type, kind=%v, name=%s\n", objType.Kind, objType.Name)
 		return
 	}
+
+	fmt.Fprintf(os.Stderr, "DEBUG: Found union type with %d members for %s.%s === %s\n", len(objType.Types), objId.Name, propName, literalValue)
 
 	// Find the matching union member
 	for _, member := range objType.Types {
 		if member.Kind == types.ObjectType && member.Properties != nil {
 			// Check if this member has the discriminant property
 			if propType, exists := member.Properties[propName]; exists {
+				fmt.Fprintf(os.Stderr, "DEBUG: Member %s has property %s with kind=%v\n", member.Name, propName, propType.Kind)
 				// Check if the property is a literal type matching our value
 				if propType.Kind == types.LiteralType {
 					if propValue, ok := propType.Value.(string); ok {
+						// Strip quotes from the type's literal value too
+						propValue = strings.Trim(propValue, `"'`)
+						fmt.Fprintf(os.Stderr, "DEBUG: Literal value: %s (looking for %s)\n", propValue, literalValue)
 						if propValue == literalValue {
 							// This is the matching member!
 							trueNarrowing[objId.Name] = member
+							fmt.Fprintf(os.Stderr, "DEBUG: Narrowed %s to %s in then branch\n", objId.Name, member.Name)
 
 							// For else branch, narrow to the other union members
 							var otherMembers []*types.Type
@@ -135,8 +149,10 @@ func (tn *TypeNarrowing) analyzeEquality(binExpr *ast.BinaryExpression, trueNarr
 							}
 							if len(otherMembers) == 1 {
 								falseNarrowing[objId.Name] = otherMembers[0]
+								fmt.Fprintf(os.Stderr, "DEBUG: Narrowed %s to %s in else branch\n", objId.Name, otherMembers[0].Name)
 							} else if len(otherMembers) > 1 {
 								falseNarrowing[objId.Name] = types.NewUnionType(otherMembers)
+								fmt.Fprintf(os.Stderr, "DEBUG: Narrowed %s to union in else branch\n", objId.Name)
 							}
 							return
 						}
