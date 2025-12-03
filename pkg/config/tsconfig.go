@@ -415,6 +415,11 @@ func (c *CompilerOptions) ShouldCheckImplicitThis() bool {
 	return c.NoImplicitThis || c.Strict
 }
 
+// ShouldCheckPropertyInitialization returns true if strict property initialization is enabled
+func (c *CompilerOptions) ShouldCheckPropertyInitialization() bool {
+	return c.StrictPropertyInitialization || c.Strict
+}
+
 // ShouldAllowUnreachableCode returns true if unreachable code is allowed
 func (c *CompilerOptions) ShouldAllowUnreachableCode() bool {
 	return c.AllowUnreachableCode
