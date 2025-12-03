@@ -2394,14 +2394,11 @@ func (tc *TypeChecker) isObjectAssignable(sourceType, targetType *types.Type) bo
 				continue
 			}
 			// Required property missing in source
-			fmt.Printf("DEBUG: isObjectAssignable missing prop %s\n", propName)
 			return false
 		}
 
 		// Check if the property types are compatible
-		fmt.Printf("DEBUG: isObjectAssignable checking prop %s: source=%s target=%s\n", propName, sourcePropType.String(), targetPropType.String())
 		if !tc.isAssignableTo(sourcePropType, targetPropType) {
-			fmt.Printf("DEBUG: isObjectAssignable prop mismatch %s\n", propName)
 			return false
 		}
 	}
