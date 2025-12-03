@@ -450,7 +450,43 @@ func (tc *TypeChecker) checkExpression(expr ast.Expression, filename string) {
 	case *ast.AsExpression:
 		// Check the underlying expression
 		tc.checkExpression(e.Expression, filename)
-		// Type assertions are allowed, no additional checking needed
+
+		// Validate type assertion (skip for 'as const' and 'as any')
+		if typeRef, ok := e.TypeAnnotation.(*ast.TypeReference); ok {
+			// Skip validation for 'as const' and 'as any'
+			if typeRef.Name == "const" || typeRef.Name == "any" {
+				return
+			}
+		}
+
+		// Get the type of the expression being asserted
+		sourceType := tc.inferencer.InferType(e.Expression)
+
+		// Convert the target type annotation
+		targetType := tc.convertTypeNode(e.TypeAnnotation)
+
+		// Type assertions are valid if:
+		// 1. Source is assignable to target, OR
+		// 2. Target is assignable to source, OR
+		// 3. Either is 'any' or 'unknown'
+
+		// Skip if either type is any or unknown (always valid)
+		if sourceType.Kind == types.AnyType || sourceType.Kind == types.UnknownType ||
+			targetType.Kind == types.AnyType || targetType.Kind == types.UnknownType {
+			return
+		}
+
+		// Check if conversion is valid
+		sourceToTarget := tc.isAssignableTo(sourceType, targetType)
+		targetToSource := tc.isAssignableTo(targetType, sourceType)
+
+		if !sourceToTarget && !targetToSource {
+			// Invalid type assertion
+			tc.addError(filename, e.Pos().Line, e.Pos().Column,
+				fmt.Sprintf("Conversion of type '%s' to type '%s' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.",
+					sourceType.String(), targetType.String()),
+				"TS2352", "error")
+		}
 	default:
 		// Unknown expression type - just a warning, don't block compilation
 		fmt.Fprintf(os.Stderr, "Warning: Unknown expression type: %T\n", expr)
