@@ -304,7 +304,11 @@ func (tc *TypeChecker) checkImportDeclaration(importDecl *ast.ImportDeclaration,
 		tc.addError(filename, importDecl.Pos().Line, importDecl.Pos().Column,
 			fmt.Sprintf("Cannot find module '%s' or its corresponding type declarations", sourceStr),
 			"TS2307", "error")
+		return
 	}
+
+	// Bind imported symbols to the type cache
+	tc.bindImportedSymbols(importDecl, filename)
 }
 
 // checkExportDeclaration checks export statements
@@ -431,12 +435,10 @@ func (tc *TypeChecker) checkClassDeclaration(decl *ast.ClassDeclaration, filenam
 	for _, member := range decl.Body {
 		switch m := member.(type) {
 		case *ast.MethodDefinition:
-			fmt.Printf("DEBUG: Visiting method %s in class %s\n", m.Key.Name, decl.ID.Name)
 			// Check method body
 			if m.Value != nil && m.Value.Body != nil {
 				// Find method scope
 				methodScope := tc.findScopeForNode(m)
-				fmt.Printf("DEBUG: methodScope for %s is %v\n", m.Key.Name, methodScope)
 				if methodScope != nil {
 					// Set current function for return type checking
 					previousFunction := tc.currentFunction

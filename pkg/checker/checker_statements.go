@@ -76,8 +76,7 @@ func (tc *TypeChecker) checkBlockStatement(block *ast.BlockStatement, filename s
 		tc.symbolTable.Current = blockScope
 
 		// Check all statements in the block
-		for i, stmt := range block.Body {
-			fmt.Printf("DEBUG: checkBlockStatement stmt %d type %T\n", i, stmt)
+		for _, stmt := range block.Body {
 			tc.checkStatement(stmt, filename)
 		}
 
@@ -85,8 +84,7 @@ func (tc *TypeChecker) checkBlockStatement(block *ast.BlockStatement, filename s
 		tc.symbolTable.Current = originalScope
 	} else {
 		// Fallback: check without scope change
-		for i, stmt := range block.Body {
-			fmt.Printf("DEBUG: checkBlockStatement fallback stmt %d type %T\n", i, stmt)
+		for _, stmt := range block.Body {
 			tc.checkStatement(stmt, filename)
 		}
 	}
@@ -100,10 +98,8 @@ func (tc *TypeChecker) checkReturnStatement(ret *ast.ReturnStatement, filename s
 		returnType := tc.inferencer.InferType(ret.Argument)
 
 		// Get declared return type from current function
-		fmt.Printf("DEBUG: checkReturnStatement currentFn=%T\n", tc.currentFunction)
 		if tc.currentFunction != nil {
 			declaredReturnType := tc.getDeclaredReturnType(tc.currentFunction)
-			fmt.Printf("DEBUG: checkReturnStatement inferred=%s declared=%v currentFn=%T\n", returnType.String(), declaredReturnType, tc.currentFunction)
 
 			if declaredReturnType != nil {
 				// Validate against declared return type
