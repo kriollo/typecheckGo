@@ -56,6 +56,7 @@ func (ir *ImportResolver) ResolveImport(importDecl *ast.ImportDeclaration) (map[
 		if resolvedModule.DefaultExport != nil {
 			symbol := &symbols.Symbol{
 				Name:         defaultSpecifier.Local.Name,
+				Type:         ir.determineSymbolType(resolvedModule.DefaultExport.Node),
 				Node:         resolvedModule.DefaultExport.Node,
 				ResolvedType: resolvedModule.DefaultExport.ResolvedType,
 				UpdateCache: func(t *types.Type) {
@@ -206,6 +207,8 @@ func (ir *ImportResolver) determineSymbolType(node ast.Node) symbols.SymbolType 
 		return symbols.TypeAliasSymbol
 	case *ast.InterfaceDeclaration:
 		return symbols.InterfaceSymbol
+	case *ast.ClassDeclaration:
+		return symbols.ClassSymbol
 	default:
 		return symbols.VariableSymbol
 	}
