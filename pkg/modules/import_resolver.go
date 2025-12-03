@@ -233,36 +233,34 @@ func (ir *ImportResolver) determineSymbolType(node ast.Node) symbols.SymbolType 
 
 // resolveReExportChain resolves a re-export chain to get the original export
 func (ir *ImportResolver) resolveReExportChain(export *ExportInfo, currentModulePath string) *ExportInfo {
-if export == nil || !export.IsReExport || export.SourceModule == "" {
-return export
-}
+	if export == nil || !export.IsReExport || export.SourceModule == "" {
+		return export
+	}
 
-// Resolve the source module
-sourceModule, err := ir.moduleResolver.ResolveModule(export.SourceModule, currentModulePath)
-if err != nil {
-return export
-}
+	// Resolve the source module
+	sourceModule, err := ir.moduleResolver.ResolveModule(export.SourceModule, currentModulePath)
+	if err != nil {
+		return export
+	}
 
-// Find the export in the source module
-// The export name in the source module should match the original name
-var sourceExport *ExportInfo
-for _, exp := range sourceModule.Exports {
-if exp.Name == searchName {
-sourceExport = exp
-break
-}
-}
+	// Find the export in the source module
+	// The export name in the source module should match the original name
+	var sourceExport *ExportInfo
+	for _, exp := range sourceModule.Exports {
+		if exp.Name == export.Name {
+			sourceExport = exp
+			break
+		}
+	}
 
-if sourceExport == nil {
-return export
+	if sourceExport == nil {
+		return export
+	}
+
+	// If the source export is also a re-export, follow the chain recursively
+	if sourceExport.IsReExport {
+		return ir.resolveReExportChain(sourceExport, sourceModule.AbsolutePath)
+	}
+
+	return sourceExport
 }
-
-// If the source export is also a re-export, follow the chain recursively
-if sourceExport.IsReExport {
-return ir.resolveReExportChain(sourceExport, sourceModule.AbsolutePath)
-}
-
-return sourceExport
-}
-
-

@@ -32,12 +32,17 @@ func ParseCode(code, filename string) (*ast.File, error) {
 // Simple TypeScript parser implementation
 func parseTypeScript(source, filename string) (*ast.File, error) {
 	p := &parser{
-		source:   source,
-		filename: filename,
-		pos:      0,
-		line:     1,
-		column:   1,
+		source:          source,
+		filename:        filename,
+		pos:             0,
+		line:            1,
+		column:          1,
+		compilerOptions: make(map[string]string),
+		virtualFiles:    make(map[string]string),
 	}
+
+	// Pre-process compiler directives
+	p.extractCompilerDirectives()
 
 	return p.parseFile()
 }
@@ -53,11 +58,13 @@ const (
 var debugParserEnabled = os.Getenv("DEBUG_PARSER") == "1"
 
 type parser struct {
-	source   string
-	filename string
-	pos      int
-	line     int
-	column   int
+	source          string
+	filename        string
+	pos             int
+	line            int
+	column          int
+	compilerOptions map[string]string // Para almacenar directivas como @allowJs, @checkJs, etc.
+	virtualFiles    map[string]string // Para almacenar archivos virtuales definidos con @filename
 }
 
 func (p *parser) parseFile() (*ast.File, error) {
@@ -3331,11 +3338,16 @@ func (p *parser) skipWhitespaceAndComments() {
 			continue
 		}
 
-		// Single-line comment
+		// Single-line comment (including compiler directives like // @filename:)
 		if char == '/' && p.pos+1 < len(p.source) && p.source[p.pos+1] == '/' {
 			p.advance()
 			p.advance()
+			// Skip entire line including compiler directives
 			for !p.isAtEnd() && p.source[p.pos] != '\n' {
+				p.advance()
+			}
+			// Also consume the newline
+			if !p.isAtEnd() && p.source[p.pos] == '\n' {
 				p.advance()
 			}
 			continue
@@ -5772,4 +5784,96 @@ func (p *parser) parseObjectTypeLiteral() (ast.TypeNode, error) {
 		Position: startPos,
 		EndPos:   p.currentPos(),
 	}, nil
+}
+
+// extractCompilerDirectives extracts TypeScript compiler directives from comments
+// These are special comments like // @filename: file.ts or // @allowJs: true
+// For multi-file tests, it splits the source into virtual files
+func (p *parser) extractCompilerDirectives() {
+	lines := strings.Split(p.source, "\n")
+
+	currentFile := ""
+	currentContent := []string{}
+	hasFilenameDirective := false
+	cleanedLines := []string{} // Lines without compiler directives
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		// Check for compiler directive comments
+		if strings.HasPrefix(trimmed, "// @") {
+			// Extract directive name and value
+			directive := strings.TrimPrefix(trimmed, "// @")
+			parts := strings.SplitN(directive, ":", 2)
+
+			if len(parts) == 2 {
+				key := strings.TrimSpace(parts[0])
+				value := strings.TrimSpace(parts[1])
+
+				if key == "filename" {
+					hasFilenameDirective = true
+					// Save previous file if any
+					if currentFile != "" {
+						p.virtualFiles[currentFile] = strings.Join(currentContent, "\n")
+					}
+					// Start new file
+					currentFile = value
+					currentContent = []string{}
+				} else {
+					p.compilerOptions[key] = value
+				}
+			}
+			// Skip this line - it's a directive, not actual code
+			continue
+		}
+
+		// If we're collecting content for a virtual file
+		if hasFilenameDirective && currentFile != "" {
+			currentContent = append(currentContent, line)
+		} else {
+			// No @filename directive yet, accumulate cleaned lines
+			cleanedLines = append(cleanedLines, line)
+		}
+	}
+
+	// Save the last file if any
+	if currentFile != "" {
+		p.virtualFiles[currentFile] = strings.Join(currentContent, "\n")
+
+		// For multi-file tests, parse only the first .d.ts file (declarations)
+		// If no .d.ts, parse the first .ts file
+		var targetContent string
+		foundDts := false
+
+		for filename, content := range p.virtualFiles {
+			if strings.HasSuffix(filename, ".d.ts") {
+				targetContent = content
+				foundDts = true
+				break
+			}
+		}
+
+		if !foundDts {
+			for filename, content := range p.virtualFiles {
+				if strings.HasSuffix(filename, ".ts") {
+					targetContent = content
+					break
+				}
+			}
+		}
+
+		if targetContent != "" {
+			p.source = targetContent
+			p.pos = 0
+			p.line = 1
+			p.column = 1
+		}
+	} else if len(cleanedLines) < len(lines) {
+		// No @filename directives but had other compiler directives
+		// Use the cleaned source without the directives
+		p.source = strings.Join(cleanedLines, "\n")
+		p.pos = 0
+		p.line = 1
+		p.column = 1
+	}
 }
