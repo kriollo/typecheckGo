@@ -1783,17 +1783,22 @@ func (p *parser) parsePostfixExpression() (ast.Expression, error) {
 
 	p.skipWhitespaceAndComments()
 
-	// Check for type assertion: expr as Type (can be chained: expr as T1 as T2)
-	iterations := 0
-	for p.matchKeyword("as") && iterations < maxParserIterations {
-		iterations++
-		p.advanceWord()
-		p.skipWhitespaceAndComments()
-		// Skip the type annotation (can be union type: Type1 | Type2)
-		p.skipTypeAnnotation()
-		p.skipWhitespaceAndComments()
-		// Continue to check for more 'as' keywords
-	}
+	// NOTE: 'as' type assertions are now handled in parseBinaryExpression
+	// to ensure they are properly parsed as AsExpression nodes
+	// The following code was skipping 'as' annotations instead of parsing them:
+	/*
+		// Check for type assertion: expr as Type (can be chained: expr as T1 as T2)
+		iterations := 0
+		for p.matchKeyword("as") && iterations < maxParserIterations {
+			iterations++
+			p.advanceWord()
+			p.skipWhitespaceAndComments()
+			// Skip the type annotation (can be union type: Type1 | Type2)
+			p.skipTypeAnnotation()
+			p.skipWhitespaceAndComments()
+			// Continue to check for more 'as' keywords
+		}
+	*/
 
 	// Check for postfix ++ or --
 	if p.match("++") {
@@ -4701,7 +4706,7 @@ func (p *parser) parseTypeAnnotationPrimary() (ast.TypeNode, error) {
 	}
 
 	// Primitive types
-	if p.matchKeyword("string", "number", "boolean", "any", "void", "null", "undefined", "never", "unknown", "object", "symbol", "bigint") {
+	if p.matchKeyword("string", "number", "boolean", "any", "void", "null", "undefined", "never", "unknown", "object", "symbol", "bigint", "const") {
 		typeName := p.advanceWord()
 		return &ast.TypeReference{
 			Name:     typeName,

@@ -447,6 +447,10 @@ func (tc *TypeChecker) checkExpression(expr ast.Expression, filename string) {
 		return
 	case *ast.SatisfiesExpression:
 		tc.checkSatisfiesExpression(e, filename)
+	case *ast.AsExpression:
+		// Check the underlying expression
+		tc.checkExpression(e.Expression, filename)
+		// Type assertions are allowed, no additional checking needed
 	default:
 		// Unknown expression type - just a warning, don't block compilation
 		fmt.Fprintf(os.Stderr, "Warning: Unknown expression type: %T\n", expr)
@@ -1252,6 +1256,19 @@ func (tc *TypeChecker) checkMemberExpression(member *ast.MemberExpression, filen
 					if mutatorMethods[id.Name] {
 						tc.addError(filename, id.Pos().Line, id.Pos().Column,
 							fmt.Sprintf("Property '%s' does not exist on type 'readonly %s[]'.", id.Name, objectType.ElementType.String()),
+							"TS2339", "error")
+					}
+				}
+			} else if objectType.Kind == types.TupleType {
+				// Check for array methods on readonly tuples
+				if objectType.IsReadonly {
+					mutatorMethods := map[string]bool{
+						"push": true, "pop": true, "shift": true, "unshift": true,
+						"splice": true, "sort": true, "reverse": true, "fill": true, "copyWithin": true,
+					}
+					if mutatorMethods[id.Name] {
+						tc.addError(filename, id.Pos().Line, id.Pos().Column,
+							fmt.Sprintf("Property '%s' does not exist on type '%s'.", id.Name, objectType.String()),
 							"TS2339", "error")
 					}
 				}

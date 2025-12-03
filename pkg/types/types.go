@@ -193,6 +193,14 @@ func NewArrayType(elementType *Type) *Type {
 	}
 }
 
+// NewTupleType crea un tipo tupla
+func NewTupleType(types []*Type) *Type {
+	return &Type{
+		Kind:  TupleType,
+		Types: types,
+	}
+}
+
 // NewUnionType crea un tipo union
 func NewUnionType(typesList []*Type) *Type {
 	var uniqueTypes []*Type
@@ -367,6 +375,17 @@ func (t *Type) String() string {
 			types[i] = typ.String()
 		}
 		return strings.Join(types, " | ")
+
+	case TupleType:
+		prefix := ""
+		if t.IsReadonly {
+			prefix = "readonly "
+		}
+		types := make([]string, len(t.Types))
+		for i, typ := range t.Types {
+			types[i] = typ.String()
+		}
+		return fmt.Sprintf("%s[%s]", prefix, strings.Join(types, ", "))
 
 	case IntersectionType:
 		types := make([]string, len(t.Types))

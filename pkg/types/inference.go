@@ -109,8 +109,79 @@ func (ti *TypeInferencer) InferType(expr ast.Expression) *Type {
 			return constructorType.ReturnType
 		}
 		return Unknown
+	case *ast.AsExpression:
+		// Check for 'as const'
+		if typeRef, ok := e.TypeAnnotation.(*ast.TypeReference); ok && typeRef.Name == "const" {
+			// Special handling for ArrayExpression to preserve tuple structure
+			if arrayExpr, ok := e.Expression.(*ast.ArrayExpression); ok {
+				// Create readonly tuple type
+				var elementTypes []*Type
+				for _, elem := range arrayExpr.Elements {
+					elemType := ti.InferType(elem)
+					// Convert element type to literal if possible
+					elemType = ti.convertToReadonly(elemType)
+					elementTypes = append(elementTypes, elemType)
+				}
+				tupleType := NewTupleType(elementTypes)
+				tupleType.IsReadonly = true
+				return tupleType
+			}
+
+			// Convert the expression type to readonly literal type
+			baseType := ti.InferType(e.Expression)
+			return ti.convertToReadonly(baseType)
+		}
+		// For other assertions, we should ideally use the asserted type
+		// But since we don't have easy access to convertTypeNode here,
+		// we'll return the inferred type of the expression for now
+		return ti.InferType(e.Expression)
 	default:
 		return Unknown
+	}
+}
+
+// convertToReadonly converts a type to its readonly/literal equivalent for 'as const'
+func (ti *TypeInferencer) convertToReadonly(t *Type) *Type {
+	if t == nil {
+		return Unknown
+	}
+
+	switch t.Kind {
+	case StringType, NumberType, BooleanType:
+		// Primitives become literals if they have a value
+		// But InferType for literals already returns LiteralType
+		// If it's a generic primitive type without value, we can't make it literal
+		return t
+
+	case ArrayType:
+		// Arrays become readonly tuples
+		// We need to know the elements to create a tuple
+		// Since ArrayType only stores ElementType, we lose the individual element values
+		// But if the original expression was an ArrayExpression, InferType would return ArrayType
+		// We need to handle ArrayExpression specially in InferType or here
+
+		// If we can't recover the tuple structure, at least make it a readonly array
+		newType := *t
+		newType.IsReadonly = true
+		// Recursively make element type readonly
+		newType.ElementType = ti.convertToReadonly(t.ElementType)
+		return &newType
+
+	case ObjectType:
+		// Objects become readonly with literal properties
+		newProps := make(map[string]*Type)
+		for k, v := range t.Properties {
+			newProps[k] = ti.convertToReadonly(v)
+		}
+		return &Type{
+			Kind:       ObjectType,
+			Name:       t.Name,
+			Properties: newProps,
+			IsReadonly: true,
+		}
+
+	default:
+		return t
 	}
 }
 
