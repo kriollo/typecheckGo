@@ -1255,6 +1255,22 @@ func (tc *TypeChecker) checkMemberExpression(member *ast.MemberExpression, filen
 		}
 	}
 
+	// Check if object is possibly undefined or null
+	if objectType.Kind == types.UnionType && !member.Optional {
+		for _, t := range objectType.Types {
+			if t.Kind == types.UndefinedType {
+				tc.addError(filename, member.Pos().Line, member.Pos().Column,
+					"Object is possibly 'undefined'.", "TS2532", "error")
+				return
+			}
+			if t.Kind == types.NullType {
+				tc.addError(filename, member.Pos().Line, member.Pos().Column,
+					"Object is possibly 'null'.", "TS2531", "error")
+				return
+			}
+		}
+	}
+
 	// Disabled: More aggressive unknown checking that causes false positives
 	// This is disabled for now because it requires proper type inference for:
 	// - Promise unwrapping (await expressions)
