@@ -120,6 +120,11 @@ func (tc *TypeChecker) checkVariableDeclaration(decl *ast.VariableDeclaration, f
 						}
 					}
 
+					// Validate generic class instantiation
+					if newExpr, ok := declarator.Init.(*ast.NewExpression); ok {
+						tc.validateGenericClassInstantiation(newExpr, declarator, filename)
+					}
+					// Now check assignability
 					if !tc.isAssignableTo(typeToCheck, declaredType) {
 						tc.addError(filename, declarator.Init.Pos().Line, declarator.Init.Pos().Column,
 							fmt.Sprintf("Type '%s' is not assignable to type '%s'.", typeToCheck.String(), declaredType.String()),

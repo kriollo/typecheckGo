@@ -5031,19 +5031,10 @@ func (p *parser) parseClassDeclaration(isAbstract bool) (*ast.ClassDeclaration, 
 	// Parse type parameters if present
 	var typeParameters []ast.TypeNode
 	if p.match("<") {
-		// Skip type parameters for now - just consume them
-		depth := 1
-		p.advance()
-		for depth > 0 && !p.isAtEnd() {
-			if p.match("<") {
-				depth++
-				p.advance()
-			} else if p.match(">") {
-				depth--
-				p.advance()
-			} else {
-				p.advance()
-			}
+		var err error
+		typeParameters, err = p.parseTypeParameters()
+		if err != nil {
+			return nil, err
 		}
 		p.skipWhitespaceAndComments()
 	}
