@@ -4705,6 +4705,24 @@ func (p *parser) parseTypeAnnotationPrimary() (ast.TypeNode, error) {
 		}
 	}
 
+	// Type query: typeof expr
+	if p.matchKeyword("typeof") {
+		p.advanceWord() // consume typeof
+		p.skipWhitespaceAndComments()
+
+		// Parse the expression (usually an identifier or qualified name)
+		expr, err := p.parseExpression()
+		if err != nil {
+			return nil, err
+		}
+
+		return &ast.TypeQuery{
+			ExprName: expr,
+			Position: startPos,
+			EndPos:   p.currentPos(),
+		}, nil
+	}
+
 	// Primitive types
 	if p.matchKeyword("string", "number", "boolean", "any", "void", "null", "undefined", "never", "unknown", "object", "symbol", "bigint", "const") {
 		typeName := p.advanceWord()

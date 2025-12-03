@@ -721,6 +721,20 @@ func (ti *TypeInferencer) inferObjectType(obj *ast.ObjectExpression) *Type {
 			if propName != "" {
 				// Infer the type of the property value
 				propType := ti.InferType(p.Value)
+
+				// Widen literal types to their base types for object properties
+				// This matches TypeScript's behavior where { name: "John" } has type { name: string }
+				if propType.Kind == LiteralType {
+					switch propType.Value.(type) {
+					case string:
+						propType = String
+					case bool:
+						propType = Boolean
+					case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
+						propType = Number
+					}
+				}
+
 				properties[propName] = propType
 			}
 		case *ast.SpreadElement:
