@@ -2158,9 +2158,20 @@ func (tc *TypeChecker) isAssignableToUncached(sourceType, targetType *types.Type
 				return true
 			}
 		}
-		if strings.HasPrefix(targetType.Name, "`") || strings.Contains(targetType.Name, "intrinsic") {
-			// Template literal type or intrinsic type - be permissive
-			return true
+	}
+
+	// Check if source literal is assignable to target template literal type
+	// e.g., 'onClick' assignable to `on${'Click' | 'Hover'}`
+	if sourceType.Kind == types.LiteralType && targetType.Kind == types.TemplateLiteralType {
+		if strVal, ok := sourceType.Value.(string); ok {
+			// Expand the template literal type to all possible string literals
+			possibleValues := tc.expandTemplateLiteralType(targetType)
+			for _, possible := range possibleValues {
+				if strVal == possible {
+					return true
+				}
+			}
+			return false
 		}
 	}
 
@@ -2586,9 +2597,56 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 	case *ast.MappedType:
 		constraint := tc.convertTypeNode(t.Constraint)
 		mapped := tc.convertTypeNode(t.MappedType)
-		// Create a TypeParameter for the key variable
-		typeParam := types.NewTypeParameter(t.TypeParameter.Name, constraint, nil)
 
+		// Try to expand mapped type if constraint is a union of string literals
+		// e.g., { [K in 'a' | 'b']: boolean } -> { a: boolean, b: boolean }
+		if constraint.Kind == types.UnionType {
+			allLiterals := true
+			var keys []string
+			for _, member := range constraint.Types {
+				if member.Kind == types.LiteralType {
+					if str, ok := member.Value.(string); ok {
+						// Normalize - remove quotes if present
+						normalized := str
+						if len(str) >= 2 && ((str[0] == '\'' && str[len(str)-1] == '\'') || (str[0] == '"' && str[len(str)-1] == '"')) {
+							normalized = str[1 : len(str)-1]
+						}
+						keys = append(keys, normalized)
+					} else {
+						allLiterals = false
+						break
+					}
+				} else {
+					allLiterals = false
+					break
+				}
+			}
+
+			// If all members are string literals, expand to object type
+			if allLiterals && len(keys) > 0 {
+				props := make(map[string]*types.Type)
+				for _, key := range keys {
+					props[key] = mapped
+				}
+				return types.NewObjectType("", props)
+			}
+		}
+
+		// If constraint is a single literal, also expand
+		if constraint.Kind == types.LiteralType {
+			if str, ok := constraint.Value.(string); ok {
+				normalized := str
+				if len(str) >= 2 && ((str[0] == '\'' && str[len(str)-1] == '\'') || (str[0] == '"' && str[len(str)-1] == '"')) {
+					normalized = str[1 : len(str)-1]
+				}
+				props := make(map[string]*types.Type)
+				props[normalized] = mapped
+				return types.NewObjectType("", props)
+			}
+		}
+
+		// Otherwise, create a TypeParameter for the key variable and return mapped type
+		typeParam := types.NewTypeParameter(t.TypeParameter.Name, constraint, nil)
 		return types.NewMappedType(typeParam, constraint, mapped, t.Readonly, t.MinusReadonly, t.Optional, t.MinusOptional)
 	case *ast.TemplateLiteralType:
 		templateTypes := make([]*types.Type, len(t.Types))
