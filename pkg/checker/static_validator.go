@@ -168,6 +168,23 @@ func (smv *StaticMemberValidator) ValidateConstructorInstantiation(
 
 	// Check if trying to instantiate something that's not a class
 	if symbol.Type != symbols.ClassSymbol {
+		// Allow variables (like Promise, Error, etc.) which might be constructors
+		if symbol.Type == symbols.VariableSymbol {
+			if symbol.ResolvedType != nil {
+				// Prevent primitives from being instantiated
+				switch symbol.ResolvedType.Kind {
+				case types.NumberType, types.StringType, types.BooleanType, types.NullType, types.UndefinedType, types.VoidType, types.NeverType:
+					// Fall through to error
+				default:
+					// Allow Object, Function, Any, Unknown
+					return
+				}
+			} else {
+				// If type not resolved yet, allow it (conservative)
+				return
+			}
+		}
+
 		smv.tc.addError(
 			filename,
 			newExpr.Callee.Pos().Line,

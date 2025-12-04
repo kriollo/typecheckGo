@@ -33,6 +33,9 @@ func (tn *TypeNarrowing) AnalyzeCondition(condition ast.Expression) (thenNarrowi
 		} else if binExpr.Operator == "!==" || binExpr.Operator == "!=" {
 			tn.analyzeEquality(binExpr, elseNarrowing, thenNarrowing, true)
 		}
+	} else if memberExpr, ok := condition.(*ast.MemberExpression); ok {
+		// Handle truthiness check: if (obj.prop)
+		tn.analyzeTruthiness(memberExpr, thenNarrowing, elseNarrowing)
 	}
 
 	return thenNarrowing, elseNarrowing
