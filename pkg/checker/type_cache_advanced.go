@@ -103,6 +103,11 @@ func computeTypeHash(t *types.Type) string {
 		h.Write([]byte(fmt.Sprintf("name:%s", t.Name)))
 	}
 
+	// Include literal value
+	if t.Kind == types.LiteralType {
+		h.Write([]byte(fmt.Sprintf("val:%v", t.Value)))
+	}
+
 	// For union/intersection, include parts
 	if t.Kind == types.UnionType || t.Kind == types.IntersectionType {
 		for _, part := range t.Types {
@@ -115,10 +120,27 @@ func computeTypeHash(t *types.Type) string {
 		h.Write([]byte(computeTypeHash(t.ElementType)))
 	}
 
+	// For tuples, include element types
+	if t.Kind == types.TupleType {
+		for _, part := range t.Types {
+			h.Write([]byte(computeTypeHash(part)))
+		}
+	}
+
 	// For objects, include property names (not values to avoid infinite recursion)
 	if t.Kind == types.ObjectType {
 		for propName := range t.Properties {
 			h.Write([]byte(fmt.Sprintf("prop:%s", propName)))
+		}
+	}
+
+	// For template literals
+	if t.Kind == types.TemplateLiteralType {
+		for _, part := range t.TemplateParts {
+			h.Write([]byte(part))
+		}
+		for _, part := range t.TemplateTypes {
+			h.Write([]byte(computeTypeHash(part)))
 		}
 	}
 

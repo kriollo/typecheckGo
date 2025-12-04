@@ -549,7 +549,10 @@ func (tc *TypeChecker) checkAssignmentExpression(assign *ast.AssignmentExpressio
 		}
 
 		// Check if right is assignable to left
-		if !tc.isAssignableTo(rightType, leftType) {
+		fmt.Printf("DEBUG: checkAssignmentExpression left=%s (Kind=%v) right=%s (Kind=%v)\n", leftType.String(), leftType.Kind, rightType.String(), rightType.Kind)
+		assignable := tc.isAssignableTo(rightType, leftType)
+		fmt.Printf("DEBUG: isAssignableTo result: %v\n", assignable)
+		if !assignable {
 			// Build a more descriptive error message
 			msg := fmt.Sprintf("Type '%s' is not assignable to type '%s'.", rightType.String(), leftType.String())
 
@@ -2286,6 +2289,11 @@ func (tc *TypeChecker) isAssignableToUncached(sourceType, targetType *types.Type
 	if targetType.Kind == types.UnionType {
 		for _, member := range targetType.Types {
 			if tc.isAssignableTo(sourceType, member) {
+				if sourceType.Kind == types.LiteralType {
+					if str, ok := sourceType.Value.(string); ok && strings.Contains(str, "pending") {
+						fmt.Printf("DEBUG: matched member %s\n", member.String())
+					}
+				}
 				return true
 			}
 		}
