@@ -1055,3 +1055,17 @@ func (s *SatisfiesExpression) Type() string  { return "SatisfiesExpression" }
 func (s *SatisfiesExpression) Pos() Position { return s.Position }
 func (s *SatisfiesExpression) End() Position { return s.EndPos }
 func (s *SatisfiesExpression) exprNode()     {}
+
+// TypePredicate represents a type predicate (value is string) or assertion (asserts value is string)
+type TypePredicate struct {
+	ParameterName *Identifier
+	TargetType    TypeNode
+	Asserts       bool
+	Position      Position
+	EndPos        Position
+}
+
+func (t *TypePredicate) Type() string  { return "TypePredicate" }
+func (t *TypePredicate) Pos() Position { return t.Position }
+func (t *TypePredicate) End() Position { return t.EndPos }
+func (t *TypePredicate) typeNode()     {}

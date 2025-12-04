@@ -15,6 +15,50 @@ func (p *parser) parseTypeAnnotationFull() (ast.TypeNode, error) {
 		p.skipWhitespaceAndComments()
 	}
 
+	// Check for assertion type predicate: asserts value is Type
+	if p.match("asserts") {
+		p.advanceString(7)
+		p.skipWhitespaceAndComments()
+
+		// Expect identifier (parameter name)
+		// Note: parseIdentifier might fail if it's 'this', handle that if needed
+		paramName, err := p.parseIdentifier()
+		if err != nil {
+			// Try to handle 'this' as parameter name
+			if p.match("this") {
+				pos := p.currentPos()
+				p.advanceString(4)
+				paramName = &ast.Identifier{Name: "this", Position: pos, EndPos: p.currentPos()}
+			} else {
+				return nil, err
+			}
+		}
+		p.skipWhitespaceAndComments()
+
+		var targetType ast.TypeNode
+
+		// Check for optional 'is Type'
+		if p.match("is") {
+			p.advanceString(2)
+			p.skipWhitespaceAndComments()
+
+			// Use parseTypeAnnotationUnary to avoid infinite recursion if we called Full?
+			// No, Full is fine because 'asserts' won't appear inside.
+			targetType, err = p.parseTypeAnnotationFull()
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		return &ast.TypePredicate{
+			ParameterName: paramName,
+			TargetType:    targetType,
+			Asserts:       true,
+			Position:      startPos,
+			EndPos:        p.currentPos(),
+		}, nil
+	}
+
 	// Parse first type (unary)
 	firstType, err := p.parseTypeAnnotationUnary()
 	if err != nil {
@@ -93,6 +137,31 @@ func (p *parser) parseTypeAnnotationUnary() (ast.TypeNode, error) {
 	}
 
 	p.skipWhitespaceAndComments()
+
+	// Check for type predicate: value is Type
+	// Only if firstType is a simple reference (identifier or this)
+	if typeRef, ok := firstType.(*ast.TypeReference); ok && len(typeRef.TypeArguments) == 0 {
+		if p.match("is") && !p.isAtEnd() { // Ensure 'is' is followed by something
+			// Check if it's really the 'is' keyword and not part of a name (though match handles that usually)
+			// match checks for word boundary if implemented correctly, or we rely on spaces
+
+			p.advanceString(2)
+			p.skipWhitespaceAndComments()
+
+			targetType, err := p.parseTypeAnnotationFull()
+			if err != nil {
+				return nil, err
+			}
+
+			return &ast.TypePredicate{
+				ParameterName: &ast.Identifier{Name: typeRef.Name, Position: typeRef.Position, EndPos: typeRef.EndPos},
+				TargetType:    targetType,
+				Asserts:       false,
+				Position:      startPos,
+				EndPos:        p.currentPos(),
+			}, nil
+		}
+	}
 
 	// Check for conditional type: T extends U ? X : Y or T extends infer U ? X : Y
 	// Only parse as conditional if we see "extends" followed by "?" or "infer"

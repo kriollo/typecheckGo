@@ -30,8 +30,10 @@ func (tn *TypeNarrowing) AnalyzeCondition(condition ast.Expression) (thenNarrowi
 	if binExpr, ok := condition.(*ast.BinaryExpression); ok {
 		if binExpr.Operator == "===" || binExpr.Operator == "==" {
 			tn.analyzeEquality(binExpr, thenNarrowing, elseNarrowing, false)
+			tn.analyzeTypeof(binExpr, thenNarrowing, elseNarrowing)
 		} else if binExpr.Operator == "!==" || binExpr.Operator == "!=" {
 			tn.analyzeEquality(binExpr, elseNarrowing, thenNarrowing, true)
+			tn.analyzeTypeof(binExpr, elseNarrowing, thenNarrowing)
 		}
 	} else if memberExpr, ok := condition.(*ast.MemberExpression); ok {
 		// Handle truthiness check: if (obj.prop)
@@ -39,6 +41,93 @@ func (tn *TypeNarrowing) AnalyzeCondition(condition ast.Expression) (thenNarrowi
 	}
 
 	return thenNarrowing, elseNarrowing
+}
+
+// analyzeTypeof analyzes typeof checks
+func (tn *TypeNarrowing) analyzeTypeof(binExpr *ast.BinaryExpression, trueNarrowing, falseNarrowing map[string]*types.Type) {
+	// Pattern: typeof x === "string"
+
+	var unary *ast.UnaryExpression
+	var literal *ast.Literal
+
+	// Check left side
+	if u, ok := binExpr.Left.(*ast.UnaryExpression); ok && u.Operator == "typeof" {
+		unary = u
+		if lit, ok := binExpr.Right.(*ast.Literal); ok {
+			literal = lit
+		}
+	}
+
+	// Check right side (reversed)
+	if unary == nil {
+		if u, ok := binExpr.Right.(*ast.UnaryExpression); ok && u.Operator == "typeof" {
+			unary = u
+			if lit, ok := binExpr.Left.(*ast.Literal); ok {
+				literal = lit
+			}
+		}
+	}
+
+	if unary == nil || literal == nil {
+		return
+	}
+
+	// Get variable name
+	var varName string
+	if id, ok := unary.Argument.(*ast.Identifier); ok {
+		varName = id.Name
+	} else {
+		return
+	}
+
+	// Get type name string
+	typeName, ok := literal.Value.(string)
+	if !ok {
+		return
+	}
+	typeName = strings.Trim(typeName, `"'`)
+
+	// Map type name to Type
+	var narrowedType *types.Type
+	switch typeName {
+	case "string":
+		narrowedType = types.String
+	case "number":
+		narrowedType = types.Number
+	case "boolean":
+		narrowedType = types.Boolean
+	case "undefined":
+		narrowedType = types.Undefined
+	case "object":
+		narrowedType = types.Any // Simplified, object is complex
+	case "function":
+		narrowedType = types.Any // Simplified
+	default:
+		return
+	}
+
+	// Apply narrowing
+	trueNarrowing[varName] = narrowedType
+
+	// For false narrowing (else branch), we can't easily exclude types from unknown/any yet
+	// without a proper subtraction type system.
+	// However, if the original type was a union, we could filter it.
+	if originalType, exists := tn.tc.varTypeCache[varName]; exists && originalType.Kind == types.UnionType {
+		var remainingTypes []*types.Type
+		for _, t := range originalType.Types {
+			// Check if t is NOT the narrowed type
+			if t.Kind != narrowedType.Kind {
+				remainingTypes = append(remainingTypes, t)
+			}
+		}
+		if len(remainingTypes) > 0 {
+			if len(remainingTypes) == 1 {
+				falseNarrowing[varName] = remainingTypes[0]
+			} else {
+				falseNarrowing[varName] = types.NewUnionType(remainingTypes)
+			}
+		}
+	}
 }
 
 // analyzeEquality analyzes equality checks for discriminated unions

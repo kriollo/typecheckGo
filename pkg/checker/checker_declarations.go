@@ -253,6 +253,66 @@ func (tc *TypeChecker) checkFunctionDeclaration(decl *ast.FunctionDeclaration, f
 			}
 		}
 
+		// Check assertion functions
+		if decl.ReturnType != nil {
+			if typePredicate, ok := decl.ReturnType.(*ast.TypePredicate); ok && typePredicate.Asserts {
+				// Get the parameter name being asserted
+				paramName := typePredicate.ParameterName.Name
+
+				// Get the target type
+				targetType := tc.convertTypeNode(typePredicate.TargetType)
+
+				// Start with the parameter's declared type
+				var currentParamType *types.Type
+				if paramType, exists := tc.varTypeCache[paramName]; exists {
+					currentParamType = paramType
+				} else {
+					currentParamType = types.Any // Should not happen if param exists
+				}
+
+				// Scan for type guards that exit the function
+				if decl.Body != nil {
+					for _, stmt := range decl.Body.Body {
+						if ifStmt, ok := stmt.(*ast.IfStatement); ok {
+							// Check if the if statement throws or returns in all paths
+							info := tc.controlFlow.AnalyzeReturns(&ast.BlockStatement{Body: []ast.Statement{ifStmt.Consequent}})
+
+							// Also check if it's a throw statement directly
+							hasThrow := false
+							if block, ok := ifStmt.Consequent.(*ast.BlockStatement); ok {
+								for _, s := range block.Body {
+									if _, isThrow := s.(*ast.ThrowStatement); isThrow {
+										hasThrow = true
+										break
+									}
+								}
+							} else if _, isThrow := ifStmt.Consequent.(*ast.ThrowStatement); isThrow {
+								hasThrow = true
+							}
+
+							if info.AllPathsReturn || hasThrow {
+								// This if statement exits the function.
+								// Analyze the condition to see what type remains in the else branch (main path)
+								_, elseNarrowing := tc.typeNarrowing.AnalyzeCondition(ifStmt.Test)
+
+								if narrowedType, exists := elseNarrowing[paramName]; exists {
+									// Update current parameter type
+									currentParamType = narrowedType
+								}
+							}
+						}
+					}
+				}
+
+				// At the end of the function, the parameter type must be assignable to the target type
+				if !tc.isAssignableTo(currentParamType, targetType) {
+					tc.addError(filename, decl.ReturnType.Pos().Line, decl.ReturnType.Pos().Column,
+						fmt.Sprintf("Assertion function wrong implementation. Type '%s' is not assignable to type '%s'.", currentParamType.String(), targetType.String()),
+						"TS2322", "error") // Using TS2322 as generic assignment error, though TS might use a specific one
+				}
+			}
+		}
+
 		// Validate return type matches declaration
 		if decl.ReturnType != nil {
 			declaredReturnType := tc.convertTypeNode(decl.ReturnType)
