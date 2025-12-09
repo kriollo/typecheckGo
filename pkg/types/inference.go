@@ -131,10 +131,10 @@ func (ti *TypeInferencer) InferType(expr ast.Expression) *Type {
 			baseType := ti.InferType(e.Expression)
 			return ti.convertToReadonly(baseType)
 		}
-		// For other assertions, we should ideally use the asserted type
-		// But since we don't have easy access to convertTypeNode here,
-		// we'll return the inferred type of the expression for now
-		return ti.InferType(e.Expression)
+
+		// For type assertions, return the asserted type (not the expression type)
+		// This is critical for double assertions like `value as unknown as number`
+		return ti.convertTypeNode(e.TypeAnnotation)
 	default:
 		return Unknown
 	}
@@ -491,14 +491,17 @@ func (ti *TypeInferencer) inferBinaryExpressionType(expr *ast.BinaryExpression) 
 			return rightType
 		}
 
-		// If left has exactly one non-null type and right is same type, return that type
+		// Check if right type is compatible with the non-null left types
+		// If left has one non-null type and right is same or compatible, return the common type
 		if len(nonNullTypes) == 1 {
-			// Check if right type is same as left non-null type or is a literal of same kind
 			leftNonNull := nonNullTypes[0]
+
+			// If same kind, return that type
 			if leftNonNull.Kind == rightType.Kind {
 				return leftNonNull
 			}
-			// If right is a literal type that widens to the left type
+
+			// If right is a literal type that widens to the left type, return left type
 			if rightType.Kind == LiteralType {
 				switch rightType.Value.(type) {
 				case string:
@@ -515,7 +518,9 @@ func (ti *TypeInferencer) inferBinaryExpressionType(expr *ast.BinaryExpression) 
 					}
 				}
 			}
-			return leftNonNull
+
+			// Types differ - return union of non-null left and right
+			return NewUnionType([]*Type{leftNonNull, rightType})
 		}
 
 		// Multiple non-null types, create union with right type
@@ -760,6 +765,7 @@ func (ti *TypeInferencer) inferFunctionExpressionType(fn *ast.FunctionExpression
 // inferObjectType infiere el tipo de un objeto literal
 func (ti *TypeInferencer) inferObjectType(obj *ast.ObjectExpression) *Type {
 	properties := make(map[string]*Type)
+	var spreadTypes []*Type // Track spread generic/intersection types
 
 	for _, prop := range obj.Properties {
 		switch p := prop.(type) {
@@ -807,12 +813,30 @@ func (ti *TypeInferencer) inferObjectType(obj *ast.ObjectExpression) *Type {
 				for k, v := range spreadType.Properties {
 					properties[k] = v
 				}
+			} else if spreadType.Kind == TypeParameterType || spreadType.Kind == IntersectionType {
+				// For type parameters (generic types like T, U), we need to track them
+				// for creating an intersection type later
+				spreadTypes = append(spreadTypes, spreadType)
 			}
 		}
 	}
 
+	// If we only have spread types (generic/intersection), return an intersection of them
+	if len(spreadTypes) > 0 && len(properties) == 0 {
+		if len(spreadTypes) == 1 {
+			return spreadTypes[0]
+		}
+		return NewIntersectionType(spreadTypes)
+	}
+
 	// Create an anonymous object type with the inferred properties
 	objType := NewObjectType("", properties)
+
+	// If we have spread types along with properties, create an intersection
+	if len(spreadTypes) > 0 {
+		allTypes := append(spreadTypes, objType)
+		return NewIntersectionType(allTypes)
+	}
 
 	// Update 'this' context for function properties
 	for _, propType := range properties {

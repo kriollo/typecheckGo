@@ -126,21 +126,30 @@ func (ov *OverloadValidator) validateImplementation(
 	// Check each signature
 	for _, sig := range signatures {
 		// Validate that implementation return type is compatible
+		// For function overloads, each overload's return type must be assignable TO
+		// the implementation return type (implementation can be wider/more general)
 		if sig.ReturnType != nil && implReturnType.Kind != types.AnyType {
-			// Implementation must be assignable to ALL overload signatures
-			if !ov.tc.isAssignableTo(implReturnType, sig.ReturnType) {
-				ov.tc.addError(
-					filename,
-					impl.ID.Pos().Line,
-					impl.ID.Pos().Column,
-					fmt.Sprintf(
-						"This overload signature is not compatible with its implementation signature.\n"+
-							"  Implementation return type '%s' is not assignable to overload return type '%s'.",
-						implReturnType.String(), sig.ReturnType.String(),
-					),
-					"TS2394",
-					"error",
-				)
+			// Check if overload return type is assignable to implementation return type
+			// For example: overload returns `string`, implementation returns `string | number` -> OK
+			// Because `string` is assignable to `string | number`
+			if !ov.tc.isAssignableTo(sig.ReturnType, implReturnType) {
+				// Don't report error - implementation is allowed to be wider
+				// Only report if the implementation return type is completely incompatible
+				// (i.e., neither direction works AND implementation isn't a union containing overload)
+				if implReturnType.Kind != types.UnionType && !ov.tc.isAssignableTo(implReturnType, sig.ReturnType) {
+					ov.tc.addError(
+						filename,
+						impl.ID.Pos().Line,
+						impl.ID.Pos().Column,
+						fmt.Sprintf(
+							"This overload signature is not compatible with its implementation signature.\n"+
+								"  Implementation return type '%s' is not assignable to overload return type '%s'.",
+							implReturnType.String(), sig.ReturnType.String(),
+						),
+						"TS2394",
+						"error",
+					)
+				}
 			}
 		}
 
