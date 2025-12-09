@@ -211,6 +211,16 @@ func (tc *TypeChecker) checkFunctionDeclaration(decl *ast.FunctionDeclaration, f
 				if paramType != nil {
 					tc.varTypeCache[param.ID.Name] = paramType
 					tc.typeCache[param.ID] = paramType
+
+					// Check default parameter value type matches declared type
+					if param.Default != nil {
+						defaultType := tc.inferencer.InferType(param.Default)
+						if !tc.isAssignableTo(defaultType, paramType) {
+							tc.addError(filename, param.Default.Pos().Line, param.Default.Pos().Column,
+								fmt.Sprintf("Type '%s' is not assignable to type '%s'.", defaultType.String(), paramType.String()),
+								"TS2322", "error")
+						}
+					}
 				}
 			}
 		}

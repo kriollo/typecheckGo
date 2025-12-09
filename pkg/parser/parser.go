@@ -2515,37 +2515,25 @@ func (p *parser) parseParameterList() ([]*ast.Parameter, error) {
 		}
 
 		// Handle default value (= expression)
-		hasDefault := false
+		var defaultValue ast.Expression
 		p.skipWhitespaceAndComments()
 		if p.match("=") {
-			hasDefault = true
 			p.advance() // consume '='
 			p.skipWhitespaceAndComments()
 
-			// Parse the default value expression but don't store it
-			// We need to skip until we find a comma or closing paren
-			depth := 0
-			for !p.isAtEnd() {
-				if p.match("(") || p.match("[") || p.match("{") {
-					depth++
-				} else if p.match(")") || p.match("]") || p.match("}") {
-					if depth == 0 && (p.match(")") || p.match(",")) {
-						break
-					}
-					depth--
-				} else if p.match(",") && depth == 0 {
-					break
-				} else {
-					p.advance()
-				}
+			// Parse and store the default value expression
+			defaultValue, err = p.parseAssignmentExpression()
+			if err != nil {
+				return nil, err
 			}
 		}
 
 		param := &ast.Parameter{
 			ID:        id,
 			ParamType: paramType,
-			Optional:  hasDefault,
+			Optional:  defaultValue != nil,
 			Rest:      isRest,
+			Default:   defaultValue,
 			Position:  id.Pos(),
 			EndPos:    p.currentPos(),
 		}
@@ -4236,14 +4224,12 @@ func (p *parser) parseArrowFunction() (*ast.ArrowFunctionExpression, error) {
 			p.skipWhitespaceAndComments()
 
 			// Handle default value
-			hasDefault := false
+			var defaultValue ast.Expression
 			if p.match("=") {
-				hasDefault = true
 				p.advance()
 				p.skipWhitespaceAndComments()
-				// Skip the default value expression for now
-				// TODO: Parse and store default value in AST
-				_, err = p.parseAssignmentExpression()
+				// Parse and store default value in AST
+				defaultValue, err = p.parseAssignmentExpression()
 				if err != nil {
 					return nil, err
 				}
@@ -4253,8 +4239,9 @@ func (p *parser) parseArrowFunction() (*ast.ArrowFunctionExpression, error) {
 			param := &ast.Parameter{
 				ID:        id,
 				ParamType: paramType,
-				Optional:  hasDefault,
+				Optional:  defaultValue != nil,
 				Rest:      isRest,
+				Default:   defaultValue,
 				Position:  id.Pos(),
 				EndPos:    p.currentPos(),
 			}
@@ -5546,12 +5533,12 @@ func (p *parser) parseParameter() (*ast.Parameter, error) {
 	}
 
 	// Parse default value if present
+	var defaultValue ast.Expression
 	if p.match("=") {
 		p.advance()
 		p.skipWhitespaceAndComments()
-		// Skip the default value expression for now
-		// TODO: Parse and store default value in AST
-		_, err = p.parseAssignmentExpression()
+		// Parse and store default value in AST
+		defaultValue, err = p.parseAssignmentExpression()
 		if err != nil {
 			return nil, err
 		}
@@ -5561,8 +5548,9 @@ func (p *parser) parseParameter() (*ast.Parameter, error) {
 	return &ast.Parameter{
 		ID:        paramName,
 		ParamType: paramType,
-		Optional:  isOptional,
+		Optional:  isOptional || defaultValue != nil,
 		Rest:      isRest,
+		Default:   defaultValue,
 		Public:    isPublic,
 		Private:   isPrivate,
 		Protected: isProtected,

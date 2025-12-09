@@ -419,12 +419,13 @@ type Parameter struct {
 	ID           *Identifier
 	ParamType    TypeNode
 	Optional     bool
-	Rest         bool   // true if this is a rest parameter (...args)
-	OriginalName string // For destructuring: { prop: var } -> OriginalName="prop"
-	Public       bool   // Parameter property: public x: number
-	Private      bool   // Parameter property: private x: number
-	Protected    bool   // Parameter property: protected x: number
-	Readonly     bool   // Parameter property: readonly x: number
+	Rest         bool       // true if this is a rest parameter (...args)
+	Default      Expression // Default value: function f(x: number = 42)
+	OriginalName string     // For destructuring: { prop: var } -> OriginalName="prop"
+	Public       bool       // Parameter property: public x: number
+	Private      bool       // Parameter property: private x: number
+	Protected    bool       // Parameter property: protected x: number
+	Readonly     bool       // Parameter property: readonly x: number
 	Position     Position
 	EndPos       Position
 }
