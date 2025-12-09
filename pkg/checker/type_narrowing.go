@@ -38,9 +38,74 @@ func (tn *TypeNarrowing) AnalyzeCondition(condition ast.Expression) (thenNarrowi
 	} else if memberExpr, ok := condition.(*ast.MemberExpression); ok {
 		// Handle truthiness check: if (obj.prop)
 		tn.analyzeTruthiness(memberExpr, thenNarrowing, elseNarrowing)
+	} else if callExpr, ok := condition.(*ast.CallExpression); ok {
+		// Handle type guard function calls: if (isString(val))
+		tn.analyzeTypeGuardCall(callExpr, thenNarrowing, elseNarrowing)
 	}
 
 	return thenNarrowing, elseNarrowing
+}
+
+// analyzeTypeGuardCall analyzes calls to type guard functions with "value is Type" return types
+func (tn *TypeNarrowing) analyzeTypeGuardCall(call *ast.CallExpression, thenNarrowing, elseNarrowing map[string]*types.Type) {
+	// Get the function name
+	funcName := ""
+	if id, ok := call.Callee.(*ast.Identifier); ok {
+		funcName = id.Name
+	} else {
+		return
+	}
+
+	// Look up the function's symbol
+	symbol, exists := tn.tc.symbolTable.ResolveSymbol(funcName)
+	if !exists || symbol.Node == nil {
+		return
+	}
+
+	// Check if the function declaration has a TypePredicate return type
+	funcDecl, ok := symbol.Node.(*ast.FunctionDeclaration)
+	if !ok {
+		return
+	}
+
+	// Check for TypePredicate return type
+	typePredicate, ok := funcDecl.ReturnType.(*ast.TypePredicate)
+	if !ok || typePredicate.Asserts {
+		// Not a type guard (it's an assertion or doesn't have a type predicate)
+		return
+	}
+
+	// Get the parameter name from the type predicate
+	paramName := typePredicate.ParameterName
+
+	// Find which argument corresponds to this parameter
+	paramIndex := -1
+	for i, param := range funcDecl.Params {
+		if param.ID != nil && param.ID.Name == paramName.Name {
+			paramIndex = i
+			break
+		}
+	}
+
+	if paramIndex < 0 || paramIndex >= len(call.Arguments) {
+		return
+	}
+
+	// Get the variable name from the corresponding argument
+	arg := call.Arguments[paramIndex]
+	argId, ok := arg.(*ast.Identifier)
+	if !ok {
+		return
+	}
+
+	// Resolve the asserted type
+	assertedType := tn.tc.convertTypeNode(typePredicate.TargetType)
+	if assertedType == nil {
+		return
+	}
+
+	// Apply narrowing in the then branch
+	thenNarrowing[argId.Name] = assertedType
 }
 
 // analyzeTypeof analyzes typeof checks
