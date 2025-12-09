@@ -12,6 +12,8 @@ func (tc *TypeChecker) registerClassType(decl *ast.ClassDeclaration, filename st
 	// Build instance type with method signatures
 	instanceProperties := make(map[string]*types.Type)
 	staticProperties := make(map[string]*types.Type)
+	privateProperties := make(map[string]bool)
+	protectedProperties := make(map[string]bool)
 
 	// Collect method and property types
 	for _, member := range decl.Body {
@@ -38,6 +40,13 @@ func (tc *TypeChecker) registerClassType(decl *ast.ClassDeclaration, filename st
 							}
 
 							instanceProperties[param.ID.Name] = paramType
+							// Track visibility
+							if param.Private {
+								privateProperties[param.ID.Name] = true
+							}
+							if param.Protected {
+								protectedProperties[param.ID.Name] = true
+							}
 						}
 					}
 				}
@@ -91,11 +100,23 @@ func (tc *TypeChecker) registerClassType(decl *ast.ClassDeclaration, filename st
 			} else {
 				instanceProperties[m.Key.Name] = propType
 			}
+
+			// Track visibility for non-static properties
+			if !m.Static {
+				if m.AccessModifier == "private" {
+					privateProperties[m.Key.Name] = true
+				}
+				if m.AccessModifier == "protected" {
+					protectedProperties[m.Key.Name] = true
+				}
+			}
 		}
 	}
 
-	// Create and register instance type
+	// Create and register instance type with visibility tracking
 	instanceType := types.NewObjectType(decl.ID.Name, instanceProperties)
+	instanceType.PrivateProperties = privateProperties
+	instanceType.ProtectedProperties = protectedProperties
 
 	// Create constructor type (function that returns instance)
 	constructorType := types.NewFunctionType(nil, instanceType)

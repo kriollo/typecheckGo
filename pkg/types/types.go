@@ -111,6 +111,10 @@ type Type struct {
 	IsReadonly     bool        // Indica si el tipo es readonly (para arrays y propiedades)
 	ThisType       *Type       // Tipo de 'this' para funciones
 
+	// Property visibility tracking for access control
+	PrivateProperties   map[string]bool // Properties that are private
+	ProtectedProperties map[string]bool // Properties that are protected
+
 	// Para mapped types: { [K in keyof T]: U }
 	TypeParameter *Type // K
 	Constraint    *Type // keyof T

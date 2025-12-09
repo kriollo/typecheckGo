@@ -1318,6 +1318,13 @@ func (tc *TypeChecker) checkMemberExpression(member *ast.MemberExpression, filen
 							fmt.Sprintf("Property '%s' does not exist on type '%s'.", id.Name, objectType.String()),
 							"TS2339", "error")
 					}
+				} else {
+					// Property exists - check if it's private
+					if objectType.PrivateProperties != nil && objectType.PrivateProperties[id.Name] {
+						tc.addError(filename, id.Pos().Line, id.Pos().Column,
+							fmt.Sprintf("Property '%s' is private and only accessible within class '%s'.", id.Name, objectType.Name),
+							"TS2341", "error")
+					}
 				}
 			} else if objectType.Kind == types.ArrayType {
 				// Check for array methods on readonly arrays
@@ -1344,6 +1351,31 @@ func (tc *TypeChecker) checkMemberExpression(member *ast.MemberExpression, filen
 							fmt.Sprintf("Property '%s' does not exist on type '%s'.", id.Name, objectType.String()),
 							"TS2339", "error")
 					}
+				}
+			} else if objectType.Kind == types.StringType {
+				// Validate string methods - check for number methods called on string
+				numberOnlyMethods := map[string]bool{
+					"toFixed": true, "toExponential": true, "toPrecision": true,
+				}
+				if numberOnlyMethods[id.Name] {
+					tc.addError(filename, id.Pos().Line, id.Pos().Column,
+						fmt.Sprintf("Property '%s' does not exist on type 'string'.", id.Name),
+						"TS2339", "error")
+				}
+			} else if objectType.Kind == types.NumberType {
+				// Validate number methods - check for string methods called on number
+				stringOnlyMethods := map[string]bool{
+					"toUpperCase": true, "toLowerCase": true, "charAt": true, "charCodeAt": true,
+					"concat": true, "indexOf": true, "lastIndexOf": true, "localeCompare": true,
+					"match": true, "replace": true, "search": true, "slice": true, "split": true,
+					"substring": true, "trim": true, "trimStart": true, "trimEnd": true,
+					"padStart": true, "padEnd": true, "repeat": true, "startsWith": true, "endsWith": true,
+					"includes": true, "normalize": true,
+				}
+				if stringOnlyMethods[id.Name] {
+					tc.addError(filename, id.Pos().Line, id.Pos().Column,
+						fmt.Sprintf("Property '%s' does not exist on type 'number'.", id.Name),
+						"TS2339", "error")
 				}
 			}
 		}
