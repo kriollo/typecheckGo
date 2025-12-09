@@ -145,6 +145,40 @@ func (smv *StaticMemberValidator) ValidateStaticMethodCall(
 	}
 }
 
+// knownGlobalConstructors is a set of globally available constructor functions
+// that can be called with 'new' even if they're not defined as classes in the user's code
+var knownGlobalConstructors = map[string]bool{
+	// Error types
+	"Error": true, "TypeError": true, "RangeError": true, "SyntaxError": true,
+	"ReferenceError": true, "URIError": true, "EvalError": true, "AggregateError": true,
+	// Collections
+	"Map": true, "Set": true, "WeakMap": true, "WeakSet": true,
+	// Promises
+	"Promise": true,
+	// Other common global constructors
+	"Date": true, "RegExp": true, "ArrayBuffer": true, "DataView": true,
+	"SharedArrayBuffer": true,
+	// Typed arrays
+	"Int8Array": true, "Uint8Array": true, "Uint8ClampedArray": true,
+	"Int16Array": true, "Uint16Array": true,
+	"Int32Array": true, "Uint32Array": true,
+	"Float32Array": true, "Float64Array": true,
+	"BigInt64Array": true, "BigUint64Array": true,
+	// Other
+	"URL": true, "URLSearchParams": true,
+	"Headers": true, "Request": true, "Response": true,
+	"FormData": true, "Blob": true, "File": true, "FileReader": true,
+	"Event": true, "CustomEvent": true, "EventTarget": true,
+	"AbortController": true, "AbortSignal": true,
+	"TextEncoder": true, "TextDecoder": true,
+	"MessageChannel": true, "MessagePort": true,
+	"Worker": true, "SharedWorker": true,
+	"WebSocket":      true,
+	"XMLHttpRequest": true,
+	"Image":          true, "Audio": true, "Video": true,
+	"Object": true, "Array": true, "Function": true, "Boolean": true, "Number": true, "String": true,
+}
+
 // ValidateConstructorInstantiation validates 'new' expressions
 func (smv *StaticMemberValidator) ValidateConstructorInstantiation(
 	newExpr *ast.NewExpression,
@@ -157,6 +191,11 @@ func (smv *StaticMemberValidator) ValidateConstructorInstantiation(
 	// Get class identifier
 	classId, ok := newExpr.Callee.(*ast.Identifier)
 	if !ok {
+		return
+	}
+
+	// Check if it's a known global constructor - these are always allowed
+	if knownGlobalConstructors[classId.Name] {
 		return
 	}
 
