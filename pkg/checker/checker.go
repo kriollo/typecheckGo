@@ -2352,6 +2352,14 @@ func (tc *TypeChecker) needsLiteralType(targetType *types.Type) bool {
 			if member.Kind == types.LiteralType {
 				return true
 			}
+			// Check for discriminated unions: objects with literal properties
+			if member.Kind == types.ObjectType && member.Properties != nil {
+				for _, propType := range member.Properties {
+					if propType.Kind == types.LiteralType {
+						return true
+					}
+				}
+			}
 		}
 	}
 	return false
@@ -2364,6 +2372,36 @@ func (tc *TypeChecker) inferLiteralType(expr ast.Expression) *types.Type {
 			return types.NewLiteralType(lit.Value)
 		}
 	}
+
+	// Handle object expressions with literal property values (for discriminated unions)
+	if objExpr, ok := expr.(*ast.ObjectExpression); ok {
+		properties := make(map[string]*types.Type)
+		for _, propNode := range objExpr.Properties {
+			if prop, ok := propNode.(*ast.Property); ok && prop.Key != nil {
+				// Get property name
+				var propName string
+				if ident, ok := prop.Key.(*ast.Identifier); ok {
+					propName = ident.Name
+				} else if lit, ok := prop.Key.(*ast.Literal); ok {
+					propName = fmt.Sprintf("%v", lit.Value)
+				}
+
+				if propName != "" && prop.Value != nil {
+					// For literal values, preserve the literal type
+					if lit, ok := prop.Value.(*ast.Literal); ok && lit.Value != nil {
+						properties[propName] = types.NewLiteralType(lit.Value)
+					} else {
+						// Otherwise infer normally
+						properties[propName] = tc.inferencer.InferType(prop.Value)
+					}
+				}
+			}
+		}
+		if len(properties) > 0 {
+			return types.NewObjectType("", properties)
+		}
+	}
+
 	// If not a literal, fall back to normal inference
 	return tc.inferencer.InferType(expr)
 }
@@ -3505,6 +3543,40 @@ func (tc *TypeChecker) substituteType(t *types.Type, substitutions map[string]*t
 		return &types.Type{Kind: types.TupleType, Types: newElements}
 	case types.RestType:
 		return types.NewRestType(tc.substituteType(t.ElementType, substitutions))
+	case types.IndexedAccessType:
+		// Substitute the object type and index type
+		objectType := tc.substituteType(t.ObjectType, substitutions)
+		indexType := tc.substituteType(t.IndexType, substitutions)
+
+		// If both are resolved, try to get the actual property type
+		if objectType.Kind == types.ObjectType && objectType.Properties != nil {
+			// If indexType is a literal string, get that property
+			if indexType.Kind == types.LiteralType {
+				if propName, ok := indexType.Value.(string); ok {
+					// Strip quotes if present
+					if len(propName) >= 2 && ((propName[0] == '"' && propName[len(propName)-1] == '"') || (propName[0] == '\'' && propName[len(propName)-1] == '\'')) {
+						propName = propName[1 : len(propName)-1]
+					}
+					if propType, exists := objectType.Properties[propName]; exists {
+						return propType
+					}
+				}
+			}
+			// If indexType is a string type (keyof T) and we want any property
+			if indexType.Kind == types.StringType && len(objectType.Properties) > 0 {
+				// Return union of all property types
+				var propTypes []*types.Type
+				for _, propType := range objectType.Properties {
+					propTypes = append(propTypes, propType)
+				}
+				if len(propTypes) == 1 {
+					return propTypes[0]
+				}
+				return types.NewUnionType(propTypes)
+			}
+		}
+		// Return unresolved indexed access type
+		return types.NewIndexedAccessType(objectType, indexType)
 	case types.ObjectType:
 		// For object types, substitute type parameters in properties
 		if t.Properties != nil {
@@ -3599,7 +3671,7 @@ func (tc *TypeChecker) substituteType(t *types.Type, substitutions map[string]*t
 
 				props[key] = propType
 			}
-			return types.NewObjectType("Mapped", props)
+			return types.NewObjectType("", props)
 		}
 
 		// If not resolvable, return new MappedType with substituted components

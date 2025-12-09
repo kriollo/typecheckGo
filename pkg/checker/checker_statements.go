@@ -26,6 +26,8 @@ func (tc *TypeChecker) checkStatement(stmt ast.Statement, filename string) {
 		tc.checkReturnStatement(s, filename)
 	case *ast.ExpressionStatement:
 		tc.checkExpression(s.Expression, filename)
+		// Apply assertion narrowing if this is an assertion function call
+		tc.applyAssertionNarrowingIfNeeded(s.Expression)
 	case *ast.IfStatement:
 		tc.checkIfStatement(s, filename)
 	case *ast.ImportDeclaration:
@@ -454,4 +456,64 @@ func (tc *TypeChecker) unwrapPromiseType(t *types.Type) *types.Type {
 
 	// Not a Promise type, return as-is
 	return t
+}
+
+// applyAssertionNarrowingIfNeeded applies type narrowing after assertion function calls
+// For example: assertIsString(val) will narrow val to string type
+func (tc *TypeChecker) applyAssertionNarrowingIfNeeded(expr ast.Expression) {
+	call, ok := expr.(*ast.CallExpression)
+	if !ok {
+		return
+	}
+
+	// Get function name
+	funcName := ""
+	if id, ok := call.Callee.(*ast.Identifier); ok {
+		funcName = id.Name
+	}
+	if funcName == "" {
+		return
+	}
+
+	// Look up function symbol
+	symbol, exists := tc.symbolTable.ResolveSymbol(funcName)
+	if !exists || symbol.Node == nil {
+		return
+	}
+
+	funcDecl, ok := symbol.Node.(*ast.FunctionDeclaration)
+	if !ok {
+		return
+	}
+
+	// Check for assertion predicate (asserts value is Type)
+	typePredicate, ok := funcDecl.ReturnType.(*ast.TypePredicate)
+	if !ok || !typePredicate.Asserts {
+		return
+	}
+
+	// Find parameter index
+	paramName := typePredicate.ParameterName.Name
+	paramIndex := -1
+	for i, param := range funcDecl.Params {
+		if param.ID != nil && param.ID.Name == paramName {
+			paramIndex = i
+			break
+		}
+	}
+	if paramIndex < 0 || paramIndex >= len(call.Arguments) {
+		return
+	}
+
+	// Get variable name from argument
+	argId, ok := call.Arguments[paramIndex].(*ast.Identifier)
+	if !ok {
+		return
+	}
+
+	// Resolve and apply the narrowed type
+	assertedType := tc.convertTypeNode(typePredicate.TargetType)
+	if assertedType != nil {
+		tc.varTypeCache[argId.Name] = assertedType
+	}
 }
