@@ -50,12 +50,14 @@ func (ti *TypeInferencer) InferType(expr ast.Expression) *Type {
 	case *ast.Literal:
 		return ti.inferLiteralType(e)
 	case *ast.Identifier:
-		// First check if we have a cached type for this specific node
-		if cachedType, ok := ti.typeCache[e]; ok {
+		// Check by variable name first - this is the authoritative source for declared types
+		// registered during first pass (functions, classes, variables etc.)
+		if cachedType, ok := ti.varTypeCache[e.Name]; ok {
 			return cachedType
 		}
-		// Then check by variable name
-		if cachedType, ok := ti.varTypeCache[e.Name]; ok {
+		// Then check if we have a cached type for this specific node
+		// (used for inferred types from context)
+		if cachedType, ok := ti.typeCache[e]; ok {
 			return cachedType
 		}
 		// Check global environment

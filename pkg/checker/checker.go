@@ -3125,7 +3125,11 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 
 				if symbol.Type == symbols.TypeParameterSymbol {
 					return types.NewTypeParameter(t.Name, nil, nil)
-				} else if symbol.Type == symbols.TypeAliasSymbol {
+				}
+
+				// DEBUG: trace symbol type
+
+				if symbol.Type == symbols.TypeAliasSymbol {
 					if symbol.Node == nil {
 						if t.Name == "Exclude" {
 							fmt.Fprintf(os.Stderr, "DEBUG: Exclude symbol has no node\n")
@@ -3176,6 +3180,18 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 					return resolvedType
 				} else if symbol.Type == symbols.InterfaceSymbol {
 					if symbol.Node == nil {
+						// For interfaces loaded from .d.ts files without AST nodes,
+						// preserve type arguments to maintain proper type information
+						// (e.g., Promise<number> should become ObjectType with TypeParameters=[number])
+						if len(t.TypeArguments) > 0 {
+							typeArgs := make([]*types.Type, len(t.TypeArguments))
+							for i, arg := range t.TypeArguments {
+								typeArgs[i] = tc.convertTypeNode(arg)
+							}
+							objType := types.NewObjectType(t.Name, nil)
+							objType.TypeParameters = typeArgs
+							return objType
+						}
 						return types.Any
 					}
 					interfaceDecl := symbol.Node.(*ast.InterfaceDeclaration)
@@ -3277,6 +3293,17 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 					return types.NewObjectType(t.Name, properties)
 				}
 			}
+
+			// Fallback for generic types with type arguments that couldn't be resolved
+			// (e.g., Promise<number> when Promise isn't in the symbol table)
+			// Preserve the type arguments in the ObjectType for proper type checking
+			typeArgs := make([]*types.Type, len(t.TypeArguments))
+			for i, arg := range t.TypeArguments {
+				typeArgs[i] = tc.convertTypeNode(arg)
+			}
+			objType := types.NewObjectType(t.Name, nil)
+			objType.TypeParameters = typeArgs
+			return objType
 		}
 
 		// For other type references without type arguments, check if it's an interface
