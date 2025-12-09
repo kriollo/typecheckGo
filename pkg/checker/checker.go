@@ -2164,14 +2164,20 @@ func (tc *TypeChecker) isAssignableToUncached(sourceType, targetType *types.Type
 	// e.g., 'onClick' assignable to `on${'Click' | 'Hover'}`
 	if sourceType.Kind == types.LiteralType && targetType.Kind == types.TemplateLiteralType {
 		if strVal, ok := sourceType.Value.(string); ok {
-			// Expand the template literal type to all possible string literals
+			// Try to expand the template literal type to all possible string literals
 			possibleValues := tc.expandTemplateLiteralType(targetType)
-			for _, possible := range possibleValues {
-				if strVal == possible {
-					return true
+			if len(possibleValues) > 0 {
+				// Template was expandable - check against all possible values
+				for _, possible := range possibleValues {
+					if strVal == possible {
+						return true
+					}
 				}
+				return false
 			}
-			return false
+			// Template contains unexpandable types (e.g., Capitalize<string>)
+			// Fall back to pattern matching
+			return sourceType.IsAssignableTo(targetType)
 		}
 	}
 
@@ -2652,11 +2658,8 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 		templateTypes := make([]*types.Type, len(t.Types))
 		for i, typeNode := range t.Types {
 			templateTypes[i] = tc.convertTypeNode(typeNode)
-			fmt.Fprintf(os.Stderr, "DEBUG TemplateLiteralType part %d: kind=%v, intrinsicKind=%s\n", i, templateTypes[i].Kind, templateTypes[i].IntrinsicKind)
 		}
-		result := types.NewTemplateLiteralType(t.Parts, templateTypes)
-		fmt.Fprintf(os.Stderr, "DEBUG TemplateLiteralType result: %s\n", result.String())
-		return result
+		return types.NewTemplateLiteralType(t.Parts, templateTypes)
 	case *ast.TypeReference:
 		// Handle intrinsic string manipulation types
 		if (t.Name == "Capitalize" || t.Name == "Uncapitalize" || t.Name == "Uppercase" || t.Name == "Lowercase") && len(t.TypeArguments) == 1 {
@@ -2893,7 +2896,30 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 					Types: []*types.Type{},
 				}
 			}
+		}
 
+		// Handle Exclude<T, U> utility type - T extends U ? never : T (distributive)
+		if t.Name == "Exclude" && len(t.TypeArguments) == 2 {
+			T := tc.convertTypeNode(t.TypeArguments[0])
+			U := tc.convertTypeNode(t.TypeArguments[1])
+			// Use distributive conditional type resolution
+			return tc.resolveConditionalType(T, U, types.Never, T)
+		}
+
+		// Handle Extract<T, U> utility type - T extends U ? T : never (distributive)
+		if t.Name == "Extract" && len(t.TypeArguments) == 2 {
+			T := tc.convertTypeNode(t.TypeArguments[0])
+			U := tc.convertTypeNode(t.TypeArguments[1])
+			// Use distributive conditional type resolution
+			return tc.resolveConditionalType(T, U, T, types.Never)
+		}
+
+		// Handle NonNullable<T> utility type - Exclude null and undefined from T
+		if t.Name == "NonNullable" && len(t.TypeArguments) == 1 {
+			T := tc.convertTypeNode(t.TypeArguments[0])
+			nullOrUndefined := types.NewUnionType([]*types.Type{types.Null, types.Undefined})
+			// Use distributive conditional type resolution
+			return tc.resolveConditionalType(T, nullOrUndefined, types.Never, T)
 		}
 
 		// Handle keyof operator (parsed as TypeReference with name starting with "keyof ")
@@ -3643,7 +3669,27 @@ func (tc *TypeChecker) resolveConditionalType(checkType, extendsType, trueType, 
 	if checkType.Kind == types.UnionType {
 		var results []*types.Type
 		for _, t := range checkType.Types {
-			results = append(results, tc.resolveConditionalType(t, extendsType, trueType, falseType))
+			// When distributing, if trueType or falseType equals the original checkType (the full union),
+			// we need to substitute it with the current member t
+			actualTrueType := trueType
+			if trueType == checkType {
+				actualTrueType = t
+			}
+			actualFalseType := falseType
+			if falseType == checkType {
+				actualFalseType = t
+			}
+			result := tc.resolveConditionalType(t, extendsType, actualTrueType, actualFalseType)
+			// Filter out never types from the result union
+			if result != types.Never {
+				results = append(results, result)
+			}
+		}
+		if len(results) == 0 {
+			return types.Never
+		}
+		if len(results) == 1 {
+			return results[0]
 		}
 		return types.NewUnionType(results)
 	}

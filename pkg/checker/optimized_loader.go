@@ -12,6 +12,31 @@ import (
 	"tstypechecker/pkg/types"
 )
 
+// builtinUtilityTypes contains utility types that must be parsed with full AST
+// These types use conditional types (T extends U ? X : Y) which require AST nodes
+// for proper instantiation. The optimized loader should never overwrite these.
+var builtinUtilityTypes = map[string]bool{
+	"Exclude":               true,
+	"Extract":               true,
+	"NonNullable":           true,
+	"Partial":               true,
+	"Required":              true,
+	"Readonly":              true,
+	"Pick":                  true,
+	"Omit":                  true,
+	"Record":                true,
+	"Parameters":            true,
+	"ReturnType":            true,
+	"ConstructorParameters": true,
+	"InstanceType":          true,
+	"ThisParameterType":     true,
+	"OmitThisParameter":     true,
+	"Uppercase":             true,
+	"Lowercase":             true,
+	"Capitalize":            true,
+	"Uncapitalize":          true,
+}
+
 // OptimizedLibLoader provides highly optimized loading of TypeScript library files
 type OptimizedLibLoader struct {
 	tc               *TypeChecker
@@ -365,6 +390,11 @@ func extractTypeAliasName(line string) string {
 			}
 			name = strings.TrimSpace(name)
 			if isValidIdentifier(name) {
+				// Skip builtin utility types - they need full AST parsing
+				// for conditional type evaluation to work correctly
+				if builtinUtilityTypes[name] {
+					return ""
+				}
 				return name
 			}
 		}

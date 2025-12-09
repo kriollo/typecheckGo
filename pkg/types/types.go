@@ -621,10 +621,7 @@ func (t *Type) IsAssignableTo(target *Type) bool {
 		switch t.Value.(type) {
 		case string:
 			if target.Kind == TemplateLiteralType {
-				fmt.Printf("DEBUG IsAssignableTo: checking literal '%s' against template\n", t.Value.(string))
-				result := target.matchesTemplate(t.Value.(string))
-				fmt.Printf("DEBUG IsAssignableTo: result=%v\n", result)
-				return result
+				return target.matchesTemplate(t.Value.(string))
 			}
 			return target.Kind == StringType
 		case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
@@ -646,47 +643,74 @@ func (t *Type) matchesTemplate(s string) bool {
 		pattern += regexp.QuoteMeta(part)
 		if i < len(t.TemplateTypes) {
 			subType := t.TemplateTypes[i]
-			switch subType.Kind {
-			case StringType:
-				pattern += ".*"
-			case IntrinsicStringType:
-				// Handle intrinsic string types with specific patterns
-				switch subType.IntrinsicKind {
-				case "Capitalize":
-					// Match string starting with uppercase letter
-					pattern += "[A-Z].*"
-				case "Uncapitalize":
-					// Match string starting with lowercase letter
-					pattern += "[a-z].*"
-				case "Uppercase":
-					// Match all uppercase string
-					pattern += "[A-Z]+"
-				case "Lowercase":
-					// Match all lowercase string
-					pattern += "[a-z]+"
-				default:
-					pattern += ".*"
-				}
-			case NumberType:
-				pattern += "[0-9.]+" // Simplified
-			case BooleanType:
-				pattern += "(true|false)"
-			case LiteralType:
-				if str, ok := subType.Value.(string); ok {
-					pattern += regexp.QuoteMeta(str)
-				}
-			// TODO: Handle unions and other types
-			default:
-				pattern += ".*"
-			}
+			pattern += buildPatternForType(subType)
 		}
 	}
 	pattern += "$"
-	// Debug: print pattern
-	fmt.Printf("DEBUG matchesTemplate: pattern='%s', string='%s'\n", pattern, s)
 	matched, _ := regexp.MatchString(pattern, s)
-	fmt.Printf("DEBUG matchesTemplate: matched=%v\n", matched)
 	return matched
+}
+
+// buildPatternForType converts a type into a regex pattern for template matching
+func buildPatternForType(t *Type) string {
+	switch t.Kind {
+	case StringType:
+		return ".*"
+	case IntrinsicStringType:
+		// Handle intrinsic string types with specific patterns
+		switch t.IntrinsicKind {
+		case "Capitalize":
+			// Match string starting with uppercase letter
+			return "[A-Z].*"
+		case "Uncapitalize":
+			// Match string starting with lowercase letter
+			return "[a-z].*"
+		case "Uppercase":
+			// Match all uppercase string
+			return "[A-Z]*"
+		case "Lowercase":
+			// Match all lowercase string
+			return "[a-z]*"
+		default:
+			return ".*"
+		}
+	case NumberType:
+		return "[0-9.]+" // Simplified
+	case BooleanType:
+		return "(true|false)"
+	case LiteralType:
+		if str, ok := t.Value.(string); ok {
+			// Strip surrounding quotes if present
+			normalized := str
+			if len(str) >= 2 && ((str[0] == '\'' && str[len(str)-1] == '\'') || (str[0] == '"' && str[len(str)-1] == '"')) {
+				normalized = str[1 : len(str)-1]
+			}
+			return regexp.QuoteMeta(normalized)
+		}
+		return ".*"
+	case UnionType:
+		// Convert union to regex alternation: "GET" | "POST" -> (GET|POST)
+		var alternatives []string
+		for _, member := range t.Types {
+			alternatives = append(alternatives, buildPatternForType(member))
+		}
+		if len(alternatives) == 0 {
+			return ".*"
+		}
+		return "(" + strings.Join(alternatives, "|") + ")"
+	case TemplateLiteralType:
+		// Recursively build pattern for nested template literal
+		var nestedPattern string
+		for i, part := range t.TemplateParts {
+			nestedPattern += regexp.QuoteMeta(part)
+			if i < len(t.TemplateTypes) {
+				nestedPattern += buildPatternForType(t.TemplateTypes[i])
+			}
+		}
+		return nestedPattern
+	default:
+		return ".*"
+	}
 }
 
 // Tipos primitivos predefinidos
