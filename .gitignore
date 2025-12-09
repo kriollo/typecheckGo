@@ -15,3 +15,4 @@ ts*.exe
 type*.exe
 
 *.tgz
+cpu.prof
