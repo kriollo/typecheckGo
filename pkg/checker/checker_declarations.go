@@ -376,18 +376,6 @@ func (tc *TypeChecker) checkExportDeclaration(exportDecl *ast.ExportDeclaration,
 	// First, check the exported declaration itself (e.g., export default class, export class, etc.)
 	if exportDecl.Declaration != nil {
 		tc.checkStatement(exportDecl.Declaration, filename)
-
-		// Check for non-descriptive function names in exports
-		if funcDecl, ok := exportDecl.Declaration.(*ast.FunctionDeclaration); ok {
-			if funcDecl.ID != nil {
-				name := funcDecl.ID.Name
-				if name == "func" || name == "fn" || name == "temp" {
-					tc.addError(filename, funcDecl.ID.Pos().Line, funcDecl.ID.Pos().Column,
-						fmt.Sprintf("Exported function has non-descriptive name '%s'. Export functions must have descriptive names.", name),
-						"LintError", "error")
-				}
-			}
-		}
 	}
 
 	if tc.moduleResolver == nil {

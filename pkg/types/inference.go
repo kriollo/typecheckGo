@@ -462,9 +462,65 @@ func (ti *TypeInferencer) inferBinaryExpressionType(expr *ast.BinaryExpression) 
 		// Operadores de comparación siempre retornan boolean
 		return Boolean
 
-	case "&&", "||", "??":
-		// Operadores lógicos retornan la unión de los tipos de los operandos
+	case "&&":
+		// Logical AND: returns left type if falsy, otherwise right type
+		// Result is union of both types
 		return NewUnionType([]*Type{leftType, rightType})
+
+	case "||":
+		// Logical OR: returns left type if truthy, otherwise right type
+		// Result is union of both types
+		return NewUnionType([]*Type{leftType, rightType})
+
+	case "??":
+		// Nullish coalescing: T | null | undefined ?? U => NonNullable<T> | U
+		// Remove null and undefined from left type
+		var nonNullTypes []*Type
+		if leftType.Kind == UnionType {
+			for _, t := range leftType.Types {
+				if t.Kind != NullType && t.Kind != UndefinedType {
+					nonNullTypes = append(nonNullTypes, t)
+				}
+			}
+		} else if leftType.Kind != NullType && leftType.Kind != UndefinedType {
+			nonNullTypes = append(nonNullTypes, leftType)
+		}
+
+		// If left has no non-null types, result is just the right type
+		if len(nonNullTypes) == 0 {
+			return rightType
+		}
+
+		// If left has exactly one non-null type and right is same type, return that type
+		if len(nonNullTypes) == 1 {
+			// Check if right type is same as left non-null type or is a literal of same kind
+			leftNonNull := nonNullTypes[0]
+			if leftNonNull.Kind == rightType.Kind {
+				return leftNonNull
+			}
+			// If right is a literal type that widens to the left type
+			if rightType.Kind == LiteralType {
+				switch rightType.Value.(type) {
+				case string:
+					if leftNonNull.Kind == StringType {
+						return String
+					}
+				case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
+					if leftNonNull.Kind == NumberType {
+						return Number
+					}
+				case bool:
+					if leftNonNull.Kind == BooleanType {
+						return Boolean
+					}
+				}
+			}
+			return leftNonNull
+		}
+
+		// Multiple non-null types, create union with right type
+		allTypes := append(nonNullTypes, rightType)
+		return NewUnionType(allTypes)
 
 	default:
 		return Unknown
