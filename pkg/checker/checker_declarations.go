@@ -246,7 +246,19 @@ func (tc *TypeChecker) checkFunctionDeclaration(decl *ast.FunctionDeclaration, f
 			unifiedReturnType := tc.controlFlow.UnifyReturnTypes(returnInfo.ReturnTypes)
 
 			if declaredReturnType != nil && unifiedReturnType != nil {
-				if !tc.isAssignableTo(unifiedReturnType, declaredReturnType) {
+				// For async functions, unwrap Promise<T> to get T
+				expectedType := declaredReturnType
+				if decl.Async && declaredReturnType.Kind == types.ObjectType && declaredReturnType.Name == "Promise" {
+					// Extract the type parameter T from Promise<T>
+					if len(declaredReturnType.TypeParameters) > 0 {
+						expectedType = declaredReturnType.TypeParameters[0]
+					} else {
+						// Promise with no type parameter means Promise<any>
+						expectedType = types.Any
+					}
+				}
+
+				if !tc.isAssignableTo(unifiedReturnType, expectedType) {
 					msg := fmt.Sprintf("Type '%s' is not assignable to type '%s'.", unifiedReturnType.String(), declaredReturnType.String())
 					tc.addError(filename, decl.ReturnType.Pos().Line, decl.ReturnType.Pos().Column, msg, "TS2322", "error")
 				}
