@@ -566,22 +566,43 @@ func (ti *TypeInferencer) inferArrayType(arr *ast.ArrayExpression) *Type {
 		return NewArrayType(Any)
 	}
 
-	// Si el contexto espera una tupla, infiere TupleType
-	// (esto requiere que el checker pase el tipo esperado, pero aquí lo forzamos si la longitud es fija y los tipos son heterogéneos)
-	elementTypes := make([]*Type, len(arr.Elements))
-	isHomogeneous := true
-	firstType := ti.InferType(arr.Elements[0])
-	elementTypes[0] = firstType
-	for i := 1; i < len(arr.Elements); i++ {
-		t := ti.InferType(arr.Elements[i])
-		elementTypes[i] = t
-		if t.Kind != firstType.Kind {
-			isHomogeneous = false
+	// Collect all element types, handling spread elements
+	var elementTypes []*Type
+	for _, elem := range arr.Elements {
+		// Handle spread elements: [...arr1] should extract arr1's element type
+		if spread, ok := elem.(*ast.SpreadElement); ok {
+			spreadType := ti.InferType(spread.Argument)
+			// If spreading an array, use its element type
+			if spreadType.Kind == ArrayType && spreadType.ElementType != nil {
+				elementTypes = append(elementTypes, spreadType.ElementType)
+			} else if spreadType.Kind == TupleType && len(spreadType.Types) > 0 {
+				// If spreading a tuple, add all element types
+				elementTypes = append(elementTypes, spreadType.Types...)
+			} else {
+				// Otherwise treat it like unknown
+				elementTypes = append(elementTypes, spreadType)
+			}
+		} else {
+			t := ti.InferType(elem)
+			elementTypes = append(elementTypes, t)
 		}
 	}
+
+	if len(elementTypes) == 0 {
+		return NewArrayType(Any)
+	}
+
 	// Si los tipos son homogéneos, devuelve ArrayType; si son heterogéneos, TupleType
+	isHomogeneous := true
+	firstType := elementTypes[0]
+	for i := 1; i < len(elementTypes); i++ {
+		if elementTypes[i].Kind != firstType.Kind {
+			isHomogeneous = false
+			break
+		}
+	}
+
 	if isHomogeneous {
-		// fmt.Fprintf(os.Stderr, "DEBUG: inferArrayType returning ArrayType: %s[]\n", firstType.String())
 		return NewArrayType(firstType)
 	}
 	return &Type{Kind: TupleType, Types: elementTypes}
