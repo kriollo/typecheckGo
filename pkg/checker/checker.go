@@ -2275,9 +2275,26 @@ func (tc *TypeChecker) isAssignableToUncached(sourceType, targetType *types.Type
 	if sourceType.Kind == types.FunctionType && targetType.Kind == types.ObjectType {
 		if len(targetType.CallSignatures) > 0 {
 			// The target is a callable interface (has call signatures)
-			// A function is assignable to any callable interface
-			// In a full implementation, we would check parameter and return type compatibility
-			return true
+			// Check if the function matches any of the call signatures
+			for _, sig := range targetType.CallSignatures {
+				// Check return type compatibility
+				if sig.ReturnType != nil && sourceType.ReturnType != nil {
+					if !tc.isAssignableTo(sourceType.ReturnType, sig.ReturnType) {
+						return false
+					}
+				}
+				// Check parameter count and types
+				if len(sourceType.Parameters) != len(sig.Parameters) {
+					return false
+				}
+				for i, paramType := range sourceType.Parameters {
+					if !tc.isAssignableTo(paramType, sig.Parameters[i]) {
+						return false
+					}
+				}
+				return true
+			}
+			return false
 		}
 	}
 
