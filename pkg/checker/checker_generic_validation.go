@@ -123,3 +123,67 @@ func (tc *TypeChecker) validateGenericClassInstantiation(
 		}
 	}
 }
+
+// validateGenericConstraints validates that inferred type arguments satisfy
+// the constraints defined on the type parameters of a generic class.
+// e.g., class Container<T extends { id: number }> should reject { name: "John" }
+func (tc *TypeChecker) validateGenericConstraints(
+	classDecl *ast.ClassDeclaration,
+	newExpr *ast.NewExpression,
+	constructorParams []*ast.Parameter,
+	filename string,
+) {
+	// Convert TypeParameters to []*ast.TypeParameter
+	var typeParams []*ast.TypeParameter
+	for _, tp := range classDecl.TypeParameters {
+		if typeParam, ok := tp.(*ast.TypeParameter); ok {
+			typeParams = append(typeParams, typeParam)
+		}
+	}
+
+	if len(typeParams) == 0 {
+		return
+	}
+
+	// Infer type arguments from constructor arguments
+	typeMap := tc.genericInferencer.InferTypeArguments(
+		typeParams,
+		constructorParams,
+		newExpr.Arguments,
+	)
+
+	// Check each type parameter's constraint
+	for _, typeParam := range typeParams {
+		if typeParam.Constraint == nil {
+			continue // No constraint to check
+		}
+
+		// Get the inferred type for this parameter
+		inferredType, exists := typeMap[typeParam.Name.Name]
+		if !exists || inferredType == nil {
+			continue
+		}
+
+		// Convert the constraint to a type
+		constraintType := tc.convertTypeNode(typeParam.Constraint)
+		if constraintType == nil {
+			continue
+		}
+
+		// Check if inferred type satisfies the constraint
+		if !tc.isAssignableTo(inferredType, constraintType) {
+			tc.addError(
+				filename,
+				newExpr.Pos().Line,
+				newExpr.Pos().Column,
+				fmt.Sprintf(
+					"Type '%s' does not satisfy the constraint '%s'.",
+					inferredType.String(),
+					constraintType.String(),
+				),
+				"TS2344",
+				"error",
+			)
+		}
+	}
+}

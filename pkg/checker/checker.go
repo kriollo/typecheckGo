@@ -2124,6 +2124,7 @@ func (tc *TypeChecker) isAssignableToUncached(sourceType, targetType *types.Type
 	}
 
 	// Unknown is assignable to anything except never
+	// Note: This is permissive to avoid false positives in type guard contexts
 	if sourceType.Kind == types.UnknownType {
 		return targetType.Kind != types.NeverType
 	}
@@ -2618,6 +2619,11 @@ func (tc *TypeChecker) checkNewExpression(expr *ast.NewExpression, filename stri
 							// Validate argument types against constructor parameters
 							if len(method.Value.Params) > 0 && len(expr.Arguments) > 0 {
 								tc.checkArgumentTypes(expr.Arguments, method.Value.Params, filename, id.Name)
+							}
+
+							// Validate generic type constraints
+							if len(classDecl.TypeParameters) > 0 && len(expr.Arguments) > 0 {
+								tc.validateGenericConstraints(classDecl, expr, method.Value.Params, filename)
 							}
 						}
 					}
