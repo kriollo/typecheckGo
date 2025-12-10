@@ -293,6 +293,15 @@ func (ti *TypeInferencer) inferMemberExpressionType(expr *ast.MemberExpression) 
 
 // inferCallExpressionType infiere el tipo de retorno de una llamada a función
 func (ti *TypeInferencer) inferCallExpressionType(call *ast.CallExpression) *Type {
+	// Special handling for Promise static methods like Promise.all, Promise.resolve
+	if member, ok := call.Callee.(*ast.MemberExpression); ok {
+		if objId, ok := member.Object.(*ast.Identifier); ok && objId.Name == "Promise" {
+			if propId, ok := member.Property.(*ast.Identifier); ok {
+				return ti.inferPromiseStaticMethodType(propId.Name, call.Arguments)
+			}
+		}
+	}
+
 	// Get the type of the callee
 	calleeType := ti.InferType(call.Callee)
 
@@ -356,6 +365,111 @@ func (ti *TypeInferencer) inferCallExpressionType(call *ast.CallExpression) *Typ
 
 	// Default: return Unknown
 	return Unknown
+}
+
+// inferPromiseStaticMethodType infers the return type of Promise static methods
+func (ti *TypeInferencer) inferPromiseStaticMethodType(methodName string, args []ast.Expression) *Type {
+	switch methodName {
+	case "all":
+		// Promise.all<T>(values: Iterable<T | PromiseLike<T>>): Promise<Awaited<T>[]>
+		// Simplified: infer element types from the array argument
+		if len(args) > 0 {
+			argType := ti.InferType(args[0])
+
+			// If it's an array, extract element types
+			if argType.Kind == ArrayType && argType.ElementType != nil {
+				// Unwrap Promise from element type if present
+				elementType := ti.unwrapPromiseType(argType.ElementType)
+				return ti.createPromiseType(NewArrayType(elementType))
+			}
+
+			// If it's a tuple, create a tuple result
+			if argType.Kind == TupleType && len(argType.Types) > 0 {
+				var unwrappedTypes []*Type
+				for _, t := range argType.Types {
+					unwrappedTypes = append(unwrappedTypes, ti.unwrapPromiseType(t))
+				}
+				return ti.createPromiseType(NewTupleType(unwrappedTypes))
+			}
+		}
+		// Fallback: return Promise<unknown[]>
+		return ti.createPromiseType(NewArrayType(Unknown))
+
+	case "allSettled":
+		// Promise.allSettled returns Promise<PromiseSettledResult<T>[]>
+		// Simplified: return Promise<object[]>
+		if len(args) > 0 {
+			return ti.createPromiseType(NewArrayType(&Type{Kind: ObjectType, Name: "PromiseSettledResult"}))
+		}
+		return ti.createPromiseType(NewArrayType(Unknown))
+
+	case "race":
+		// Promise.race<T>(values: Iterable<T | PromiseLike<T>>): Promise<Awaited<T>>
+		if len(args) > 0 {
+			argType := ti.InferType(args[0])
+			if argType.Kind == ArrayType && argType.ElementType != nil {
+				elementType := ti.unwrapPromiseType(argType.ElementType)
+				return ti.createPromiseType(elementType)
+			}
+			if argType.Kind == TupleType && len(argType.Types) > 0 {
+				// Race returns union of all types
+				var unwrappedTypes []*Type
+				for _, t := range argType.Types {
+					unwrappedTypes = append(unwrappedTypes, ti.unwrapPromiseType(t))
+				}
+				return ti.createPromiseType(NewUnionType(unwrappedTypes))
+			}
+		}
+		return ti.createPromiseType(Unknown)
+
+	case "resolve":
+		// Promise.resolve<T>(value: T | PromiseLike<T>): Promise<Awaited<T>>
+		if len(args) > 0 {
+			argType := ti.InferType(args[0])
+			unwrapped := ti.unwrapPromiseType(argType)
+			return ti.createPromiseType(unwrapped)
+		}
+		return ti.createPromiseType(Void)
+
+	case "reject":
+		// Promise.reject<T = never>(reason?: any): Promise<T>
+		return ti.createPromiseType(Never)
+
+	case "any":
+		// Promise.any is similar to race but returns first fulfilled
+		if len(args) > 0 {
+			argType := ti.InferType(args[0])
+			if argType.Kind == ArrayType && argType.ElementType != nil {
+				elementType := ti.unwrapPromiseType(argType.ElementType)
+				return ti.createPromiseType(elementType)
+			}
+		}
+		return ti.createPromiseType(Unknown)
+	}
+
+	// Unknown method, return Promise<unknown>
+	return ti.createPromiseType(Unknown)
+}
+
+// createPromiseType creates a Promise<T> type
+func (ti *TypeInferencer) createPromiseType(innerType *Type) *Type {
+	return &Type{
+		Kind:           ObjectType,
+		Name:           "Promise",
+		TypeParameters: []*Type{innerType},
+	}
+}
+
+// unwrapPromiseType extracts T from Promise<T>, or returns the type unchanged if not a Promise
+func (ti *TypeInferencer) unwrapPromiseType(t *Type) *Type {
+	if t == nil {
+		return Unknown
+	}
+	// Check if it's Promise<T> by name
+	if t.Kind == ObjectType && t.Name == "Promise" && len(t.TypeParameters) > 0 {
+		return t.TypeParameters[0]
+	}
+	return t
 }
 
 // inferArrowFunctionReturnType analyzes an arrow function's body to infer its return type
