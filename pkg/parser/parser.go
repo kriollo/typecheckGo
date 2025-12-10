@@ -2582,6 +2582,7 @@ func (p *parser) parseImportDeclaration() (*ast.ImportDeclaration, error) {
 		}
 
 		specifiers = append(specifiers, ast.ImportSpecifier{
+			Imported: &ast.Identifier{Name: "*", Position: startPos, EndPos: p.currentPos()},
 			Local:    local,
 			Position: startPos,
 			EndPos:   p.currentPos(),

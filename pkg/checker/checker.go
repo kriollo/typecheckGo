@@ -1986,6 +1986,11 @@ func (tc *TypeChecker) getExpressionType(expr ast.Expression) *types.Type {
 
 		// If not in cache, try to infer from the symbol table
 		if symbol, exists := tc.symbolTable.ResolveSymbol(id.Name); exists {
+			// Check if we have a pre-computed ResolvedType (e.g., for namespace imports)
+			if symbol.ResolvedType != nil {
+				tc.varTypeCache[id.Name] = symbol.ResolvedType
+				return symbol.ResolvedType
+			}
 			// Check if we have a cached type for the symbol's declaration
 			if symbol.Node != nil {
 				// Try to get the type from the declarator

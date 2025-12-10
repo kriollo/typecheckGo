@@ -606,37 +606,38 @@ func (p *parser) parseInterfaceDeclaration() (ast.Declaration, error) {
 			p.skipWhitespaceAndComments()
 
 			if p.match("(") {
+				// Parse constructor signature properly as a CallSignature
+				callSigStart := memberStart
+
 				// Parse parameters
-				// For now, we'll just skip parameters and return type to avoid complex parsing logic here
-				// In a full implementation, we would parse them properly
-				depth := 1
-				p.advance()
-				for depth > 0 && !p.isAtEnd() {
-					if p.match("(") {
-						depth++
-					} else if p.match(")") {
-						depth--
-					}
-					p.advance()
+				params, err := p.parseCallParameters()
+				if err != nil {
+					return nil, err
 				}
+
 				p.skipWhitespaceAndComments()
 
+				var returnType ast.TypeNode
 				if p.match(":") {
 					p.advance()
 					p.skipWhitespaceAndComments()
-					p.skipTypeAnnotation()
+					returnType, err = p.parseTypeAnnotationFull()
+					if err != nil {
+						return nil, err
+					}
 				}
+
 				p.skipWhitespaceAndComments()
 				if p.match(";") || p.match(",") {
 					p.advance()
 				}
 
-				// Add a placeholder member for now
-				members = append(members, ast.InterfaceProperty{
-					Key:      &ast.Identifier{Name: "new", Position: memberStart, EndPos: p.currentPos()},
-					Value:    nil,
-					Position: memberStart,
-					EndPos:   p.currentPos(),
+				// Create CallSignature (constructor signatures are stored as call signatures)
+				members = append(members, &ast.CallSignature{
+					Parameters: params,
+					ReturnType: returnType,
+					Position:   callSigStart,
+					EndPos:     p.currentPos(),
 				})
 				p.skipWhitespaceAndComments()
 				continue

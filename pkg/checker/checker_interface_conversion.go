@@ -62,8 +62,12 @@ func (tc *TypeChecker) convertInterfaceToType(decl *ast.InterfaceDeclaration) *t
 		case *ast.CallSignature:
 			// Convert call signature to FunctionType
 			params := make([]*types.Type, len(m.Parameters))
-			for i := range m.Parameters {
-				params[i] = types.Any
+			for i, param := range m.Parameters {
+				if param.ParamType != nil {
+					params[i] = tc.convertTypeNode(param.ParamType)
+				} else {
+					params[i] = types.Any
+				}
 			}
 			returnType := tc.convertTypeNode(m.ReturnType)
 			callSignatures = append(callSignatures, types.NewFunctionType(params, returnType))

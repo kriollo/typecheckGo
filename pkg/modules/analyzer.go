@@ -79,6 +79,38 @@ func (a *ModuleAnalyzer) analyzeStatement(module *ResolvedModule, stmt ast.State
 
 // analyzeExportDeclaration analiza una declaración de export
 func (a *ModuleAnalyzer) analyzeExportDeclaration(module *ResolvedModule, export *ast.ExportDeclaration) error {
+	// Handle wildcard exports: export * from './module'
+	if export.IsWildcard && export.Source != nil {
+		sourceModulePath := export.Source.Value.(string)
+
+		// Resolve the source module
+		resolvedSource, err := a.resolver.ResolveModule(sourceModulePath, module.AbsolutePath)
+		if err != nil {
+			// Don't fail, just skip this re-export silently
+			return nil
+		}
+
+		// Copy all exports from source module as re-exports
+		for exportName, exportInfo := range resolvedSource.Exports {
+			// Skip if already exported (current module exports take precedence)
+			if _, exists := module.Exports[exportName]; exists {
+				continue
+			}
+
+			module.Exports[exportName] = &ExportInfo{
+				Name:         exportName,
+				Type:         "named",
+				Node:         exportInfo.Node,
+				Position:     export.Pos(),
+				IsReExport:   true,
+				SourceModule: sourceModulePath,
+				OriginalName: exportInfo.Name,
+				ResolvedType: exportInfo.ResolvedType,
+			}
+		}
+		return nil
+	}
+
 	// Named exports with specifiers (e.g., export { foo, bar })
 	if len(export.Specifiers) > 0 {
 		sourceModule := ""

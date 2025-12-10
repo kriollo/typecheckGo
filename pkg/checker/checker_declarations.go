@@ -124,6 +124,11 @@ func (tc *TypeChecker) checkVariableDeclaration(decl *ast.VariableDeclaration, f
 					if newExpr, ok := declarator.Init.(*ast.NewExpression); ok {
 						tc.validateGenericClassInstantiation(newExpr, declarator, filename)
 					}
+
+					// Validate class expression constructor against interface constructor signature
+					if classExpr, ok := declarator.Init.(*ast.ClassExpression); ok {
+						tc.validateClassExpressionConstructor(classExpr, declaredType, filename, declarator)
+					}
 					// Now check assignability
 					if !tc.isAssignableTo(typeToCheck, declaredType) {
 						tc.addError(filename, declarator.Init.Pos().Line, declarator.Init.Pos().Column,
@@ -931,4 +936,78 @@ func (tc *TypeChecker) isAssignedInBlock(propName string, block *ast.BlockStatem
 		}
 	}
 	return false
+}
+
+// validateClassExpressionConstructor checks that a class expression's constructor
+// is compatible with the declared interface's constructor signature
+func (tc *TypeChecker) validateClassExpressionConstructor(classExpr *ast.ClassExpression, declaredType *types.Type, filename string, declarator *ast.VariableDeclarator) {
+	if declaredType == nil || declaredType.Kind != types.ObjectType {
+		return
+	}
+
+	// Check if the declared type has a constructor signature (stored in CallSignatures)
+	if len(declaredType.CallSignatures) == 0 {
+		return
+	}
+
+	// Get the class declaration from the class expression
+	if classExpr.Class == nil {
+		return
+	}
+
+	// Find the constructor in the class expression
+	var classConstructor *ast.MethodDefinition
+	for _, member := range classExpr.Class.Body {
+		if method, ok := member.(*ast.MethodDefinition); ok {
+			if method.Kind == "constructor" {
+				classConstructor = method
+				break
+			}
+		}
+	}
+
+	if classConstructor == nil || classConstructor.Value == nil {
+		return
+	}
+
+	// Get the first constructor signature from the interface
+	// Constructor signatures are stored in CallSignatures
+	interfaceConstructor := declaredType.CallSignatures[0]
+	classParams := classConstructor.Value.Params
+
+	// Validate parameter types
+	for i := 0; i < len(interfaceConstructor.Parameters) && i < len(classParams); i++ {
+		expectedType := interfaceConstructor.Parameters[i]
+		classParam := classParams[i]
+
+		// Get the class parameter type
+		var classParamType *types.Type
+		if classParam.ParamType != nil {
+			classParamType = tc.convertTypeNode(classParam.ParamType)
+		} else {
+			classParamType = types.Any
+		}
+
+		// Check if types are compatible (interface param must be assignable to class param for contravariance)
+		if !tc.isAssignableTo(expectedType, classParamType) {
+			// Get the actual position to report
+			pos := declarator.ID.Pos()
+			paramName := "parameter"
+			if classParam.ID != nil {
+				paramName = classParam.ID.Name
+			}
+
+			className := "Clock"
+			if classExpr.Class.ID != nil {
+				className = classExpr.Class.ID.Name
+			}
+
+			tc.addError(filename, pos.Line, pos.Column,
+				fmt.Sprintf("Type 'typeof %s' is not assignable to type '%s'. Types of parameters '%s' are incompatible. Type '%s' is not assignable to type '%s'.",
+					className, declaredType.Name, paramName,
+					expectedType.String(), classParamType.String()),
+				"TS2322", "error")
+			return // Report only the first mismatch
+		}
+	}
 }
