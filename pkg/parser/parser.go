@@ -4394,11 +4394,15 @@ func (p *parser) parseTypePrimaryNode() (ast.TypeNode, error) {
 		if typeName == "infer" {
 			p.skipWhitespaceAndComments()
 			if p.matchIdentifier() {
-				inferredName := p.advanceWord()
-				return &ast.TypeReference{
-					Name:     "infer " + inferredName,
-					Position: startPos,
-					EndPos:   p.currentPos(),
+				inferStart := p.currentPos()
+				inferredId, err := p.parseIdentifier()
+				if err != nil {
+					return nil, err
+				}
+				return &ast.InferType{
+					TypeParameter: inferredId,
+					Position:      startPos,
+					EndPos:        inferStart,
 				}, nil
 			}
 		}

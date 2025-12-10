@@ -3175,6 +3175,11 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 
 					// Evaluate if it's a conditional type
 					if resolvedType.Kind == types.ConditionalType {
+						// For infer types (InferredType != nil), use evaluateConditionalType
+						// which properly handles the infer keyword pattern
+						if resolvedType.InferredType != nil {
+							return tc.evaluateConditionalType(resolvedType)
+						}
 						return tc.resolveConditionalType(resolvedType.CheckType, resolvedType.ExtendsType, resolvedType.TrueType, resolvedType.FalseType)
 					}
 					return resolvedType
@@ -3524,6 +3529,10 @@ func (tc *TypeChecker) convertTypeNode(typeNode ast.TypeNode) *types.Type {
 		}
 		return inferredType
 
+	case *ast.InferType:
+		// Handle infer T - create an InferType placeholder
+		return types.NewInferType(t.TypeParameter.Name)
+
 	default:
 		return types.Unknown
 	}
@@ -3535,14 +3544,19 @@ func (tc *TypeChecker) evaluateConditionalType(condType *types.Type) *types.Type
 		return condType
 	}
 
+	// Case 1: Old-style InferredType field is set (simple case: T extends infer U)
 	if condType.InferredType != nil {
-		// T extends infer U ? X : Y
 		var inferredType *types.Type
+
+		if debugParserEnabled {
+			fmt.Fprintf(os.Stderr, "DEBUG evaluateConditional (old-style): CheckType.Kind=%v, InferredType.Name=%s\n", condType.CheckType.Kind, condType.InferredType.Name)
+		}
 
 		// Handle T extends (infer U)[]
 		if condType.CheckType.Kind == types.ArrayType {
 			inferredType = condType.CheckType.ElementType
-		} else if condType.CheckType.Kind == types.FunctionType { // Handle T extends (...args: any[]) => infer R
+		} else if condType.CheckType.Kind == types.FunctionType {
+			// Handle T extends (...args: any[]) => infer R
 			inferredType = condType.CheckType.ReturnType
 		}
 
@@ -3557,12 +3571,105 @@ func (tc *TypeChecker) evaluateConditionalType(condType *types.Type) *types.Type
 		return condType.FalseType
 	}
 
-	// For regular conditional types: T extends U ? X : Y
+	// Case 2: ExtendsType contains InferType (e.g., T extends (...args) => infer R)
+	if condType.ExtendsType != nil {
+		inferInfos := tc.findInferTypes(condType.ExtendsType)
+
+		if len(inferInfos) > 0 {
+			if debugParserEnabled {
+				fmt.Fprintf(os.Stderr, "DEBUG evaluateConditional (new-style): CheckType.Kind=%v, Found %d infer types\n", condType.CheckType.Kind, len(inferInfos))
+			}
+
+			// Try to pattern-match CheckType against ExtendsType
+			substitutions := make(map[string]*types.Type)
+			if tc.matchTypePattern(condType.CheckType, condType.ExtendsType, substitutions) {
+				if debugParserEnabled {
+					for k, v := range substitutions {
+						fmt.Fprintf(os.Stderr, "DEBUG evaluateConditional: Inferred %s = %s\n", k, v.String())
+					}
+				}
+				return tc.substituteType(condType.TrueType, substitutions)
+			}
+			return condType.FalseType
+		}
+	}
+
+	// Case 3: Regular conditional type: T extends U ? X : Y
 	// Check if CheckType is assignable to ExtendsType
-	if condType.CheckType.IsAssignableTo(condType.ExtendsType) {
+	if condType.ExtendsType != nil && condType.CheckType.IsAssignableTo(condType.ExtendsType) {
 		return condType.TrueType
 	}
 	return condType.FalseType
+}
+
+// findInferTypes finds all InferType nodes in a type tree
+func (tc *TypeChecker) findInferTypes(t *types.Type) []*types.Type {
+	if t == nil {
+		return nil
+	}
+
+	var result []*types.Type
+
+	if t.Kind == types.InferTypeKind {
+		result = append(result, t)
+	}
+
+	// Recursively search in type components
+	if t.ReturnType != nil {
+		result = append(result, tc.findInferTypes(t.ReturnType)...)
+	}
+	if t.ElementType != nil {
+		result = append(result, tc.findInferTypes(t.ElementType)...)
+	}
+	for _, param := range t.Parameters {
+		result = append(result, tc.findInferTypes(param)...)
+	}
+	for _, typ := range t.Types {
+		result = append(result, tc.findInferTypes(typ)...)
+	}
+
+	return result
+}
+
+// matchTypePattern attempts to match checkType against extendsType pattern,
+// extracting inferred types into the substitutions map
+func (tc *TypeChecker) matchTypePattern(checkType, extendsType *types.Type, substitutions map[string]*types.Type) bool {
+	if checkType == nil || extendsType == nil {
+		return false
+	}
+
+	// If extendsType is an InferType, capture the checkType
+	if extendsType.Kind == types.InferTypeKind {
+		substitutions[extendsType.Name] = checkType
+		return true
+	}
+
+	// For function types: (...args) => ReturnType
+	if extendsType.Kind == types.FunctionType && checkType.Kind == types.FunctionType {
+		// Match return types (where infer usually appears)
+		if extendsType.ReturnType != nil {
+			tc.matchTypePattern(checkType.ReturnType, extendsType.ReturnType, substitutions)
+		}
+		// Match parameter types if needed
+		for i := range extendsType.Parameters {
+			if i < len(checkType.Parameters) {
+				tc.matchTypePattern(checkType.Parameters[i], extendsType.Parameters[i], substitutions)
+			}
+		}
+		// For pattern matching, we consider it a match if checkType is a function
+		return true
+	}
+
+	// For array types: T[]
+	if extendsType.Kind == types.ArrayType && checkType.Kind == types.ArrayType {
+		if extendsType.ElementType != nil {
+			tc.matchTypePattern(checkType.ElementType, extendsType.ElementType, substitutions)
+		}
+		return true
+	}
+
+	// For other types, check basic assignability
+	return checkType.Kind == extendsType.Kind || checkType.IsAssignableTo(extendsType)
 }
 
 // substituteType recursively substitutes type parameters in a given type.
@@ -3696,9 +3803,25 @@ func (tc *TypeChecker) substituteType(t *types.Type, substitutions map[string]*t
 		trueType := tc.substituteType(t.TrueType, substitutions)
 		falseType := tc.substituteType(t.FalseType, substitutions)
 
+		if debugParserEnabled {
+			if t.InferredType == nil {
+				fmt.Fprintf(os.Stderr, "DEBUG substituteType ConditionalType: CheckType.Kind=%v, InferredType=nil\\n", checkType.Kind)
+			} else {
+				fmt.Fprintf(os.Stderr, "DEBUG substituteType ConditionalType: CheckType.Kind=%v, InferredType.Kind=%v, InferredType.Name=%s\\n", checkType.Kind, t.InferredType.Kind, t.InferredType.Name)
+			}
+		}
+
 		if t.InferredType != nil {
-			// We don't substitute the inferred type parameter itself
-			return types.NewConditionalTypeWithInfer(checkType, t.InferredType, trueType, falseType)
+			// For infer types (old-style), evaluate now that checkType is substituted
+			tempCond := types.NewConditionalTypeWithInfer(checkType, t.InferredType, trueType, falseType)
+			return tc.evaluateConditionalType(tempCond)
+		}
+
+		// For new-style infer (infer inside extendsType like function return type)
+		// Check if extendsType contains an InferType
+		if len(tc.findInferTypes(extendsType)) > 0 {
+			tempCond := types.NewConditionalType(checkType, extendsType, trueType, falseType)
+			return tc.evaluateConditionalType(tempCond)
 		}
 
 		return tc.resolveConditionalType(checkType, extendsType, trueType, falseType)

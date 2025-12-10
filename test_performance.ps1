@@ -9,7 +9,7 @@ Write-Host ""
 # Test 1: First run without cache (sequential loading)
 Write-Host "Test 1: First run with profiling (sequential loading)" -ForegroundColor Yellow
 Write-Host "-------------------------------------------------------" -ForegroundColor Yellow
-Write-Host "Command: TSCHECK_PROFILE=1 .\tscheck.exe check src" -ForegroundColor Gray
+Write-Host "Command: TSCHECK_PROFILE=1 .\tscheck.exe check test" -ForegroundColor Gray
 Write-Host ""
 
 # Clear cache first
@@ -18,11 +18,11 @@ if (Test-Path "$env:TEMP\tscheck-cache") {
     Remove-Item "$env:TEMP\tscheck-cache\*.snapshot" -ErrorAction SilentlyContinue
 }
 
-$env:TSCHECK_PROFILE="1"
-$env:TSCHECK_PARALLEL_LOAD="0"
+$env:TSCHECK_PROFILE = "1"
+$env:TSCHECK_PARALLEL_LOAD = "0"
 
 $time1 = Measure-Command {
-    .\tscheck.exe check src 2>&1 | Out-Null
+    .\tscheck.exe check test 2>&1 | Out-Null
 }
 
 Write-Host "First run completed in: $($time1.TotalMilliseconds)ms" -ForegroundColor Green
@@ -32,11 +32,11 @@ Write-Host ""
 # Test 2: Second run with cache
 Write-Host "Test 2: Second run with cache (should be faster)" -ForegroundColor Yellow
 Write-Host "-------------------------------------------------------" -ForegroundColor Yellow
-Write-Host "Command: TSCHECK_PROFILE=1 .\tscheck.exe check src" -ForegroundColor Gray
+Write-Host "Command: TSCHECK_PROFILE=1 .\tscheck.exe check test" -ForegroundColor Gray
 Write-Host ""
 
 $time2 = Measure-Command {
-    .\tscheck.exe check src 2>&1 | Out-Null
+    .\tscheck.exe check test 2>&1 | Out-Null
 }
 
 Write-Host "Second run completed in: $($time2.TotalMilliseconds)ms" -ForegroundColor Green
@@ -57,7 +57,7 @@ if (Test-Path "$env:TEMP\tscheck-cache") {
     Remove-Item "$env:TEMP\tscheck-cache\*.snapshot" -ErrorAction SilentlyContinue
 }
 
-$env:TSCHECK_PARALLEL_LOAD="1"
+$env:TSCHECK_PARALLEL_LOAD = "1"
 
 $time3 = Measure-Command {
     .\tscheck.exe check src 2>&1 | Out-Null

@@ -759,6 +759,19 @@ func (c *ConditionalType) Pos() Position { return c.Position }
 func (c *ConditionalType) End() Position { return c.EndPos }
 func (c *ConditionalType) typeNode()     {}
 
+// InferType represents 'infer T' in conditional type extends clauses
+// e.g., T extends (...args: any[]) => infer R ? R : never
+type InferType struct {
+	TypeParameter *Identifier
+	Position      Position
+	EndPos        Position
+}
+
+func (i *InferType) Type() string  { return "InferType" }
+func (i *InferType) Pos() Position { return i.Position }
+func (i *InferType) End() Position { return i.EndPos }
+func (i *InferType) typeNode()     {}
+
 // TemplateLiteralType represents `prefix${T}suffix`
 type TemplateLiteralType struct {
 	Parts    []string   // Literal parts

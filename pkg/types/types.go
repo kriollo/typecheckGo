@@ -36,6 +36,7 @@ const (
 	RestType
 	KeyOfType
 	IntrinsicStringType
+	InferTypeKind
 )
 
 func (tk TypeKind) String() string {
@@ -90,6 +91,8 @@ func (tk TypeKind) String() string {
 		return "keyof"
 	case IntrinsicStringType:
 		return "intrinsic string"
+	case InferTypeKind:
+		return "infer"
 	default:
 		return "unknown"
 	}
@@ -363,6 +366,14 @@ func NewRestType(elemType *Type) *Type {
 	}
 }
 
+// NewInferType creates an infer type placeholder (infer T)
+func NewInferType(name string) *Type {
+	return &Type{
+		Kind: InferTypeKind,
+		Name: name,
+	}
+}
+
 // String retorna una representación en string del tipo
 func (t *Type) String() string {
 	if t == nil {
@@ -460,6 +471,9 @@ func (t *Type) String() string {
 
 	case RestType:
 		return "..." + t.ElementType.String()
+
+	case InferTypeKind:
+		return "infer " + t.Name
 
 	case ObjectType:
 		if t.Name != "" && t.Name != "object" {
